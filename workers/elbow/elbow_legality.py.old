@@ -1,0 +1,126 @@
+"""
+Elbow legality evaluation — ActionLab V14
+
+HARD RULE:
+- Angles only (camera-agnostic): internal elbow angle for bowling arm.
+- No velocities or world axes here (risks will use biomechanics later).
+
+Method:
+- Take a short late window before Release (about 0.18 s).
+- Collect all valid elbow angles in that window.
+- baseline  = p10 (more flexed side)
+- release   = p90 (more extended side)
+- extension = max(0, release - baseline)
+- Thresholds:
+    < 18°   -> LEGAL
+    18–22°  -> BORDERLINE
+    > 22°   -> ILLEGAL
+"""
+
+from typing import Any, Dict, List, Optional
+
+THRESH_LEGAL = 18.0
+THRESH_BORDERLINE = 22.0
+MIN_SAMPLES = 3
+LATE_WINDOW_SEC = 0.18
+
+
+def _build_angle_map(elbow_signal: List[Dict[str, Any]]) -> Dict[int, float]:
+    """Convert elbow_signal list into {frame -> angle_deg}."""
+    angles: Dict[int, float] = {}
+    for item in elbow_signal:
+        if not isinstance(item, dict):
+            continue
+        frame = item.get("frame")
+        angle = item.get("angle_deg")
+        valid = item.get("valid", True)
+        if frame is None or angle is None or not valid:
+            continue
+        try:
+            f = int(frame)
+            a = float(angle)
+        except (TypeError, ValueError):
+            continue
+        angles[f] = a
+    return angles
+
+
+def _percentile(sorted_vals: List[float], q: float) -> Optional[float]:
+    """Simple percentile (0–1) on a sorted list."""
+    n = len(sorted_vals)
+    if n == 0:
+        return None
+    if n == 1:
+        return sorted_vals[0]
+    q = max(0.0, min(1.0, q))
+    idx = int(round(q * (n - 1)))
+    return sorted_vals[idx]
+
+
+def evaluate_elbow_legality(
+    elbow_signal: List[Dict[str, Any]],
+    events: Dict[str, Any],
+    fps: float,
+) -> Dict[str, Any]:
+    """
+    Compute elbow extension using angles only, in a short
+    late window before Release.
+    """
+    if not elbow_signal or not isinstance(events, dict) or fps <= 0:
+        return {"verdict": "INSUFFICIENT_DATA", "extension_deg": None}
+
+    try:
+        uah_frame = int(events["uah"]["frame"])
+        rel_frame = int(events["release"]["frame"])
+    except (KeyError, TypeError, ValueError):
+        return {"verdict": "INSUFFICIENT_DATA", "extension_deg": None}
+
+    angles = _build_angle_map(elbow_signal)
+    if not angles:
+        return {"verdict": "INSUFFICIENT_DATA", "extension_deg": None}
+
+    # Late window: max(UAH, Release - N_frames) -> Release - 1
+    n_frames = max(3, int(LATE_WINDOW_SEC * fps))
+    start_frame = max(uah_frame, rel_frame - n_frames)
+    end_frame = rel_frame - 1
+    if end_frame < start_frame:
+        end_frame = start_frame
+
+    window_angles: List[float] = []
+    for f in range(start_frame, end_frame + 1):
+        a = angles.get(f)
+        if a is not None:
+            window_angles.append(a)
+
+    if len(window_angles) < MIN_SAMPLES:
+        return {"verdict": "INSUFFICIENT_DATA", "extension_deg": None}
+
+    window_angles.sort()
+    baseline = _percentile(window_angles, 0.10)
+    release = _percentile(window_angles, 0.90)
+
+    if baseline is None or release is None:
+        return {"verdict": "INSUFFICIENT_DATA", "extension_deg": None}
+
+    extension = max(0.0, release - baseline)
+
+    if extension < THRESH_LEGAL:
+        verdict = "LEGAL"
+    elif extension <= THRESH_BORDERLINE:
+        verdict = "BORDERLINE"
+    else:
+        verdict = "ILLEGAL"
+
+    max_angle = max(window_angles)
+
+    return {
+        "verdict": verdict,
+        "extension_deg": round(extension, 2),
+        "baseline_angle_deg": round(baseline, 2),
+        "release_angle_deg": round(release, 2),
+        "max_angle_deg": round(max_angle, 2),
+        "window": {
+            "start_frame": start_frame,
+            "end_frame": end_frame,
+        },
+    }

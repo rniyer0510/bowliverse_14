@@ -1,0 +1,54 @@
+from app.common.logger import get_logger
+from app.workers.pose.landmarks import get_lm, vis_ok
+
+logger = get_logger(__name__)
+
+def _score_frame(pf, hand):
+    # Score only by landmark visibility (no angle logic here)
+    hip = int(vis_ok(get_lm(pf, "LEFT_HIP"))) + int(vis_ok(get_lm(pf, "RIGHT_HIP")))
+
+    if (hand or "R").upper() == "R":
+        heel = "RIGHT_HEEL"
+        toe = "RIGHT_FOOT_INDEX"
+    else:
+        heel = "LEFT_HEEL"
+        toe = "LEFT_FOOT_INDEX"
+
+    foot = int(vis_ok(get_lm(pf, heel))) + int(vis_ok(get_lm(pf, toe)))
+    return hip * 2 + foot  # hips slightly more important for stability
+
+def detect_ffc_bfc(pose_frames, hand, uah_frame=None, ffc_frame=None, lookback=60):
+    """
+    ACTION-ONLY helper:
+    - Choose best BFC frame in a backward window by visibility score.
+    - FFC is optional; if not known, we anchor search from uah_frame.
+    """
+    if ffc_frame is not None:
+        anchor = int(ffc_frame)
+    elif uah_frame is not None:
+        anchor = int(uah_frame)
+    else:
+        return {}
+
+    start = max(0, anchor - int(lookback))
+    best = None
+    best_score = -1
+
+    logger.info(f"[FFC/BFC] anchor={anchor} lookback={lookback} window=[{start}..{anchor}]")
+
+    for i in range(anchor, start - 1, -1):
+        s = _score_frame(pose_frames[i], hand)
+        if i in (anchor, anchor-1, anchor-2, start, start+1, start+2):
+            logger.info(f"[FFC/BFC] i={i} score={s}")
+        if s > best_score:
+            best_score = s
+            best = i
+
+    logger.info(f"[FFC/BFC] picked best={best} best_score={best_score}")
+
+    if best is None or best_score <= 0:
+        return {}
+
+    # We return ffc=bfc only as placeholders for action pipeline.
+    # True FFC can be implemented later; for now we care about best BFC frame.
+    return {"ffc": {"frame": best}, "bfc": {"frame": best}}

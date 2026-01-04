@@ -1,0 +1,36 @@
+# NOTE: Patched to guarantee BFC < FFC
+# This preserves action intent correctness at BFC
+
+def detect_bfc(pose_frames, ffc_frame, visibility_fn):
+    """
+    Detect Back-Foot Contact (BFC).
+    Ensures BFC occurs strictly before FFC.
+    """
+
+    # ----------------------------------------------------------
+    # Primary detection (existing logic assumed upstream)
+    # ----------------------------------------------------------
+    bfc = _detect_bfc_candidate(pose_frames)
+
+    # ----------------------------------------------------------
+    # Guard: BFC must be strictly before FFC
+    # ----------------------------------------------------------
+    if bfc is None or bfc >= ffc_frame:
+        # Backward search from just before FFC
+        for i in range(ffc_frame - 1, -1, -1):
+            frame = pose_frames[i]
+
+            if not visibility_fn(frame, ["left_heel", "left_toe"]):
+                continue
+
+            heel = frame["left_heel"]
+            toe = frame["left_toe"]
+
+            # Stable contact proxy: vertical separation minimal
+            if abs(toe.y - heel.y) < 0.02:
+                return i
+
+        # If nothing found, return None explicitly
+        return None
+
+    return bfc

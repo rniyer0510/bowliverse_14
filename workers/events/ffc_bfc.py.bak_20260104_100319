@@ -1,0 +1,77 @@
+# app/workers/events/ffc_bfc.py
+# Reverse-only FFC → BFC detection (ActionLab v14)
+
+def _landmarks_visible(frame, keys):
+    for k in keys:
+        lm = frame.get(k)
+        if lm is None:
+            return False
+        if lm.x is None or lm.y is None:
+            return False
+    return True
+
+
+def detect_ffc_bfc(pose_frames, hand, uah_frame):
+    """
+    Detect FFC and BFC using reverse-only logic.
+
+    Invariant enforced:
+        BFC < FFC < UAH
+    """
+
+    if uah_frame is None:
+        return None
+
+    # ----------------------------------------
+    # Foot selection based on handedness
+    # ----------------------------------------
+    if hand.upper() == "R":
+        front_heel, front_toe = "right_heel", "right_toe"
+        back_heel, back_toe = "left_heel", "left_toe"
+    else:
+        front_heel, front_toe = "left_heel", "left_toe"
+        back_heel, back_toe = "right_heel", "right_toe"
+
+    # ----------------------------------------
+    # STEP 1 — Reverse-detect FFC (from UAH)
+    # ----------------------------------------
+    ffc = None
+    for i in range(uah_frame - 1, -1, -1):
+        frame = pose_frames[i]
+
+        if not _landmarks_visible(frame, [front_heel, front_toe]):
+            continue
+
+        heel = frame[front_heel]
+        toe = frame[front_toe]
+
+        # Stable front-foot contact proxy
+        if abs(heel.y - toe.y) < 0.02:
+            ffc = i
+            break
+
+    if ffc is None:
+        return None
+
+    # ----------------------------------------
+    # STEP 2 — Reverse-detect BFC (from FFC)
+    # ----------------------------------------
+    bfc = None
+    for i in range(ffc - 1, -1, -1):
+        frame = pose_frames[i]
+
+        if not _landmarks_visible(frame, [back_heel, back_toe]):
+            continue
+
+        heel = frame[back_heel]
+        toe = frame[back_toe]
+
+        if abs(heel.y - toe.y) < 0.02:
+            bfc = i
+            break
+
+    return {
+        "ffc": {"frame": ffc},
+        "bfc": {"frame": bfc},
+    }
+
