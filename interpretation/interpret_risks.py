@@ -1,4 +1,7 @@
-def interpret_risks(risks):
+from app.interpretation.flow_analysis import analyze_linear_flow
+
+
+def interpret_risks(risks, kinematics=None):
     """
     Produce two interpretations from the full risk set:
     1) Coach-facing (technical but concise)
@@ -63,30 +66,36 @@ def interpret_risks(risks):
         risk_level = "low"
 
     # -----------------------------
+    # Linear flow (interpretive only)
+    # -----------------------------
+    flow_analysis = analyze_linear_flow(risks=risks, kinematics=kinematics or {})
+    flow_state = (flow_analysis.get("flow_state") or "SMOOTH").upper()
+
+    # -----------------------------
     # Coach interpretation
     # -----------------------------
     coach_summary = (
-        "High impact and rotation loads are being redirected into the trunk, "
-        "with compensatory movement patterns indicating elevated stress."
-        if risk_level == "high"
+        "Multiple load indicators suggest disrupted forward flow, with energy being "
+        "redirected into trunk motion rather than released smoothly."
+        if flow_state == "FRAGMENTED"
         else
-        "Moderate load patterns suggest areas that could benefit from improved control and balance."
-        if risk_level == "moderate"
+        "Some interruption of forward flow is present, indicating opportunities for improved sequencing."
+        if flow_state == "INTERRUPTED"
         else
-        "Overall load patterns appear well-managed with no dominant risk concentration."
+        "Overall movement shows good forward continuity with well-managed load transfer."
     )
 
     coach_interpretation = {
         "summary": coach_summary,
         "load_generation": (
-            "Front-foot braking and rotational acceleration are the primary load drivers."
+            "Front-foot braking and rotational acceleration contribute most to load generation."
             if risk_level in ("moderate", "high")
             else
             "No excessive load generation detected."
         ),
         "load_absorption": (
             "Lower-body absorption could not be fully assessed due to visual occlusion."
-            if any(r.get("confidence", 1.0) == 0.0 for r in risks)
+            if any(float(r.get("confidence", 1.0)) == 0.0 for r in risks)
             else
             "Load absorption appears generally controlled."
         ),
@@ -97,6 +106,7 @@ def interpret_risks(risks):
             "No significant compensatory patterns observed."
         ),
         "primary_risk_region": dominant_region,
+        "flow_state": flow_state.lower(),
         "confidence": round(min(1.0, max_strength + 0.2), 2),
     }
 
@@ -104,25 +114,25 @@ def interpret_risks(risks):
     # Kid interpretation
     # -----------------------------
     kid_summary = (
-        "Your body is working very hard when your front foot hits the ground."
-        if risk_level == "high"
+        "Your body is working very hard all at once when you bowl."
+        if flow_state == "FRAGMENTED"
         else
-        "Your body is working quite hard when you bowl."
-        if risk_level == "moderate"
+        "Your body works a bit harder at some moments when you bowl."
+        if flow_state == "INTERRUPTED"
         else
-        "Your body is moving nicely when you bowl."
+        "Your body moves smoothly when you bowl."
     )
 
     kid_what_is_happening = (
-        "When you land, your body twists fast and bends to the side to help you throw the ball."
-        if risk_level in ("moderate", "high")
+        "Your body slows down suddenly and then twists or bends to help throw the ball."
+        if flow_state in ("FRAGMENTED", "INTERRUPTED")
         else
-        "Your body stays mostly balanced as you throw the ball."
+        "Your body keeps moving forward smoothly as you throw the ball."
     )
 
     kid_what_to_remember = (
-        "Try to stay tall and balanced when your front foot lands."
-        if risk_level in ("moderate", "high")
+        "Try to stay tall and keep moving forward when your front foot lands."
+        if flow_state in ("FRAGMENTED", "INTERRUPTED")
         else
         "Keep staying tall and relaxed when you bowl."
     )
@@ -135,9 +145,9 @@ def interpret_risks(risks):
 
     # Add coach guidance ONLY for moderate/high risk
     if risk_level in ("moderate", "high"):
-        kid_interpretation[
-            "coach_tip"
-        ] = "It’s a good idea to show this to your coach so they can help you bowl safely."
+        kid_interpretation["coach_tip"] = (
+            "It’s a good idea to show this to your coach so they can help you bowl comfortably."
+        )
 
     # -----------------------------
     # Final combined interpretation
@@ -145,5 +155,5 @@ def interpret_risks(risks):
     return {
         "coach": coach_interpretation,
         "kid": kid_interpretation,
+        "linear_flow": flow_analysis,
     }
-

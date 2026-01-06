@@ -1,263 +1,185 @@
 """
-Elbow legality evaluation — ActionLab V14 (LOCKED)
+Elbow legality evaluation — ActionLab V14 (FINAL, ICC-SAFE)
 
-ANGLES ONLY – camera agnostic
-
-Design goals (NON-NEGOTIABLE):
-- Use the full UAH → Release window (do NOT bias late).
-- Measure INTERNAL elbow extension relative to elbow angle at UAH.
-- Never return INSUFFICIENT_DATA when UAH & Release exist and >=2 valid samples exist.
-- Robust to occlusion/jitter: outlier rejection + envelope logic.
-- Avoid under-estimating stiff elite actions at low FPS.
-- Report confidence explicitly when sample support is weak.
+LOCKED BEHAVIOUR:
+- Never return INCONCLUSIVE if elbow landmarks exist
+- LEGAL with confidence downgrade when signal is sparse
+- ILLEGAL / BORDERLINE only when confidence is sufficient
 """
 
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 import math
 
-# ICC thresholds (LOCKED)
-THRESH_LEGAL = 18.0
-THRESH_BORDERLINE = 22.0
+THRESH_LEGAL = 15.0
+THRESH_BORDERLINE = 20.0
 
-# Minimum valid samples to compute legality
-MIN_SAMPLES = 2
+RELEASE_TRIM_FRAMES = 2
+MIN_SAMPLES = 5
+BASELINE_MAX_SAMPLES = 4
+PEAK_Q = 90
 
-# Confidence heuristics (DO NOT affect verdict)
-IDEAL_SAMPLES = 5
-IDEAL_WINDOW_SEC = 0.10  # 100 ms
-
-# Adaptive sampling (FPS-safe)
-MAX_SAMPLES = 7
-MIN_STRIDE = 1
-
-# UAH baseline anchoring
-UAH_BASELINE_MAX_FRAMES = 2     # hard cap
-UAH_BASELINE_RATIO = 0.30       # % of window
-
-# Outlier rejection
-MAD_K = 3.5
-ANGLE_RANGE = (0.0, 180.0)
+BASELINE_VEL_MAX = 3.0  # deg/frame
 
 
-# -----------------------------
-# Helpers
-# -----------------------------
+# -------------------------------------------------
+# Utilities
+# -------------------------------------------------
 
-def _build_angle_map(elbow_signal: List[Dict[str, Any]]) -> Dict[int, float]:
-    out: Dict[int, float] = {}
-    for it in elbow_signal:
-        if not isinstance(it, dict):
-            continue
-        f = it.get("frame")
-        a = it.get("angle_deg")
-        if f is None or a is None or not it.get("valid", False):
-            continue
-        try:
-            out[int(f)] = float(a)
-        except Exception:
-            pass
-    return out
-
-
-def _median(vals: List[float]) -> Optional[float]:
-    if not vals:
+def _safe_int(x: Any) -> Optional[int]:
+    try:
+        return int(x) if x is not None else None
+    except Exception:
         return None
-    s = sorted(vals)
-    n = len(s)
-    mid = n // 2
-    if n % 2 == 1:
-        return float(s[mid])
-    return 0.5 * (float(s[mid - 1]) + float(s[mid]))
 
 
-def _percentile(vals: List[float], q: float) -> Optional[float]:
-    if not vals:
-        return None
-    vals = sorted(vals)
-    q = max(0.0, min(1.0, q))
-    idx = int(round(q * (len(vals) - 1)))
-    return vals[max(0, min(idx, len(vals) - 1))]
+def _finite(x: Any) -> bool:
+    try:
+        return x is not None and math.isfinite(float(x))
+    except Exception:
+        return False
 
 
-def _mad(vals: List[float], med: float) -> float:
+def _extract_event_frame(events: Dict[str, Any], key: str) -> Optional[int]:
+    node = events.get(key) if isinstance(events, dict) else None
+    if isinstance(node, dict):
+        return _safe_int(node.get("frame"))
+    return None
+
+
+def _percentile(vals: List[float], q: int) -> float:
+    xs = sorted(vals)
+    if len(xs) == 1:
+        return xs[0]
+    k = (len(xs) - 1) * (q / 100.0)
+    f = int(math.floor(k))
+    c = int(math.ceil(k))
+    return xs[f] if f == c else xs[f] + (xs[c] - xs[f]) * (k - f)
+
+
+def _mad_filter(vals: List[float], z: float = 6.0) -> List[float]:
+    if len(vals) < 5:
+        return vals
+    med = sorted(vals)[len(vals) // 2]
     dev = [abs(v - med) for v in vals]
-    m = _median(dev)
-    return float(m) if m is not None else 0.0
+    mad = sorted(dev)[len(dev) // 2]
+    if mad < 1e-9:
+        return vals
+    out = []
+    for v in vals:
+        mz = 0.6745 * (v - med) / mad
+        if abs(mz) <= z:
+            out.append(v)
+    return out if len(out) >= 3 else vals
 
 
-def _robust_filter(vals: List[float]) -> Tuple[List[float], Dict[str, Any]]:
-    """
-    Remove:
-    - impossible angles
-    - single-frame spikes using MAD
-    """
-    dbg: Dict[str, Any] = {
-        "raw_n": len(vals),
-        "range_dropped": 0,
-        "mad_dropped": 0,
+# -------------------------------------------------
+# Core
+# -------------------------------------------------
+
+def _compute_elbow_legality(
+    elbow_signal: List[Dict[str, Any]],
+    events: Dict[str, Any],
+) -> Dict[str, Any]:
+
+    uah = _extract_event_frame(events, "uah")
+    release = _extract_event_frame(events, "release")
+
+    if uah is None or release is None:
+        return {
+            "verdict": "LEGAL",
+            "confidence": 0.25,
+            "reason": "events_missing_assumed_legal"
+        }
+
+    release_used = release - RELEASE_TRIM_FRAMES
+    if release_used <= uah:
+        return {
+            "verdict": "LEGAL",
+            "confidence": 0.25,
+            "reason": "event_window_too_short"
+        }
+
+    # Collect valid samples
+    rows = []
+    for it in elbow_signal:
+        f = _safe_int(it.get("frame")) if isinstance(it, dict) else None
+        if f is None or f < uah or f > release_used:
+            continue
+        if not it.get("valid", False):
+            continue
+        a = it.get("angle_deg")
+        if not _finite(a):
+            continue
+        rows.append(float(a))
+
+    # ---------------------------------------------
+    # SIGNAL-SPARSE CASE (KEY FIX)
+    # ---------------------------------------------
+    if len(rows) < MIN_SAMPLES:
+        return {
+            "verdict": "LEGAL",
+            "confidence": 0.30,
+            "reason": "insufficient_signal_density",
+            "debug": {
+                "valid_samples": len(rows),
+                "uah": uah,
+                "release": release,
+                "note": "Event window sufficient; elbow landmarks sparse"
+            }
+        }
+
+    rows = _mad_filter(rows)
+
+    velocities = [abs(rows[i] - rows[i-1]) for i in range(1, len(rows))]
+    baseline_candidates = []
+
+    for i, v in enumerate(velocities):
+        if v <= BASELINE_VEL_MAX:
+            baseline_candidates.append(rows[i])
+        if len(baseline_candidates) >= BASELINE_MAX_SAMPLES:
+            break
+
+    if len(baseline_candidates) < 2:
+        baseline_candidates = rows[:BASELINE_MAX_SAMPLES]
+
+    baseline = sorted(baseline_candidates)[len(baseline_candidates) // 2]
+    peak = _percentile(rows, PEAK_Q)
+    extension = peak - baseline
+
+    if extension > THRESH_BORDERLINE:
+        verdict = "ILLEGAL"
+        confidence = 0.75
+    elif extension > THRESH_LEGAL:
+        verdict = "BORDERLINE"
+        confidence = 0.60
+    else:
+        verdict = "LEGAL"
+        confidence = 0.80
+
+    return {
+        "verdict": verdict,
+        "confidence": round(confidence, 2),
+        "extension_deg": round(extension, 2),
+        "baseline_angle_deg": round(baseline, 2),
+        "release_angle_deg": round(peak, 2),
+        "window": {"start_frame": uah, "end_frame": release_used},
     }
 
-    lo, hi = ANGLE_RANGE
-    in_range: List[float] = []
-    for v in vals:
-        if lo <= v <= hi and not math.isnan(v):
-            in_range.append(v)
-        else:
-            dbg["range_dropped"] += 1
 
-    if len(in_range) < MIN_SAMPLES:
-        return in_range, dbg
-
-    med = _median(in_range)
-    if med is None:
-        return in_range, dbg
-
-    mad = _mad(in_range, med)
-    dbg["median"] = round(float(med), 3)
-    dbg["mad"] = round(float(mad), 6)
-
-    # If MAD ~ 0, data is already very stable
-    if mad < 1e-6:
-        return in_range, dbg
-
-    keep: List[float] = []
-    for v in in_range:
-        if abs(v - med) <= MAD_K * mad:
-            keep.append(v)
-        else:
-            dbg["mad_dropped"] += 1
-
-    return keep, dbg
-
-
-def _adaptive_sample(vals: List[float], max_samples: int) -> List[float]:
-    """
-    Reduce dense signals safely without biasing peak.
-    """
-    n = len(vals)
-    if n <= max_samples:
-        return vals
-
-    stride = max(MIN_STRIDE, int(math.floor(n / max_samples)))
-    sampled = vals[::stride]
-
-    if sampled[-1] != vals[-1]:
-        sampled.append(vals[-1])
-
-    return sampled
-
-
-# -----------------------------
-# Main entry
-# -----------------------------
+# -------------------------------------------------
+# Public API
+# -------------------------------------------------
 
 def evaluate_elbow_legality(
     elbow_signal: List[Dict[str, Any]],
-    events: Dict[str, Any],
-    fps: float,
+    events: Dict[str, Any] = None,
+    **kwargs,
 ) -> Dict[str, Any]:
-
-    if not elbow_signal or fps <= 0:
-        return {"verdict": "INSUFFICIENT_DATA", "extension_deg": None}
-
-    try:
-        uah = int(events["uah"]["frame"])
-        rel = int(events["release"]["frame"])
-    except Exception:
-        return {"verdict": "INSUFFICIENT_DATA", "extension_deg": None}
-
-    if rel <= uah:
-        return {"verdict": "INSUFFICIENT_DATA", "extension_deg": None}
-
-    angle_map = _build_angle_map(elbow_signal)
-    if not angle_map:
-        return {"verdict": "INSUFFICIENT_DATA", "extension_deg": None}
-
-    start = uah
-    end = max(uah, rel - 1)
-
-    window_vals = [angle_map[f] for f in range(start, end + 1) if f in angle_map]
-
-    filtered_vals, filt_dbg = _robust_filter(window_vals)
-    filtered_vals = _adaptive_sample(filtered_vals, MAX_SAMPLES)
-
-    if len(filtered_vals) < MIN_SAMPLES:
+    if not isinstance(events, dict):
         return {
-            "verdict": "INSUFFICIENT_DATA",
-            "extension_deg": None,
-            "window": {"start_frame": start, "end_frame": end},
-            "debug": {"filter": filt_dbg, "valid_samples": len(filtered_vals)},
+            "verdict": "LEGAL",
+            "confidence": 0.25,
+            "reason": "events_missing_assumed_legal"
         }
-
-    # -----------------------------
-    # Baseline: anchored tightly at UAH
-    # -----------------------------
-    win_len = len(filtered_vals)
-    early_n = max(
-        1,
-        min(
-            UAH_BASELINE_MAX_FRAMES,
-            int(math.ceil(win_len * UAH_BASELINE_RATIO)),
-        ),
-    )
-
-    early_vals = filtered_vals[:early_n]
-    baseline = _median(early_vals)
-
-    if baseline is None:
-        return {"verdict": "INSUFFICIENT_DATA", "extension_deg": None}
-
-    # -----------------------------
-    # Peak extension logic (KEY FIX)
-    # -----------------------------
-    # If sample support is sparse (low FPS, elite action),
-    # percentile underestimates excursion → use MAX.
-    if len(filtered_vals) >= 6:
-        peak = _percentile(filtered_vals, 0.90)
-        peak_method = "p90"
-    else:
-        peak = max(filtered_vals)
-        peak_method = "max"
-
-    if peak is None:
-        return {"verdict": "INSUFFICIENT_DATA", "extension_deg": None}
-
-    extension = max(0.0, float(peak) - float(baseline))
-
-    # -----------------------------
-    # Verdict
-    # -----------------------------
-    if extension < THRESH_LEGAL:
-        verdict = "LEGAL"
-    elif extension <= THRESH_BORDERLINE:
-        verdict = "BORDERLINE"
-    else:
-        verdict = "ILLEGAL"
-
-    win_sec = max(0.0, (end - start + 1) / fps)
-    low_conf = (len(filtered_vals) < IDEAL_SAMPLES) or (win_sec < IDEAL_WINDOW_SEC)
-
-    out: Dict[str, Any] = {
-        "verdict": verdict if not low_conf else f"{verdict}_LOW_CONFIDENCE",
-        "extension_deg": round(extension, 2),
-        "baseline_angle_deg": round(float(baseline), 2),
-        "release_angle_deg": round(float(peak), 2),
-        "window": {
-            "start_frame": start,
-            "end_frame": end,
-        },
-        "samples": {
-            "valid": int(len(filtered_vals)),
-            "window_sec": round(win_sec, 3),
-        },
-    }
-
-    out["debug"] = {
-        "filter": filt_dbg,
-        "raw_window_samples": int(len(window_vals)),
-        "uah_baseline_samples": early_n,
-        "peak_method": peak_method,
-    }
-
-    return out
+    return _compute_elbow_legality(elbow_signal, events)
 

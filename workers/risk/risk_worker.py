@@ -5,7 +5,13 @@ from app.workers.risk.hip_shoulder_mismatch import compute_hip_shoulder_mismatch
 from app.workers.risk.lateral_trunk_lean import compute_lateral_trunk_lean
 
 RISK_CONFIG = {
-    "ffbs": {"pre_window": 6, "post_window": 4, "jerk_reference": 15.0, "floor": 0.15},
+    "ffbs": {
+        "pre_window": 6,
+        "post_window": 4,
+        "jerk_reference": 15.0,
+        "travel_min": 0.012,  # configurable threshold (normalized units)
+        "floor": 0.15
+    },
     "knee": {"post_window": 8, "collapse_ref": 20.0, "floor": 0.15},
     "trunk": {"snap_ref": 120.0, "floor": 0.15},
     "hsm": {"mismatch_ref": 2.0, "floor": 0.15},
@@ -13,10 +19,14 @@ RISK_CONFIG = {
 }
 
 
-def _emit(obj, floor):
+def _emit(obj, floor, risk_id: str):
     if obj is None:
-        return {"signal_strength": floor, "confidence": 0.4}
-    obj["signal_strength"] = max(obj["signal_strength"], floor)
+        return {"risk_id": risk_id, "signal_strength": floor, "confidence": 0.4}
+
+    if "risk_id" not in obj or not obj.get("risk_id"):
+        obj["risk_id"] = risk_id
+
+    obj["signal_strength"] = max(float(obj.get("signal_strength", 0.0)), float(floor))
     return obj
 
 
@@ -29,29 +39,74 @@ def run_risk_worker(pose_frames, video, events, action):
     uah = (events.get("uah") or {}).get("frame")
     rel = (events.get("release") or {}).get("frame")
 
-    risks.append(_emit(
-        compute_front_foot_braking_shock(pose_frames, ffc, fps, RISK_CONFIG["ffbs"]),
-        RISK_CONFIG["ffbs"]["floor"]
-    ))
+    # FFBS (intent-aware + momentum gate)
+    risks.append(
+        _emit(
+            compute_front_foot_braking_shock(
+                pose_frames, ffc, fps, RISK_CONFIG["ffbs"], action=action or {}
+            ),
+            RISK_CONFIG["ffbs"]["floor"],
+            "front_foot_braking_shock",
+        )
+    )
 
-    risks.append(_emit(
-        compute_knee_brace_failure(pose_frames, ffc, fps, RISK_CONFIG["knee"]),
-        RISK_CONFIG["knee"]["floor"]
-    ))
+    risks.append(
+        _emit(
+            compute_knee_brace_failure(pose_frames, ffc, fps, RISK_CONFIG["knee"]),
+            RISK_CONFIG["knee"]["floor"],
+            "knee_brace_failure",
+        )
+    )
 
-    risks.append(_emit(
-        compute_trunk_rotation_snap(pose_frames, ffc, uah, fps, RISK_CONFIG["trunk"]),
-        RISK_CONFIG["trunk"]["floor"]
-    ))
+    risks.append(
+        _emit(
+            compute_trunk_rotation_snap(pose_frames, ffc, uah, fps, RISK_CONFIG["trunk"]),
+            RISK_CONFIG["trunk"]["floor"],
+            "trunk_rotation_snap",
+        )
+    )
 
-    risks.append(_emit(
-        compute_hip_shoulder_mismatch(pose_frames, ffc, rel, fps, RISK_CONFIG["hsm"]),
-        RISK_CONFIG["hsm"]["floor"]
-    ))
+    risks.append(
+        _emit(
+            compute_hip_shoulder_mismatch(pose_frames, ffc, rel, fps, RISK_CONFIG["hsm"]),
+            RISK_CONFIG["hsm"]["floor"],
+            "hip_shoulder_mismatch",
+        )
+    )
 
-    risks.append(_emit(
-        compute_lateral_trunk_lean(pose_frames, ffc, rel, fps, RISK_CONFIG["lean"]),
-        RISK_CONFIG["lean"]["floor"]
-    ))
+    risks.append(
+        _emit(
+            compute_lateral_trunk_lean(
+                pose_frames,
+                bfc,
+                ffc,
+                rel,
+                fps,
+                RISK_CONFIG["lean"],
+            ),
+            RISK_CONFIG["lean"]["floor"],
+            "lateral_trunk_lean",
+        )
+    )
+
+    # Cap isolated lateral lean (monitor only)
+    moderate_or_higher = [
+        r for r in risks
+        if r.get("risk_id") != "lateral_trunk_lean"
+        and float(r.get("signal_strength", 0.0)) >= 0.4
+    ]
+
+    for r in risks:
+        if (
+            r.get("risk_id") == "lateral_trunk_lean"
+            and float(r.get("signal_strength", 0.0)) >= 0.6
+            and len(moderate_or_higher) == 0
+        ):
+            r["signal_strength"] = 0.45
+            r.setdefault(
+                "note",
+                "Lateral posture is stable and isolated. "
+                "Not a short-term risk; consider long-term load monitoring."
+            )
 
     return risks

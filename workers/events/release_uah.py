@@ -1,257 +1,125 @@
-"""
-Release & UAH detection — ActionLab V14 (REVIEWED & HARDENED)
-
-Biomechanics-first, object-aware, wrist-safe.
-
-Priority order for Release detection:
-1. Ball separation (future-ready, optional)
-2. Elbow angular velocity peak (PRIMARY fallback)
-3. Wrist-speed decay (LAST resort)
-
-UAH detection remains unchanged and is anchored backward from release.
-"""
-
 from typing import Any, Dict, List, Optional, Tuple
 import math
 
-# MediaPipe indices (LOCKED)
 LS, LE, LW = 11, 13, 15
 RS, RE, RW = 12, 14, 16
 
 MIN_VIS = 0.5
 SMOOTH_WIN = 3
-
-# Release detection tuning
-ELBOW_PEAK_SEARCH_RATIO = 0.45     # search after this fraction of clip
-ELBOW_PEAK_MIN_SAMPLES = 3
-WRIST_FALLBACK_RATIO = 0.85
-
-# UAH constraints
 UAH_LOOKBACK_SEC = 0.9
 UAH_MIN_SEP_SEC = 0.15
 
-CARRY_DECAY = 0.92
-
-
-# ---------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------
-
 def _xyz(pt):
-    if pt is None:
-        return None
     try:
         return (float(pt["x"]), float(pt["y"]), float(pt.get("z", 0.0)))
     except Exception:
         return None
 
-
 def _dist(a, b):
-    return math.sqrt(
-        (a[0] - b[0]) ** 2 +
-        (a[1] - b[1]) ** 2 +
-        (a[2] - b[2]) ** 2
-    )
+    return math.sqrt(sum((a[i] - b[i])**2 for i in range(3)))
 
-
-def _smooth(vals: List[Optional[float]], k: int) -> List[float]:
-    """
-    Smooth while ignoring None values.
-    During occlusion, decay last valid value.
-    """
-    out: List[float] = []
-    last_valid = 0.0
-
-    for i in range(len(vals)):
-        lo = max(0, i - k // 2)
-        hi = min(len(vals), i + k // 2 + 1)
-        window = [v for v in vals[lo:hi] if v is not None]
-
-        if window:
-            val = sum(window) / len(window)
-            last_valid = val
-            out.append(val)
+def _smooth(vals):
+    out = []
+    last = 0.0
+    for v in vals:
+        if v is None:
+            last *= 0.9
+            out.append(last)
         else:
-            last_valid *= CARRY_DECAY
-            out.append(last_valid)
-
+            last = v
+            out.append(v)
     return out
 
-
-def _angle(a, b, c) -> Optional[float]:
-    """
-    Internal elbow angle at b: Shoulder–Elbow–Wrist
-    """
-    bax, bay, baz = a[0] - b[0], a[1] - b[1], a[2] - b[2]
-    bcx, bcy, bcz = c[0] - b[0], c[1] - b[1], c[2] - b[2]
-
-    mag_ba = math.sqrt(bax*bax + bay*bay + baz*baz)
-    mag_bc = math.sqrt(bcx*bcx + bcy*bcy + bcz*bcz)
-
-    if mag_ba < 1e-6 or mag_bc < 1e-6:
-        return None
-
-    dot = bax*bcx + bay*bcy + baz*bcz
-    cosv = max(-1.0, min(1.0, dot / (mag_ba * mag_bc)))
-    return math.degrees(math.acos(cosv))
-
-
 def _upper_arm_tilt(s, e):
-    """
-    Angle between shoulder→elbow and vertical.
-    """
-    vx, vy, vz = e[0] - s[0], e[1] - s[1], e[2] - s[2]
-    mag = math.sqrt(vx * vx + vy * vy + vz * vz)
+    vx, vy, vz = e[0]-s[0], e[1]-s[1], e[2]-s[2]
+    mag = math.sqrt(vx*vx + vy*vy + vz*vz)
     if mag < 1e-6:
         return None
     cosv = abs(vy) / mag
     cosv = max(-1.0, min(1.0, cosv))
     return math.degrees(math.acos(cosv))
 
+def detect_release_uah(pose_frames: List[Dict[str, Any]], hand: str, fps: float):
+    s_idx, e_idx, w_idx = (RS, RE, RW) if hand == "R" else (LS, LE, LW)
 
-# ---------------------------------------------------------------------
-# Main
-# ---------------------------------------------------------------------
+    frames, wrist_xyz, pelvis_xyz, shoulder_xyz, elbow_xyz = [], [], [], [], []
 
-def detect_release_uah(
-    pose_frames: List[Dict[str, Any]],
-    hand: str,
-    fps: float,
-) -> Dict[str, Dict[str, int]]:
-
-    if hand == "R":
-        s_idx, e_idx, w_idx = RS, RE, RW
-    else:
-        s_idx, e_idx, w_idx = LS, LE, LW
-
-    frames: List[int] = []
-    elbow_angles: List[Optional[float]] = []
-    wrist_xyz: List[Optional[Tuple[float, float, float]]] = []
-    shoulder_xyz: List[Optional[Tuple[float, float, float]]] = []
-    elbow_xyz: List[Optional[Tuple[float, float, float]]] = []
-
-    # -----------------------------
-    # Extract signals
-    # -----------------------------
     for it in pose_frames:
-        f = int(it["frame"])
+        f = it["frame"]
         lm = it.get("landmarks")
-
         frames.append(f)
 
-        if not lm or len(lm) <= max(s_idx, e_idx, w_idx):
-            elbow_angles.append(None)
+        if not lm:
             wrist_xyz.append(None)
+            pelvis_xyz.append(None)
             shoulder_xyz.append(None)
             elbow_xyz.append(None)
             continue
 
-        try:
-            if (
-                lm[s_idx].get("visibility", 1.0) < MIN_VIS or
-                lm[e_idx].get("visibility", 1.0) < MIN_VIS or
-                lm[w_idx].get("visibility", 1.0) < MIN_VIS
-            ):
-                elbow_angles.append(None)
-                wrist_xyz.append(None)
-                shoulder_xyz.append(None)
-                elbow_xyz.append(None)
-                continue
-        except Exception:
-            elbow_angles.append(None)
-            wrist_xyz.append(None)
-            shoulder_xyz.append(None)
-            elbow_xyz.append(None)
-            continue
+        w = _xyz(lm[w_idx]) if lm[w_idx]["visibility"] >= MIN_VIS else None
+        s = _xyz(lm[s_idx]) if lm[s_idx]["visibility"] >= MIN_VIS else None
+        e = _xyz(lm[e_idx]) if lm[e_idx]["visibility"] >= MIN_VIS else None
 
-        s = _xyz(lm[s_idx])
-        e = _xyz(lm[e_idx])
-        w = _xyz(lm[w_idx])
+        hip_l = _xyz(lm[23]) if lm[23]["visibility"] >= MIN_VIS else None
+        hip_r = _xyz(lm[24]) if lm[24]["visibility"] >= MIN_VIS else None
+        pelvis = None
+        if hip_l and hip_r:
+            pelvis = ((hip_l[0]+hip_r[0])/2, (hip_l[1]+hip_r[1])/2, (hip_l[2]+hip_r[2])/2)
 
+        wrist_xyz.append(w)
+        pelvis_xyz.append(pelvis)
         shoulder_xyz.append(s)
         elbow_xyz.append(e)
-        wrist_xyz.append(w)
 
-        ang = _angle(s, e, w) if s and e and w else None
-        elbow_angles.append(ang)
-
-    # -----------------------------
-    # Elbow angular velocity (PRIMARY)
-    # -----------------------------
-    ang_vel: List[Optional[float]] = [None]
-    for i in range(1, len(elbow_angles)):
-        if elbow_angles[i] is not None and elbow_angles[i - 1] is not None:
-            ang_vel.append(abs(elbow_angles[i] - elbow_angles[i - 1]))
-        else:
-            ang_vel.append(None)
-
-    ang_vel_s = _smooth(ang_vel, SMOOTH_WIN)
-
-    start_i = int(len(ang_vel_s) * ELBOW_PEAK_SEARCH_RATIO)
-    peak_elbow_i = None
-
-    if sum(v is not None for v in ang_vel_s[start_i:]) >= ELBOW_PEAK_MIN_SAMPLES:
-        peak_elbow_i = max(
-            range(start_i, len(ang_vel_s)),
-            key=lambda i: ang_vel_s[i] if ang_vel_s[i] is not None else -1
-        )
-
-    # -----------------------------
-    # Wrist-speed fallback (LAST)
-    # -----------------------------
-    wrist_speed: List[Optional[float]] = [None]
-    for i in range(1, len(frames)):
-        if wrist_xyz[i] and wrist_xyz[i - 1]:
-            wrist_speed.append(_dist(wrist_xyz[i], wrist_xyz[i - 1]))
-        else:
-            wrist_speed.append(None)
-
-    wrist_speed_s = _smooth(wrist_speed, SMOOTH_WIN)
-    peak_wrist_i = max(range(len(wrist_speed_s)), key=lambda i: wrist_speed_s[i])
-
-    # -----------------------------
-    # Final release selection
-    # -----------------------------
-    if peak_elbow_i is not None:
-        release_i = peak_elbow_i
+    # Forward axis from pelvis velocity
+    vels = []
+    for i in range(1, len(pelvis_xyz)):
+        if pelvis_xyz[i] and pelvis_xyz[i-1]:
+            vels.append((
+                pelvis_xyz[i][0]-pelvis_xyz[i-1][0],
+                pelvis_xyz[i][1]-pelvis_xyz[i-1][1],
+                pelvis_xyz[i][2]-pelvis_xyz[i-1][2],
+            ))
+    if not vels:
+        forward = (1,0,0)
     else:
-        release_i = peak_wrist_i
+        fx = sum(v[0] for v in vels)/len(vels)
+        fy = sum(v[1] for v in vels)/len(vels)
+        fz = sum(v[2] for v in vels)/len(vels)
+        mag = math.sqrt(fx*fx+fy*fy+fz*fz) or 1.0
+        forward = (fx/mag, fy/mag, fz/mag)
 
-    release_frame = frames[release_i]
+    proj = [None]
+    for i in range(1, len(wrist_xyz)):
+        if wrist_xyz[i] and wrist_xyz[i-1]:
+            vx = wrist_xyz[i][0]-wrist_xyz[i-1][0]
+            vy = wrist_xyz[i][1]-wrist_xyz[i-1][1]
+            vz = wrist_xyz[i][2]-wrist_xyz[i-1][2]
+            proj.append(vx*forward[0] + vy*forward[1] + vz*forward[2])
+        else:
+            proj.append(None)
 
-    # -----------------------------
-    # UAH (unchanged logic)
-    # -----------------------------
-    best_tilt = None
-    uah_i = None
+    proj_s = _smooth(proj)
+    start = int(len(proj_s)*0.45)
+    release_i = max(range(start, len(proj_s)), key=lambda i: proj_s[i])
 
     fps_eff = fps or 25.0
-    lookback = max(8, int(UAH_LOOKBACK_SEC * fps_eff))
-    min_sep = max(2, int(UAH_MIN_SEP_SEC * fps_eff))
+    min_sep = max(2, int(UAH_MIN_SEP_SEC*fps_eff))
+    lookback = max(8, int(UAH_LOOKBACK_SEC*fps_eff))
 
-    uah_end = max(0, release_i - min_sep)
-    uah_start = max(0, uah_end - lookback)
-
-    for i in range(uah_end, uah_start - 1, -1):
+    uah_i = None
+    best = None
+    for i in range(max(0, release_i-min_sep), max(0, release_i-lookback), -1):
         if shoulder_xyz[i] and elbow_xyz[i]:
             tilt = _upper_arm_tilt(shoulder_xyz[i], elbow_xyz[i])
-            if tilt is None:
-                continue
-            if best_tilt is None or tilt < best_tilt:
-                best_tilt = tilt
+            if tilt is not None and (best is None or tilt < best):
+                best = tilt
                 uah_i = i
 
     if uah_i is None:
-        uah_i = max(0, release_i - min_sep)
-
-    uah_frame = frames[uah_i]
-
-    # Safety
-    if release_frame <= uah_frame:
-        release_frame = frames[min(len(frames) - 1, uah_i + 1)]
+        uah_i = max(0, release_i-min_sep)
 
     return {
-        "uah": {"frame": int(uah_frame)},
-        "release": {"frame": int(release_frame)},
+        "uah": {"frame": frames[uah_i]},
+        "release": {"frame": frames[release_i]},
     }
-
