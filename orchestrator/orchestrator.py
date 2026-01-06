@@ -11,8 +11,8 @@ from app.workers.events.ffc_bfc import detect_ffc_bfc
 from app.workers.elbow.elbow_signal import compute_elbow_signal
 from app.workers.elbow.elbow_legality import evaluate_elbow_legality
 
-# Action (LOCKED)
-from app.action.action_classifier import classify_action
+# Action (NEW, BIOMECH-CORRECT, LOCKED)
+from app.workers.action.action_classifier import classify_action
 
 # Risk (v14 – cricket-native, baseball-style mechanics)
 from app.workers.risk.risk_worker import run_risk_worker
@@ -32,14 +32,14 @@ def analyze(
     bowler_type: str = Form(None),  # DEPRECATED – retained for backward compatibility
 ):
     """
-    ActionLab V14 – Orchestrator (FROZEN)
+    ActionLab V14 – Orchestrator (LOCKED)
 
     Responsibilities:
     - load video + pose
     - detect Release → UAH (reverse, fps-bounded)
-    - detect FFC → BFC (ACTION ONLY)
-    - classify action (BFC-anchored)
-    - compute biomechanical risks (v13 risk set, cricket-native)
+    - detect FFC → BFC (action anchoring)
+    - classify action (windowed, BFC-anchored)
+    - compute biomechanical risks (v14 cricket-native)
     - compute elbow signal (LOCKED)
     - compute elbow legality (LOCKED)
     - interpret risks (coach + child)
@@ -71,7 +71,6 @@ def analyze(
 
     # --------------------------------
     # Detect FFC → BFC (ACTION ONLY)
-    # Guard against missing UAH
     # --------------------------------
     uah_frame = (events.get("uah") or {}).get("frame")
     if uah_frame is not None:
@@ -84,7 +83,7 @@ def analyze(
             events.update(foot_events)
 
     # --------------------------------
-    # Action classification (BFC-anchored)
+    # Action classification (BFC-anchored, windowed)
     # --------------------------------
     bfc_frame = (events.get("bfc") or {}).get("frame")
     ffc_frame = (events.get("ffc") or {}).get("frame")
@@ -98,9 +97,6 @@ def analyze(
 
     # --------------------------------
     # Risk computation (v14)
-    # - baseball-style mechanics
-    # - cricket-native signals
-    # - v13 risk set only
     # --------------------------------
     risks = run_risk_worker(
         pose_frames=pose_frames,
@@ -111,8 +107,6 @@ def analyze(
 
     # --------------------------------
     # Risk interpretation
-    # - coach version
-    # - child (8-year-old) version
     # --------------------------------
     interpretation = interpret_risks(risks)
 
@@ -140,7 +134,6 @@ def analyze(
         "schema": "actionlab.v14",
         "input": {
             "hand": hand,
-            # bowler_type intentionally retained for backward compatibility
         },
         "video": {
             "fps": video.get("fps"),

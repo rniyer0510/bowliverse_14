@@ -1,110 +1,136 @@
-from app.workers.action.intent_state import (
-    IntentState,
-    soften_open,
-    soften_closed,
-)
-from app.common.geometry import project_to_screen_plane
+import statistics
 from app.common.signal_quality import landmarks_visible
+from app.workers.action.geometry import (
+    compute_batsman_axis,
+    vec,
+    norm,
+    angle_deg,
+)
+from app.workers.action.foot_orientation import compute_foot_intent
+
+# MediaPipe landmark indices
+LS, RS = 11, 12
+LH, RH = 23, 24
+
+# -----------------------------
+# Pelvic tolerance bands
+# -----------------------------
+HIP_OPEN_LIMIT = 55.0      # deg
+HIP_DRIFT_LIMIT = 12.0     # deg (BFC → FFC)
 
 
-def classify_action(ctx):
+def classify_action(pose_frames, hand, bfc_frame, ffc_frame):
     """
-    Final action classification.
-    - BFC-only
-    - Single snapshot
-    - No averaging
-    - No angle thresholds
+    Action classification (V14 LOCKED)
+
+    Decision hierarchy:
+    1. FOOT intent @ BFC (PRIMARY)
+    2. Shoulder intent (SECONDARY)
+    3. MIXED only on STRUCTURAL pelvic violation
     """
 
-    bfc = ctx.events.bfc
-    pose = ctx.pose.frames[bfc.frame]
+    if bfc_frame is None:
+        return {"intent": None, "action": "UNKNOWN", "confidence": 0.0}
 
-    # --------------------------------------------------------------
-    # Guardrail: visibility (ONLY allowed UNKNOWN case)
-    # --------------------------------------------------------------
-    if not landmarks_visible(pose, ["left_heel", "left_toe"]):
-        return {
-            "action": "UNKNOWN",
-            "intent": None,
-        }
+    axis = compute_batsman_axis(pose_frames, bfc_frame, ffc_frame)
+    if axis is None:
+        return {"intent": None, "action": "UNKNOWN", "confidence": 0.0}
 
-    # --------------------------------------------------------------
-    # Step 1: Toe-based primary intent
-    # --------------------------------------------------------------
-    heel = pose["left_heel"]
-    toe = pose["left_toe"]
-
-    toe_vec = project_to_screen_plane(toe - heel)
-
-    if toe_vec.is_parallel_to_pitch():
-        toe_state = IntentState.CLOSED
-    elif toe_vec.is_mostly_parallel():
-        toe_state = IntentState.SEMI_CLOSED
-    elif toe_vec.is_diagonal():
-        toe_state = IntentState.SEMI_OPEN
-    else:
-        toe_state = IntentState.OPEN
-
-    # --------------------------------------------------------------
-    # Step 2: Hip softening (secondary, non-authoritative)
-    # --------------------------------------------------------------
-    hip_vec = project_to_screen_plane(
-        pose["left_hip"] - pose["right_hip"]
+    # --------------------------------
+    # PRIMARY: Foot-based intent
+    # --------------------------------
+    foot = compute_foot_intent(
+        pose_frames=pose_frames,
+        hand=hand,
+        bfc_frame=bfc_frame,
+        axis=axis,
     )
 
-    intent = toe_state
-    possible_contradiction = False
+    foot_intent = foot["intent"] if foot else None
+    foot_conf = foot["confidence"] if foot else 0.0
 
-    if hip_vec.is_more_open_than(toe_vec):
-        intent = soften_open(intent)
-    elif hip_vec.is_more_closed_than(toe_vec):
-        intent = soften_closed(intent)
+    # --------------------------------
+    # SECONDARY: Shoulder intent
+    # --------------------------------
+    shoulder_angles = []
+    used = 0
 
-    if toe_state == IntentState.OPEN and intent in (
-        IntentState.CLOSED,
-        IntentState.SEMI_CLOSED,
-    ):
-        possible_contradiction = True
+    for f in range(bfc_frame - 3, bfc_frame + 4):
+        if f < 0 or f >= len(pose_frames):
+            continue
 
-    # --------------------------------------------------------------
-    # Step 3: Shoulder phase (context only)
-    # --------------------------------------------------------------
-    shoulder_vec = project_to_screen_plane(
-        pose["left_shoulder"] - pose["right_shoulder"]
-    )
+        frame = pose_frames[f]
+        if not landmarks_visible(frame, [LS, RS, LH, RH]):
+            continue
 
-    if shoulder_vec.lags(intent):
-        shoulder_phase = "LAGGING"
-    elif shoulder_vec.leads(intent):
-        shoulder_phase = "LEADING"
+        lm = frame["landmarks"]
+        sh_vec = norm(vec(lm[RS], lm[LS]))
+        if not sh_vec:
+            continue
+
+        ang = angle_deg(sh_vec, axis)
+        shoulder_angles.append(ang)
+        used += 1
+
+    shoulder_intent = None
+    shoulder_conf = 0.0
+
+    if len(shoulder_angles) >= 3:
+        shoulder_med = statistics.median(shoulder_angles)
+        shoulder_var = statistics.pstdev(shoulder_angles) if len(shoulder_angles) > 1 else 0.0
+
+        if shoulder_med < 35:
+            shoulder_intent = "SIDE_ON"
+        elif shoulder_med > 65:
+            shoulder_intent = "FRONT_ON"
+        else:
+            shoulder_intent = "SEMI_OPEN"
+
+        vis_conf = min(1.0, used / 7.0)
+        var_conf = max(0.0, 1.0 - (shoulder_var / 20.0))
+        shoulder_conf = vis_conf * var_conf
+
+    # --------------------------------
+    # Final intent
+    # --------------------------------
+    if foot_intent:
+        intent = foot_intent
+        confidence = foot_conf
+    elif shoulder_intent:
+        intent = shoulder_intent
+        confidence = shoulder_conf
     else:
-        shoulder_phase = "SYNCED"
+        return {"intent": None, "action": "UNKNOWN", "confidence": 0.0}
 
-    # --------------------------------------------------------------
-    # Step 4: Final Action Mapping
-    # --------------------------------------------------------------
-    if possible_contradiction:
-        action = "MIXED"
+    # --------------------------------
+    # STRUCTURAL MIXED detection
+    # --------------------------------
+    mixed = False
 
-    elif intent in (IntentState.CLOSED, IntentState.SEMI_CLOSED):
-        if shoulder_phase == "SYNCED":
-            action = "SIDE_ON"
-        else:
-            action = "SIDE_ON_OPENING"
+    lm_bfc = pose_frames[bfc_frame]["landmarks"]
+    hip_vec_bfc = norm(vec(lm_bfc[RH], lm_bfc[LH]))
+    hip_ang_bfc = angle_deg(hip_vec_bfc, axis) if hip_vec_bfc else None
 
-    elif intent == IntentState.SEMI_OPEN:
-        if shoulder_phase == "LAGGING":
-            action = "SIDE_ON_OPENING"
-        else:
-            action = "FRONT_ON_CLOSING"
+    hip_ang_ffc = None
+    if ffc_frame is not None:
+        lm_ffc = pose_frames[ffc_frame]["landmarks"]
+        hip_vec_ffc = norm(vec(lm_ffc[RH], lm_ffc[LH]))
+        hip_ang_ffc = angle_deg(hip_vec_ffc, axis) if hip_vec_ffc else None
 
-    else:  # OPEN
-        if shoulder_phase == "SYNCED":
-            action = "FRONT_ON"
-        else:
-            action = "FRONT_ON_CLOSING"
+    # Case 1: pelvis already too open at BFC
+    if intent == "SIDE_ON" and hip_ang_bfc is not None:
+        if hip_ang_bfc > HIP_OPEN_LIMIT:
+            mixed = True
+
+    # Case 2: pelvis keeps opening after BFC
+    if hip_ang_bfc is not None and hip_ang_ffc is not None:
+        if (hip_ang_ffc - hip_ang_bfc) > HIP_DRIFT_LIMIT:
+            mixed = True
+
+    action = "MIXED" if mixed else intent
 
     return {
+        "intent": intent.lower(),
         "action": action,
-        "intent": intent.value,
+        "confidence": round(confidence, 2),
     }

@@ -14,6 +14,13 @@ CRITICAL FIX:
 - We still compute the INTERNAL elbow angle at elbow:
     angle = ∠(shoulder - elbow - distal)
   but distal is now robust to wrist flick/roll/occlusion artifacts.
+
+REGRESSION GUARD (IMPORTANT):
+- Some pipelines may supply pose_frames as a list where each element is:
+    a) {"landmarks": [...]}  (no "frame" key)
+    b) raw landmarks list [...]
+  If we default frame=0 for missing keys, the elbow legality angle-map collapses.
+  We therefore fall back to enumerate index when "frame" is missing.
 """
 
 import math
@@ -92,10 +99,12 @@ def _angle(a: Tuple[float, float, float],
     return float(math.degrees(math.acos(cosv)))
 
 
-def _normalize_pose_frames(pose_frames: Any) -> List[Dict[str, Any]]:
+def _normalize_pose_frames(pose_frames: Any) -> List[Any]:
     """
-    Normalize pose_frames into:
-      [{ "frame": int, "landmarks": list|None }, ...]
+    Pass-through normalization:
+    - list => return as-is
+    - dict with frames/pose_frames => return that list
+    - dict keyed by frame => expand to list of {"frame": int, "landmarks": ...}
     """
     if isinstance(pose_frames, list):
         return pose_frames
@@ -120,10 +129,6 @@ def _normalize_pose_frames(pose_frames: Any) -> List[Dict[str, Any]]:
 
 
 def _weighted_centroid(points: List[Tuple[Tuple[float, float, float], float]]) -> Optional[Tuple[float, float, float]]:
-    """
-    points: [((x,y,z), weight), ...]
-    returns weighted centroid or None.
-    """
     if not points:
         return None
     sw = sum(w for _, w in points)
@@ -136,56 +141,42 @@ def _weighted_centroid(points: List[Tuple[Tuple[float, float, float], float]]) -
 
 
 def _virtual_distal_point(lm: Any, w_idx: int, i_idx: int, p_idx: int, t_idx: int) -> Optional[Tuple[float, float, float]]:
-    """
-    Build a wrist-robust distal point using wrist + hand landmarks.
-    We only include a landmark if its visibility >= VISIBILITY_MIN.
-    """
     pts: List[Tuple[Tuple[float, float, float], float]] = []
 
-    # Wrist
     w = lm[w_idx]
     if _get_vis(w) >= VISIBILITY_MIN:
         w_xyz = _to_xyz(w)
         if w_xyz is not None:
             pts.append((w_xyz, W_WRIST))
 
-    # Index
     idx = lm[i_idx]
     if _get_vis(idx) >= VISIBILITY_MIN:
         idx_xyz = _to_xyz(idx)
         if idx_xyz is not None:
             pts.append((idx_xyz, W_INDEX))
 
-    # Pinky
     pk = lm[p_idx]
     if _get_vis(pk) >= VISIBILITY_MIN:
         pk_xyz = _to_xyz(pk)
         if pk_xyz is not None:
             pts.append((pk_xyz, W_PINKY))
 
-    # Thumb
     th = lm[t_idx]
     if _get_vis(th) >= VISIBILITY_MIN:
         th_xyz = _to_xyz(th)
         if th_xyz is not None:
             pts.append((th_xyz, W_THUMB))
 
-    # If only wrist exists, centroid == wrist (fine).
     return _weighted_centroid(pts)
 
 
 def compute_elbow_signal(pose_frames: Any, hand: str) -> List[Dict[str, Any]]:
     """
     Returns list of:
-      {
-        "frame": int,
-        "angle_deg": float | None,
-        "valid": bool
-      }
+      {"frame": int, "angle_deg": float|None, "valid": bool}
     """
     frames = _normalize_pose_frames(pose_frames)
 
-    # LOCK bowling arm once
     if hand == "R":
         s_idx, e_idx, w_idx = RS, RE, RW
         i_idx, p_idx, t_idx = R_INDEX, R_PINKY, R_THUMB
@@ -196,53 +187,60 @@ def compute_elbow_signal(pose_frames: Any, hand: str) -> List[Dict[str, Any]]:
     signal: List[Dict[str, Union[int, float, bool, None]]] = []
     prev_angle: Optional[float] = None
 
-    for item in frames:
-        frame = int(item.get("frame", 0))
-        lm = item.get("landmarks")
+    for i, item in enumerate(frames):
+        # Support multiple frame shapes safely
+        frame_idx = i
+        lm = None
 
-        if lm is None or len(lm) <= max(s_idx, e_idx, w_idx, i_idx, p_idx, t_idx):
-            signal.append({"frame": frame, "angle_deg": None, "valid": False})
+        if isinstance(item, dict):
+            if "frame" in item:
+                try:
+                    frame_idx = int(item.get("frame"))
+                except Exception:
+                    frame_idx = i
+            lm = item.get("landmarks")
+        elif isinstance(item, list):
+            lm = item
+        else:
+            signal.append({"frame": frame_idx, "angle_deg": None, "valid": False})
+            continue
+
+        if lm is None or not isinstance(lm, list) or len(lm) <= max(s_idx, e_idx, w_idx, i_idx, p_idx, t_idx):
+            signal.append({"frame": frame_idx, "angle_deg": None, "valid": False})
             continue
 
         s = lm[s_idx]
         e = lm[e_idx]
 
-        # Need shoulder & elbow visibility; distal is handled by virtual point logic
         try:
-            if (
-                _get_vis(s) < VISIBILITY_MIN or
-                _get_vis(e) < VISIBILITY_MIN
-            ):
-                signal.append({"frame": frame, "angle_deg": None, "valid": False})
+            if _get_vis(s) < VISIBILITY_MIN or _get_vis(e) < VISIBILITY_MIN:
+                signal.append({"frame": frame_idx, "angle_deg": None, "valid": False})
                 continue
         except Exception:
-            signal.append({"frame": frame, "angle_deg": None, "valid": False})
+            signal.append({"frame": frame_idx, "angle_deg": None, "valid": False})
             continue
 
-        a = _to_xyz(s)  # shoulder
-        b = _to_xyz(e)  # elbow
+        a = _to_xyz(s)
+        b = _to_xyz(e)
         if a is None or b is None:
-            signal.append({"frame": frame, "angle_deg": None, "valid": False})
+            signal.append({"frame": frame_idx, "angle_deg": None, "valid": False})
             continue
 
-        # Wrist-robust distal point (KEY FIX)
         c = _virtual_distal_point(lm, w_idx=w_idx, i_idx=i_idx, p_idx=p_idx, t_idx=t_idx)
         if c is None:
-            signal.append({"frame": frame, "angle_deg": None, "valid": False})
+            signal.append({"frame": frame_idx, "angle_deg": None, "valid": False})
             continue
 
         ang = _angle(a, b, c)
         if ang is None:
-            signal.append({"frame": frame, "angle_deg": None, "valid": False})
+            signal.append({"frame": frame_idx, "angle_deg": None, "valid": False})
             continue
 
-        # Jitter / spike suppression:
         if prev_angle is not None and abs(ang - prev_angle) > ANGLE_JUMP_MAX_DEG:
-            signal.append({"frame": frame, "angle_deg": None, "valid": False})
+            signal.append({"frame": frame_idx, "angle_deg": None, "valid": False})
             continue
 
-        signal.append({"frame": frame, "angle_deg": ang, "valid": True})
+        signal.append({"frame": frame_idx, "angle_deg": ang, "valid": True})
         prev_angle = ang
 
     return signal
-
