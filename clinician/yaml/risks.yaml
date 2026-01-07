@@ -1,18 +1,42 @@
+clinician:
+  summary:
+    overall_assessment: "Some parts of your bowling action may place extra load on your body."
+    overall_severity: "MODERATE"
+    recommendation_level: "CORRECT"
+    confidence: 0.85
+
+    explanation:
+      kid: >
+        Your overall injury risk is moderate because several small stresses
+        are adding up across your action. No single issue is severe on its own,
+        but together they increase the load on your body.
+      coach: >
+        Aggregate load elevation driven by multiple low-to-moderate contributors.
+        No single dominant fault; cumulative stress profile warrants correction focus.
+
 risks:
 
   front_foot_braking_shock:
     title: "Front-foot braking"
     body_region: "lower_body"
+
+    primary_risk_note:
+      kid: >
+        This is the most important area to watch first because it contributes
+        the most to your overall load, even though it is currently well controlled.
+      coach: >
+        Primary contributor by influence, not severity. Early monitoring recommended.
+
     explanations:
       kid:
         low: "Your front foot lands smoothly. You slow down in control. Keep this rhythm."
-        moderate: "You slow down a bit suddenly on landing. That can make your leg and back work harder. Try to keep it smoother."
+        moderate: "You slow down a bit suddenly on landing. This can make your leg and back work harder. Try to keep it smoother."
         high: "You stop sharply when the front foot lands. This can stress the leg and back. Work on a smoother landing."
         very_high: "Very hard stop on landing. This puts high load on the body. Fix this before bowling more."
       coach:
         low: "Controlled deceleration through FFC."
         moderate: "Mild braking spike. Monitor rhythm and step length."
-        high: "Abrupt decel at FFC. Load transfer compromised."
+        high: "Abrupt deceleration at FFC. Load transfer compromised."
         very_high: "Severe braking shock. High injury risk."
 
     cues:
@@ -23,7 +47,7 @@ risks:
       coach:
         - intent: monitor
           title: "Firm but flowing FFC"
-          explanation: "Cue a stable landing without an abrupt stop. Reduce sudden decel. Preserve forward travel into release."
+          explanation: "Cue a stable landing without an abrupt stop. Reduce sudden deceleration. Preserve forward travel into release."
 
   knee_brace_failure:
     title: "Front-knee support"
