@@ -1,0 +1,22 @@
+elbow:
+  # Single-camera friendly bands (communication only; legality math is unchanged elsewhere)
+  bands:
+    clear:
+      max_deg: 13.0
+      label: "Clear"
+      player_text: "Your bowling arm stays comfortably within safe and legal limits."
+
+    monitor:
+      max_deg: 16.0
+      label: "Monitor"
+      player_text: "Your action is legal. Small changes like this are common in video capture."
+
+    review:
+      max_deg: 20.0
+      label: "Review Recommended"
+      player_text: "Your arm action is close to the limit. A coach review is recommended."
+
+    high_confidence:
+      min_deg: 20.0
+      label: "High Confidence Review Required"
+      player_text: "A technique review is recommended to reduce future risk."

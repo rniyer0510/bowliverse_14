@@ -1,0 +1,126 @@
+risks:
+
+  front_foot_braking_shock:
+    title: "Front-foot braking"
+    body_region: "lower_body"
+    explanations:
+      kid:
+        low: "Your front foot lands smoothly. You slow down in control. Keep this rhythm."
+        moderate: "You slow down a bit suddenly on landing. That can make your leg and back work harder. Try to keep it smoother."
+        high: "You stop sharply when the front foot lands. This can stress the leg and back. Work on a smoother landing."
+        very_high: "Very hard stop on landing. This puts high load on the body. Fix this before bowling more."
+      coach:
+        low: "Controlled deceleration through FFC."
+        moderate: "Mild braking spike. Monitor rhythm and step length."
+        high: "Abrupt decel at FFC. Load transfer compromised."
+        very_high: "Severe braking shock. High injury risk."
+
+    cues:
+      kid:
+        - intent: monitor
+          title: "Land smoothly"
+          explanation: "When your front foot lands, slow down gently. If you stop suddenly, your leg and back take extra load. Try to keep moving forward."
+      coach:
+        - intent: monitor
+          title: "Firm but flowing FFC"
+          explanation: "Cue a stable landing without an abrupt stop. Reduce sudden decel. Preserve forward travel into release."
+
+  knee_brace_failure:
+    title: "Front-knee support"
+    body_region: "knee"
+    explanations:
+      kid:
+        low: "Your front leg supports you well. This helps your bowling feel strong. Keep it."
+        moderate: "Your front knee bends a bit more than needed. That can make you sink. Try to stay taller."
+        high: "Your front knee keeps bending after landing. This makes your body collapse. Fix this with your coach."
+        very_high: "Front knee collapses. This can overload the knee and back. Stop and correct before continuing."
+      coach:
+        low: "Brace stable."
+        moderate: "Brace softening under load."
+        high: "Brace failure evident."
+        very_high: "Severe brace collapse."
+
+    cues:
+      kid:
+        - intent: monitor
+          title: "Keep the front leg strong"
+          explanation: "After the front foot lands, the front leg should stay strong. If it keeps bending, your body sinks. Try to stay tall as you release."
+      coach:
+        - intent: monitor
+          title: "Brace into release"
+          explanation: "Cue firm knee support post-FFC. Avoid continued flexion collapse. Build support without hard lockout."
+
+  trunk_rotation_snap:
+    title: "Late trunk rotation"
+    body_region: "lower_back"
+    explanations:
+      kid:
+        low: "Your body turns smoothly. That keeps the action easy on the back. Keep it."
+        moderate: "Your turn speeds up near the end. That can make the back work harder. Start turning a little earlier."
+        high: "Your body turns very suddenly at the end. This can stress the back. Fix timing with your coach."
+        very_high: "Very sharp late turn. High back load. Reduce immediately."
+      coach:
+        low: "Rotation smooth."
+        moderate: "Late acceleration present."
+        high: "End-phase snap."
+        very_high: "Violent late rotation."
+
+    cues:
+      kid:
+        - intent: monitor
+          title: "Turn earlier"
+          explanation: "Start turning before the ball leaves your hand. If you turn too late, your back works harder. Try to turn earlier and smoother."
+      coach:
+        - intent: monitor
+          title: "Earlier rotation build"
+          explanation: "Initiate trunk rotation earlier to reduce end-phase snap. Smooth acceleration profile into release."
+
+  hip_shoulder_mismatch:
+    title: "Hip–shoulder timing"
+    body_region: "spine"
+    explanations:
+      kid:
+        low: "Your hips and shoulders move together. This keeps the action smooth. Keep it."
+        moderate: "Your hips and shoulders are slightly out of time. That can add twist. Try to move as one."
+        high: "Your hips and shoulders are out of sync. This adds strain to the back. Fix timing with your coach."
+        very_high: "Large timing mismatch. High spinal load. Correct before continuing."
+      coach:
+        low: "Sequencing clean."
+        moderate: "Minor timing gap."
+        high: "Clear separation mismatch."
+        very_high: "Severe timing fault."
+
+    cues:
+      kid:
+        - intent: monitor
+          title: "Move together"
+          explanation: "Let your hips and shoulders turn together. If they turn at different times, your body twists more. Try one smooth turn."
+      coach:
+        - intent: monitor
+          title: "Coordinate rotation"
+          explanation: "Reduce hip–shoulder timing gap. Encourage connected rotation from base through delivery."
+
+  lateral_trunk_lean:
+    title: "Side lean"
+    body_region: "side_body"
+    explanations:
+      kid:
+        low: "You stay balanced while bowling. That helps control. Keep it."
+        moderate: "A small side lean can be part of your style. Keep it controlled and repeatable. Don’t let it grow bigger."
+        high: "You lean a lot to the side at release. This can stress your body. Work on staying more upright."
+        very_high: "Heavy side lean at release. High load on one side. Correct before bowling more."
+      coach:
+        low: "Upright posture."
+        moderate: "Lean appears style-consistent. Monitor only."
+        high: "Off-axis loading rising."
+        very_high: "Severe lateral collapse."
+
+    cues:
+      kid:
+        - intent: monitor
+          title: "Stay tall"
+          explanation: "A small side lean can happen in bowling. Keep it controlled and stable. If it gets bigger, your body works harder."
+      coach:
+        - intent: monitor
+          title: "Stack posture"
+          explanation: "Maintain upright trunk through FFC to release. Treat moderate lean as style-consistent unless corroborated by other breakdowns."

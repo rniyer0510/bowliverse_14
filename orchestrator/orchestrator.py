@@ -17,15 +17,19 @@ from app.workers.action.action_classifier import classify_action
 # Risk (v14 – cricket-native, baseball-style mechanics)
 from app.workers.risk.risk_worker import run_risk_worker
 
-# Interpretation (coach + child)
+# Interpretation (KEYED; no English strings)
 from app.interpretation.interpret_risks import interpret_risks
 
 # Basic coaching diagnostics (NON-RISK)
 from app.workers.efficiency.basic_coaching import analyze_basics
 
+# Clinician (YAML-driven explanations)
+from app.clinician.interpreter import ClinicianInterpreter
+
 
 app = FastAPI()
 logger = get_logger(__name__)
+clinician_engine = ClinicianInterpreter()
 
 
 @app.post("/analyze")
@@ -44,8 +48,9 @@ def analyze(
     - classify action (BFC-anchored)
     - compute risks (V14 injury/stress model)
     - compute basics (V14 coaching diagnostics, non-risk)
-    - interpret risks
+    - interpret risks (KEYED)
     - compute elbow legality (LOCKED)
+    - clinician layer (YAML) builds UI-ready explanations
     - assemble response
     """
     logger.info("Analyze request received")
@@ -88,7 +93,7 @@ def analyze(
         action=action,
     )
 
-    # Basics (non-risk, always helpful for amateurs)
+    # Basics (non-risk)
     basics = analyze_basics(
         pose_frames=pose_frames,
         hand=hand,
@@ -96,7 +101,7 @@ def analyze(
         action=action,
     )
 
-    # Interpretation
+    # Interpretation (KEYED; no English)
     interpretation = interpret_risks(risks)
 
     # Elbow signal + legality (LOCKED)
@@ -109,6 +114,13 @@ def analyze(
         pose_frames=pose_frames,  # IMPORTANT: enables event-driven legality without INCONCLUSIVE
     )
 
+    # Clinician layer (YAML-driven UI payload)
+    clinician = clinician_engine.build(
+        elbow=elbow,
+        risks=risks,
+        interpretation=interpretation,
+    )
+
     return {
         "schema": "actionlab.v14",
         "input": {"hand": hand},
@@ -118,5 +130,6 @@ def analyze(
         "action": action,
         "risks": risks,
         "basics": basics,
-        "interpretation": interpretation,
+        "interpretation": interpretation,  # keyed, backend-friendly
+        "clinician": clinician,            # frontend should render from this
     }

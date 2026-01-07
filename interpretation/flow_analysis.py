@@ -6,14 +6,17 @@ def analyze_linear_flow(
     kinematics: Dict[str, Any],
 ) -> Dict[str, Any]:
     """
-    Linear Action Flow (interpretation-only)
+    Linear Action Flow (interpretation-only, KEYED OUTPUT)
 
-    RULE (V14 LOCKED):
+    LOCKED RULE (V14):
     - 0 or 1 moderate contributor  -> SMOOTH
     - 2 moderate contributors      -> INTERRUPTED
     - ≥3 moderate contributors     -> FRAGMENTED
-    """
 
+    NOTE:
+    This returns keys + contributors only (no English strings).
+    English explanations come from YAML clinician layer.
+    """
     contributors = []
     conf_sum = 0.0
 
@@ -27,16 +30,6 @@ def analyze_linear_flow(
             "flow_state": "SMOOTH",
             "confidence": 0.85,
             "contributors": contributors,
-            "coach": {
-                "summary": "Forward energy is transferred smoothly through the action.",
-                "detail": "No meaningful interruption of kinetic flow detected.",
-                "cues": [],
-            },
-            "user": {
-                "summary": "Your bowling action flows smoothly.",
-                "detail": "Your body keeps moving forward naturally while you bowl.",
-                "try_this": [],
-            },
         }
 
     if len(contributors) == 2:
@@ -44,41 +37,10 @@ def analyze_linear_flow(
     else:
         flow_state = "FRAGMENTED"
 
-    base_conf = min(1.0, conf_sum / len(contributors))
-
-    coach_detail = (
-        "Some interruption of forward flow is present. Energy transfer is not fully continuous "
-        "through front-foot contact into release."
-        if flow_state == "INTERRUPTED"
-        else
-        "Multiple risk signals indicate fragmented forward flow, with energy redirected into "
-        "rotation or lateral movement instead of releasing smoothly."
-    )
-
-    user_detail = (
-        "Your movement slows slightly before releasing the ball."
-        if flow_state == "INTERRUPTED"
-        else
-        "Your body slows down suddenly when you bowl, which makes other parts work harder."
-    )
+    base_conf = min(1.0, conf_sum / max(1, len(contributors)))
 
     return {
         "flow_state": flow_state,
         "confidence": round(base_conf, 2),
         "contributors": contributors,
-        "coach": {
-            "summary": f"Linear action flow is {flow_state.lower()}.",
-            "detail": coach_detail,
-            "cues": [
-                "Allow your chest to keep travelling forward",
-                "Avoid stopping or collapsing at front-foot contact",
-            ],
-        },
-        "user": {
-            "summary": "Your bowling action loses smooth flow.",
-            "detail": user_detail,
-            "try_this": [
-                "Stay tall and keep moving forward as you bowl",
-            ],
-        },
     }
