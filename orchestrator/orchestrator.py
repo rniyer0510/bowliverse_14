@@ -26,6 +26,9 @@ from app.workers.efficiency.basic_coaching import analyze_basics
 # Clinician (YAML-driven explanations)
 from app.clinician.interpreter import ClinicianInterpreter
 
+# Persistence (best-effort, side-effect only)
+from app.persistence.writer import write_analysis
+
 
 app = FastAPI()
 logger = get_logger(__name__)
@@ -36,7 +39,7 @@ clinician_engine = ClinicianInterpreter()
 def analyze(
     file: UploadFile = File(...),
     hand: str = Form(...),
-    bowler_type: str = Form(None),  # DEPRECATED – retained for backward compatibility
+    bowler_type: str = Form(None),  # retained for backward compatibility
 ):
     """
     ActionLab V14 – Orchestrator
@@ -52,10 +55,13 @@ def analyze(
     - compute elbow legality (LOCKED)
     - clinician layer (YAML) builds UI-ready explanations
     - assemble response
+    - persist analysis (best-effort, non-blocking)
     """
     logger.info("Analyze request received")
 
-    # Load
+    # ------------------------------------------------------------
+    # Load video + pose
+    # ------------------------------------------------------------
     video, pose_frames, _ = load_video(file)
 
     try:
@@ -63,21 +69,35 @@ def analyze(
     except Exception:
         fps_val = 0.0
 
+    # ------------------------------------------------------------
     # Events: Release → UAH
-    events = detect_release_uah(pose_frames=pose_frames, hand=hand, fps=fps_val)
+    # ------------------------------------------------------------
+    events = detect_release_uah(
+        pose_frames=pose_frames,
+        hand=hand,
+        fps=fps_val,
+    )
     logger.info(f"Detected events (release/uah): {events}")
 
+    # ------------------------------------------------------------
     # FFC/BFC anchored off UAH (ACTION anchoring)
+    # ------------------------------------------------------------
     uah_frame = (events.get("uah") or {}).get("frame")
     if uah_frame is not None:
-        foot_events = detect_ffc_bfc(pose_frames=pose_frames, hand=hand, uah_frame=uah_frame)
+        foot_events = detect_ffc_bfc(
+            pose_frames=pose_frames,
+            hand=hand,
+            uah_frame=uah_frame,
+        )
         if foot_events:
             events.update(foot_events)
 
     bfc_frame = (events.get("bfc") or {}).get("frame")
     ffc_frame = (events.get("ffc") or {}).get("frame")
 
-    # Action
+    # ------------------------------------------------------------
+    # Action classification
+    # ------------------------------------------------------------
     action = classify_action(
         pose_frames=pose_frames,
         hand=hand,
@@ -85,7 +105,9 @@ def analyze(
         ffc_frame=ffc_frame,
     )
 
-    # Risks
+    # ------------------------------------------------------------
+    # Risk computation (V14 unified risk model)
+    # ------------------------------------------------------------
     risks = run_risk_worker(
         pose_frames=pose_frames,
         video=video,
@@ -93,7 +115,9 @@ def analyze(
         action=action,
     )
 
-    # Basics (non-risk)
+    # ------------------------------------------------------------
+    # Basics (non-risk coaching diagnostics)
+    # ------------------------------------------------------------
     basics = analyze_basics(
         pose_frames=pose_frames,
         hand=hand,
@@ -101,35 +125,67 @@ def analyze(
         action=action,
     )
 
-    # Interpretation (KEYED; no English)
+    # ------------------------------------------------------------
+    # Interpretation (KEYED, backend-friendly)
+    # ------------------------------------------------------------
     interpretation = interpret_risks(risks)
 
+    # ------------------------------------------------------------
     # Elbow signal + legality (LOCKED)
-    elbow_signal = compute_elbow_signal(pose_frames=pose_frames, hand=hand)
+    # ------------------------------------------------------------
+    elbow_signal = compute_elbow_signal(
+        pose_frames=pose_frames,
+        hand=hand,
+    )
 
     elbow = evaluate_elbow_legality(
         elbow_signal=elbow_signal,
         events=events,
         fps=fps_val,
-        pose_frames=pose_frames,  # IMPORTANT: enables event-driven legality without INCONCLUSIVE
+        pose_frames=pose_frames,  # IMPORTANT: prevents INCONCLUSIVE
     )
 
-    # Clinician layer (YAML-driven UI payload)
+    # ------------------------------------------------------------
+    # Clinician layer (YAML → UI payload)
+    # ------------------------------------------------------------
     clinician = clinician_engine.build(
         elbow=elbow,
         risks=risks,
         interpretation=interpretation,
     )
 
-    return {
+    # ------------------------------------------------------------
+    # Assemble final response (SOURCE OF TRUTH)
+    # ------------------------------------------------------------
+    result = {
         "schema": "actionlab.v14",
         "input": {"hand": hand},
-        "video": {"fps": video.get("fps"), "total_frames": video.get("total_frames")},
+        "video": {
+            "fps": video.get("fps"),
+            "total_frames": video.get("total_frames"),
+            "file_path": video.get("path"),  # used for persistence + replay
+        },
         "events": events,
         "elbow": elbow,
         "action": action,
         "risks": risks,
         "basics": basics,
-        "interpretation": interpretation,  # keyed, backend-friendly
-        "clinician": clinician,            # frontend should render from this
+        "interpretation": interpretation,
+        "clinician": clinician,
     }
+
+    # ------------------------------------------------------------
+    # 🔒 Best-effort persistence (MUST NOT break analysis)
+    # ------------------------------------------------------------
+    try:
+        write_analysis(
+            result=result,
+            file_path=video.get("path"),
+            hand=hand,
+            bowler_type=bowler_type,
+        )
+    except Exception as e:
+        logger.warning(f"Persistence skipped: {e}")
+
+    return result
+

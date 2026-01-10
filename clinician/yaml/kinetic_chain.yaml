@@ -1,55 +1,6 @@
-kinetic_chain:
-  states:
-    smooth:
-      label: "Smooth flow"
-      kid_summary: >
-        Your bowling action flows smoothly from start to finish.
-        There are no sudden stops or rushed movements.
-        Keep repeating this rhythm.
-      coach_summary: >
-        Continuous energy transfer with no visible breaks.
-        Stable sequencing.
-        Maintain rhythm and repeatability.
+energy_transfer:
+  good:
+    message: "Energy flows smoothly through your body."
 
-    controlled_low_linear:
-      label: "Controlled flow"
-      kid_summary: >
-        Your bowling is controlled and steady.
-        You rely on balance and accuracy more than speed.
-        Keep focusing on rhythm and consistency.
-      coach_summary: >
-        Low linear velocity by design.
-        Stable patterning with no compensatory breakdown.
-        Style-consistent, monitor only.
-
-    interrupted:
-      label: "Interrupted flow"
-      kid_summary: >
-        Your body slows down suddenly before release.
-        This makes bowling harder on your body.
-        Try to keep moving forward through the delivery.
-      coach_summary: >
-        Forward flow interruption before release.
-        Late compensation present.
-        Cue continued momentum through FFC.
-
-    fragmented:
-      label: "Fragmented flow"
-      kid_summary: >
-        Your movement breaks in a few places.
-        This makes bowling tiring and less smooth.
-        Work on a simpler rhythm.
-      coach_summary: >
-        Multiple disruptions in sequencing.
-        High compensation load.
-        Simplify action and restore continuity.
-
-    unknown:
-      label: "Limited by video"
-      kid_summary: >
-        Some parts were hard to see in the video.
-        This makes it hard to judge the action.
-        Try recording again from a clearer angle.
-      coach_summary: >
-        Pose visibility limits interpretation.
-        Retest with full body visible and stable framing.
+  loaded:
+    message: "Some body segments absorb more load during delivery."

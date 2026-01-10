@@ -1,23 +1,10 @@
-version: actionlab.clinician.v1
+elbow_extension:
+  good:
+    status: good
+    message: "Elbow action stays within safe limits."
+    explanation: "This reduces stress on the elbow during high-speed delivery."
 
-elbow:
-  bands:
-    clear:
-      max_deg: 13.0
-      label: "Clear"
-      player_text: "Your bowling arm stays comfortably within safe and legal limits."
-
-    monitor:
-      max_deg: 16.0
-      label: "Monitor"
-      player_text: "Your action is legal. Small variations like this are common in video capture."
-
-    review:
-      max_deg: 20.0
-      label: "Review Recommended"
-      player_text: "Your arm action is close to the limit. A technique review is recommended."
-
-    high_confidence:
-      min_deg: 20.0
-      label: "High Confidence Review Required"
-      player_text: "A technique review is strongly recommended to reduce future risk."
+  watch:
+    status: watch
+    message: "Elbow experiences higher stress during release."
+    explanation: "Strengthening the forearm and shoulder can help protect the joint."

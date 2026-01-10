@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 from app.clinician.loader import load_yaml
 from app.clinician.bands import severity_band, confidence_band
 
-ELBOW = load_yaml("elbow.yaml")
-RISKS = load_yaml("risks.yaml")
-CHAIN = load_yaml("kinetic_chain.yaml")
+ELBOW = load_yaml("elbow.yaml") or {}
+RISKS = load_yaml("risks.yaml") or {}
+CHAIN = load_yaml("kinetic_chain.yaml") or {}
 
 SEV_RANK = {"VERY_HIGH": 4, "HIGH": 3, "MODERATE": 2, "LOW": 1}
 CONF_RANK = {"HIGH": 3, "MEDIUM": 2, "LOW": 1}
@@ -22,60 +22,66 @@ def f(x: Any, d: float = 0.0) -> float:
 
 class ClinicianInterpreter:
     """
-    ActionLab V14 – FINAL Clinician Interpreter
+    ActionLab V14 – Clinician Interpreter (ROBUST, ICC-ALIGNED)
 
-    Responsibilities:
-    - Translate biomech + risk signals into human-safe explanations
-    - Resolve contradictions using kinetic-chain context
-    - Produce a clinician-style summary for frontend display
-    - Output frontend-ready JSON (frontend renders only)
+    - Never crashes frontend
+    - Never drops risks silently
+    - YAML-driven where appropriate
+    - ICC-correct elbow interpretation
     """
 
     # ---------- ELBOW ----------
     def build_elbow(self, raw: Dict[str, Any]) -> Dict[str, Any]:
         ext = f(raw.get("extension_deg"))
-        b = ELBOW["elbow"]["bands"]
+        verdict = (raw.get("verdict") or "").upper()
 
-        if ext <= b["clear"]["max_deg"]:
-            use = b["clear"]
-        elif ext <= b["monitor"]["max_deg"]:
-            use = b["monitor"]
-        elif ext <= b["review"]["max_deg"]:
-            use = b["review"]
+        # ICC-aligned logic
+        if verdict == "ILLEGAL":
+            band = "ILLEGAL"
+            text = "Your elbow action exceeds the legal extension limit."
+        elif ext <= 15.0:
+            band = "OK"
+            text = "Your elbow action is within the legal range."
+        elif ext <= 20.0:
+            band = "BORDERLINE"
+            text = "Your elbow action is close to the legal limit and should be monitored."
         else:
-            use = b["high_confidence"]
+            band = "ILLEGAL"
+            text = "Your elbow action exceeds the legal extension limit."
 
         return {
             "extension_deg": round(ext, 2),
-            "band": use["label"],
-            "player_text": use["player_text"],
+            "band": band,
+            "player_text": text,
         }
 
     # ---------- KINETIC CHAIN ----------
     def build_chain(self, interpretation: Dict[str, Any]) -> Dict[str, Any]:
         flow = (interpretation or {}).get("linear_flow") or {}
-        contrib = set(flow.get("contributors") or [])
+        state = (flow.get("flow_state") or "unknown").lower()
 
-        # Style-consistent protection (e.g., McGrath-type actions)
-        if contrib == {"trunk_rotation_snap", "lateral_trunk_lean"}:
-            state = "controlled_low_linear"
+        energy = CHAIN.get("energy_transfer") or {}
+
+        if state == "interrupted":
+            msg = energy.get("loaded", {}).get(
+                "message",
+                "Some parts of your body are absorbing extra load during delivery.",
+            )
+        elif state == "smooth":
+            msg = energy.get("good", {}).get(
+                "message",
+                "Energy flows smoothly through your body.",
+            )
         else:
-            state = (flow.get("flow_state") or "unknown").lower()
+            msg = "Your movement pattern could not be fully classified."
 
-        states = CHAIN["kinetic_chain"]["states"]
-        if state not in states:
-            state = "unknown"
-
-        s = states[state]
         return {
             "state": state.upper(),
-            "label": s["label"],
-            "kid_summary": s["kid_summary"],
-            "coach_summary": s["coach_summary"],
-            "confidence": f(flow.get("confidence")),
+            "kid_summary": msg,
+            "confidence": f(flow.get("confidence"), 1.0),
         }
 
-    # ---------- RISK BUILD ----------
+    # ---------- RISKS ----------
     def build_risks(self, raw: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         out: List[Dict[str, Any]] = []
 
@@ -84,74 +90,79 @@ class ClinicianInterpreter:
             if not rid:
                 continue
 
-            spec = RISKS["risks"][rid]  # strict contract
+            spec = RISKS.get(rid)
 
             sev = severity_band(f(r.get("signal_strength")))
             conf = confidence_band(f(r.get("confidence")))
 
+            if not spec:
+                out.append({
+                    "risk_id": rid,
+                    "title": rid.replace("_", " ").title(),
+                    "severity": sev,
+                    "confidence": conf,
+                    "kid_explanation": "This movement places some stress on your body.",
+                    "coach_explanation": "Monitor this loading pattern.",
+                    "evidence": r,
+                })
+                continue
+
             out.append({
                 "risk_id": rid,
-                "title": spec["title"],
-                "body_region": spec["body_region"],
+                "title": spec.get("title", rid),
+                "body_region": spec.get("body_region"),
                 "severity": sev,
                 "confidence": conf,
-                "kid_explanation": spec["explanations"]["kid"][sev.lower()],
-                "coach_explanation": spec["explanations"]["coach"][sev.lower()],
-                "cues": spec["cues"],
+                "kid_explanation": spec.get("explanations", {})
+                    .get("kid", {})
+                    .get(sev.lower(), ""),
+                "coach_explanation": spec.get("explanations", {})
+                    .get("coach", {})
+                    .get(sev.lower(), ""),
+                "cues": spec.get("cues", {}),
                 "evidence": {
                     "signal_strength": round(f(r.get("signal_strength")), 3),
                     "confidence": round(f(r.get("confidence")), 3),
-                    "note": r.get("note"),
                     "window": r.get("window"),
+                    "note": r.get("note"),
                 },
             })
+
         return out
-
-    def _risk_sort_key(self, r: Dict[str, Any]) -> Tuple[int, int, float]:
-        sev = SEV_RANK.get(r.get("severity", "LOW"), 0)
-        conf = CONF_RANK.get(r.get("confidence", "LOW"), 0)
-        strength = f((r.get("evidence") or {}).get("signal_strength"), 0.0)
-        return (sev, conf, strength)
-
-    def _force_monitor_intent(self, risks: List[Dict[str, Any]]) -> None:
-        for r in risks:
-            cues = r.get("cues") or {}
-            for side in ("kid", "coach"):
-                for c in (cues.get(side) or []):
-                    c["intent"] = "monitor"
 
     # ---------- SUMMARY ----------
     def build_summary(
         self,
         chain: Dict[str, Any],
-        elbow: Dict[str, Any],
         risks: List[Dict[str, Any]],
     ) -> Dict[str, Any]:
-        max_sev = "LOW"
-        for r in risks:
-            if SEV_RANK.get(r["severity"], 0) > SEV_RANK.get(max_sev, 0):
-                max_sev = r["severity"]
 
-        if chain["state"] == "CONTROLLED_LOW_LINEAR":
-            assessment = (
-                "Your bowling action is controlled and repeatable with no major injury risks identified."
-            )
-            recommendation = "MONITOR"
-        elif max_sev in ("HIGH", "VERY_HIGH"):
-            assessment = (
-                "Some parts of your bowling action may place extra load on your body."
-            )
-            recommendation = "CORRECT"
+        # Count high-confidence red risks
+        red_hits = 0
+        for r in risks:
+            if (
+                r.get("severity") in ("HIGH", "VERY_HIGH")
+                and r.get("confidence") == "HIGH"
+            ):
+                red_hits += 1
+
+        if red_hits >= 2:
+            max_sev = "VERY_HIGH"
+            rec = "CORRECT"
+            text = "Some parts of your action are placing high load on your body."
+        elif red_hits == 1:
+            max_sev = "MODERATE"
+            rec = "MONITOR"
+            text = "Your action is generally sound, but a few areas need attention."
         else:
-            assessment = (
-                "Your bowling action is generally sound with a few areas to keep an eye on."
-            )
-            recommendation = "MONITOR"
+            max_sev = "LOW"
+            rec = "MAINTAIN"
+            text = "Your action is generally sound."
 
         return {
-            "overall_assessment": assessment,
+            "overall_assessment": text,
             "overall_severity": max_sev,
-            "recommendation_level": recommendation,
+            "recommendation_level": rec,
             "confidence": chain.get("confidence", 1.0),
         }
 
@@ -166,28 +177,10 @@ class ClinicianInterpreter:
 
         chain = self.build_chain(interpretation)
         built_risks = self.build_risks(risks)
-
-        # 🔒 Controlled-flow protection
-        if chain["state"] == "CONTROLLED_LOW_LINEAR":
-            built_risks = sorted(
-                built_risks,
-                key=self._risk_sort_key,
-                reverse=True
-            )[:2]
-
-            self._force_monitor_intent(built_risks)
-
-            for r in built_risks:
-                if r["severity"] in ("HIGH", "VERY_HIGH"):
-                    r["severity"] = "MODERATE"
-                    spec = RISKS["risks"][r["risk_id"]]
-                    r["kid_explanation"] = spec["explanations"]["kid"]["moderate"]
-                    r["coach_explanation"] = spec["explanations"]["coach"]["moderate"]
-
-        summary = self.build_summary(chain, elbow, built_risks)
+        summary = self.build_summary(chain, built_risks)
 
         return {
-            "summary": summary,                 # 🔹 NEW (top-of-report)
+            "summary": summary,
             "elbow": self.build_elbow(elbow),
             "kinetic_chain": chain,
             "risks": built_risks,
