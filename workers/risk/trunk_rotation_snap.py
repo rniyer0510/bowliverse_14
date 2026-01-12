@@ -1,62 +1,53 @@
-import numpy as np
+# app/workers/risk/trunk_rotation_snap.py
 
-LEFT_SHOULDER = 11
-RIGHT_SHOULDER = 12
-LEFT_HIP = 23
-RIGHT_HIP = 24
-VIS_THR = 0.5
+import numpy as np
+from app.common.logger import get_logger
+
+logger = get_logger(__name__)
 
 
 def compute_trunk_rotation_snap(pose_frames, ffc_frame, uah_frame, fps, config):
-    if None in (ffc_frame, uah_frame) or fps <= 0:
-        return None
+    floor = float(config.get("floor", 0.15))
 
-    start = int(ffc_frame)
-    end = int(uah_frame)
+    if ffc_frame is None or ffc_frame < 0:
+        return {"risk_id": "trunk_rotation_snap", "signal_strength": floor, "confidence": 0.0}
 
     angles = []
-    used = 0
+    vis = []
 
-    for i in range(start, end + 1):
-        lms = pose_frames[i].get("landmarks")
-        if not lms:
+    for i in range(max(0, ffc_frame - 6), min(len(pose_frames), ffc_frame + 6)):
+        frame = pose_frames[i]
+        if not isinstance(frame, dict):
             continue
 
-        if min(
-            lms[LEFT_SHOULDER]["visibility"],
-            lms[RIGHT_SHOULDER]["visibility"],
-            lms[LEFT_HIP]["visibility"],
-            lms[RIGHT_HIP]["visibility"],
-        ) < VIS_THR:
+        lm = frame.get("landmarks")
+        if not isinstance(lm, dict):
             continue
 
-        sh = np.array([
-            lms[RIGHT_SHOULDER]["x"] - lms[LEFT_SHOULDER]["x"],
-            lms[RIGHT_SHOULDER]["y"] - lms[LEFT_SHOULDER]["y"],
-        ])
-        hp = np.array([
-            lms[RIGHT_HIP]["x"] - lms[LEFT_HIP]["x"],
-            lms[RIGHT_HIP]["y"] - lms[LEFT_HIP]["y"],
-        ])
+        if "LEFT_SHOULDER" not in lm or "RIGHT_SHOULDER" not in lm:
+            continue
 
-        ang = np.degrees(np.arctan2(sh[1], sh[0]) - np.arctan2(hp[1], hp[0]))
-        angles.append(ang)
-        used += 1
+        dx = lm["RIGHT_SHOULDER"]["x"] - lm["LEFT_SHOULDER"]["x"]
+        dy = lm["RIGHT_SHOULDER"]["y"] - lm["LEFT_SHOULDER"]["y"]
 
-    if len(angles) < 4:
-        return None
+        angles.append(np.arctan2(dy, dx))
+        vis.append(min(lm["LEFT_SHOULDER"].get("v", 0), lm["RIGHT_SHOULDER"].get("v", 0)))
 
-    angles = np.unwrap(np.radians(angles))
-    vel = np.gradient(angles) * fps
-    acc = np.gradient(vel) * fps
+    if len(angles) < 5:
+        return {
+            "risk_id": "trunk_rotation_snap",
+            "signal_strength": floor,
+            "confidence": 0.0,
+            "note": "Torso rotation proxy insufficient",
+        }
 
-    peak = float(np.max(np.abs(acc)))
-    signal = min(peak / config["snap_ref"], 1.0)
-    conf = min(used / (end - start + 1), 1.0)
+    jerk = np.max(np.abs(np.diff(np.diff(angles))))
+    signal = min(1.0, jerk / 1.2)
+    confidence = float(np.mean(vis)) * 0.7
 
     return {
         "risk_id": "trunk_rotation_snap",
-        "signal_strength": round(signal, 3),
-        "confidence": round(conf, 3),
-        "debug": {"peak_rot_acc": round(peak, 3)},
+        "signal_strength": round(max(signal, floor), 3),
+        "confidence": round(confidence, 3),
+        "debug": {"rot_jerk": round(jerk, 3), "mode": "proxy"},
     }

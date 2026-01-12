@@ -1,0 +1,46 @@
+front_foot_braking_shock:
+  title: "Front Foot Braking Shock"
+  coach_explanation: >
+    After front-foot contact, forward momentum slows down abruptly instead of
+    being absorbed smoothly through the leg and trunk. This creates a braking
+    effect where forces rise faster than the body can dissipate them, increasing
+    load on the ankle, knee, and lower back.
+  kid_explanation: >
+    Try to land your front foot firmly and let your body move over it smoothly,
+    instead of stopping suddenly.
+
+knee_brace_failure:
+  title: "Knee Brace Failure"
+  coach_explanation: >
+    After the front foot lands, the knee continues to bend rather than holding
+    firm. This reduces energy transfer up the body and increases load on the knee
+    joint, especially during repeated deliveries.
+  kid_explanation: >
+    At landing, try to stay tall and let your front leg act like a strong post.
+
+trunk_rotation_snap:
+  title: "Trunk Rotation Snap"
+  coach_explanation: >
+    The upper body rotates very rapidly over a short period of time, creating a
+    sharp spike in rotational load. When this rotation is not well supported by
+    the lower body, it can stress the side and lower back.
+  kid_explanation: >
+    Try to rotate smoothly through your delivery instead of spinning suddenly.
+
+hip_shoulder_mismatch:
+  title: "Hip–Shoulder Mismatch"
+  coach_explanation: >
+    The hips and shoulders are not rotating together during delivery. This
+    separation can be useful for speed, but when it becomes excessive or poorly
+    timed, it increases stress through the trunk and groin region.
+  kid_explanation: >
+    Focus on letting your hips and shoulders work together as you bowl.
+
+lateral_trunk_lean:
+  title: "Lateral Trunk Lean"
+  coach_explanation: >
+    The torso tilts sideways during delivery instead of staying balanced over the
+    base of support. This shifts load unevenly across the spine and can increase
+    stress on the side body.
+  kid_explanation: >
+    Try to keep your chest upright and balanced as you deliver the ball.

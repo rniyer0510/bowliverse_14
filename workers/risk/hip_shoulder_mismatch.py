@@ -1,69 +1,46 @@
+# app/workers/risk/hip_shoulder_mismatch.py
+
 import numpy as np
+from app.common.logger import get_logger
 
-LEFT_SHOULDER = 11
-RIGHT_SHOULDER = 12
-LEFT_HIP = 23
-RIGHT_HIP = 24
-VIS_THR = 0.5
+logger = get_logger(__name__)
 
 
-def compute_hip_shoulder_mismatch(pose_frames, ffc_frame, release_frame, fps, config):
-    if None in (ffc_frame, release_frame) or fps <= 0:
-        return None
+def compute_hip_shoulder_mismatch(pose_frames, ffc_frame, rel_frame, fps, config):
+    floor = float(config.get("floor", 0.15))
 
-    start = int(ffc_frame)
-    end = int(release_frame)
+    hips = []
+    shoulders = []
 
-    hip_vel = []
-    sh_vel = []
-    used = 0
-
-    prev_hip = None
-    prev_sh = None
-
-    for i in range(start, end + 1):
-        lms = pose_frames[i].get("landmarks")
-        if not lms:
+    for i in range(max(0, ffc_frame - 6), min(len(pose_frames), ffc_frame + 6)):
+        frame = pose_frames[i]
+        if not isinstance(frame, dict):
             continue
 
-        if min(
-            lms[LEFT_SHOULDER]["visibility"],
-            lms[RIGHT_SHOULDER]["visibility"],
-            lms[LEFT_HIP]["visibility"],
-            lms[RIGHT_HIP]["visibility"],
-        ) < VIS_THR:
+        lm = frame.get("landmarks")
+        if not isinstance(lm, dict):
             continue
 
-        sh = np.array([
-            lms[RIGHT_SHOULDER]["x"] - lms[LEFT_SHOULDER]["x"],
-            lms[RIGHT_SHOULDER]["y"] - lms[LEFT_SHOULDER]["y"],
-        ])
-        hp = np.array([
-            lms[RIGHT_HIP]["x"] - lms[LEFT_HIP]["x"],
-            lms[RIGHT_HIP]["y"] - lms[LEFT_HIP]["y"],
-        ])
+        if not all(k in lm for k in ["LEFT_HIP", "RIGHT_HIP", "LEFT_SHOULDER", "RIGHT_SHOULDER"]):
+            continue
 
-        if prev_hip is not None:
-            hip_vel.append(np.linalg.norm(hp - prev_hip) * fps)
-            sh_vel.append(np.linalg.norm(sh - prev_sh) * fps)
-            used += 1
+        hips.append(lm["RIGHT_HIP"]["x"] - lm["LEFT_HIP"]["x"])
+        shoulders.append(lm["RIGHT_SHOULDER"]["x"] - lm["LEFT_SHOULDER"]["x"])
 
-        prev_hip = hp
-        prev_sh = sh
+    if len(hips) < 4:
+        return {
+            "risk_id": "hip_shoulder_mismatch",
+            "signal_strength": floor,
+            "confidence": 0.0,
+            "note": "Phase proxy insufficient",
+        }
 
-    if len(hip_vel) < 3:
-        return None
-
-    hip_vel = np.array(hip_vel)
-    sh_vel = np.array(sh_vel)
-
-    mismatch = np.mean(np.abs(sh_vel - hip_vel))
-    signal = min(mismatch / config["mismatch_ref"], 1.0)
-    conf = min(used / (end - start), 1.0)
+    phase = np.mean(np.abs(np.array(hips) - np.array(shoulders)))
+    signal = min(1.0, phase / 0.25)
 
     return {
         "risk_id": "hip_shoulder_mismatch",
-        "signal_strength": round(signal, 3),
-        "confidence": round(conf, 3),
-        "debug": {"mean_mismatch": round(float(mismatch), 3)},
+        "signal_strength": round(max(signal, floor), 3),
+        "confidence": 0.6,
+        "debug": {"phase_lag": round(phase, 3), "mode": "proxy"},
     }
