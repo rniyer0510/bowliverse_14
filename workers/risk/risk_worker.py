@@ -4,12 +4,14 @@ from app.workers.risk.trunk_rotation_snap import compute_trunk_rotation_snap
 from app.workers.risk.hip_shoulder_mismatch import compute_hip_shoulder_mismatch
 from app.workers.risk.lateral_trunk_lean import compute_lateral_trunk_lean
 
+from app.workers.risk.visual_utils import draw_and_save_visual
+
 RISK_CONFIG = {
     "ffbs": {
         "pre_window": 6,
         "post_window": 4,
         "jerk_reference": 15.0,
-        "travel_min": 0.012,  # configurable threshold (normalized units)
+        "travel_min": 0.012,
         "floor": 0.15
     },
     "knee": {"post_window": 8, "collapse_ref": 20.0, "floor": 0.15},
@@ -30,6 +32,51 @@ def _emit(obj, floor, risk_id: str):
     return obj
 
 
+def _attach_visual_best_effort(risk, pose_frames, video, events):
+    try:
+        if not isinstance(risk, dict):
+            return risk
+
+        vid_path = video.get("path") or video.get("file_path") or video.get("video_path")
+        if not vid_path:
+            return risk
+
+        rid = risk.get("risk_id")
+
+        ffc = (events.get("ffc") or {}).get("frame")
+        bfc = (events.get("bfc") or {}).get("frame")
+        uah = (events.get("uah") or {}).get("frame")
+        rel = (events.get("release") or {}).get("frame")
+
+        anchor = None
+        if rid == "front_foot_braking_shock":
+            anchor = ffc
+        elif rid == "knee_brace_failure":
+            anchor = ffc
+        elif rid == "trunk_rotation_snap":
+            anchor = uah or ffc
+        elif rid == "hip_shoulder_mismatch":
+            anchor = rel or uah
+        elif rid == "lateral_trunk_lean":
+            anchor = bfc or ffc
+
+        if anchor is None:
+            return risk
+
+        vis = draw_and_save_visual(
+            risk=risk,
+            video_path=vid_path,
+            frame_idx=int(anchor),
+            pose_frames=pose_frames,
+        )
+        if vis:
+            risk["visual"] = vis
+
+        return risk
+    except Exception:
+        return risk
+
+
 def run_risk_worker(pose_frames, video, events, action):
     fps = float(video.get("fps") or 0.0)
     risks = []
@@ -39,7 +86,6 @@ def run_risk_worker(pose_frames, video, events, action):
     uah = (events.get("uah") or {}).get("frame")
     rel = (events.get("release") or {}).get("frame")
 
-    # FFBS (intent-aware + momentum gate)
     risks.append(
         _emit(
             compute_front_foot_braking_shock(
@@ -89,7 +135,6 @@ def run_risk_worker(pose_frames, video, events, action):
         )
     )
 
-    # Cap isolated lateral lean (monitor only)
     moderate_or_higher = [
         r for r in risks
         if r.get("risk_id") != "lateral_trunk_lean"
@@ -109,4 +154,8 @@ def run_risk_worker(pose_frames, video, events, action):
                 "Not a short-term risk; consider long-term load monitoring."
             )
 
-    return risks
+    out = []
+    for r in risks:
+        out.append(_attach_visual_best_effort(r, pose_frames, video, events))
+
+    return out

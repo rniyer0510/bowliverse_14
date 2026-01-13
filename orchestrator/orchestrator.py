@@ -1,4 +1,6 @@
-from fastapi import FastAPI, UploadFile, File, Form
+from fastapi import FastAPI, UploadFile, File, Form, Request
+from fastapi.staticfiles import StaticFiles
+import os
 
 from app.common.logger import get_logger
 from app.io.loader import load_video
@@ -30,32 +32,38 @@ from app.clinician.interpreter import ClinicianInterpreter
 from app.persistence.writer import write_analysis
 
 
+# ------------------------------------------------------------
+# App init
+# ------------------------------------------------------------
 app = FastAPI()
 logger = get_logger(__name__)
 clinician_engine = ClinicianInterpreter()
 
+# ------------------------------------------------------------
+# 🔹 Serve visual evidence over HTTP
+# ------------------------------------------------------------
+VISUALS_DIR = "/tmp/actionlab_frames"
+
+if os.path.isdir(VISUALS_DIR):
+    app.mount(
+        "/visuals",
+        StaticFiles(directory=VISUALS_DIR),
+        name="visuals",
+    )
+    logger.info(f"Mounted visual evidence directory: {VISUALS_DIR}")
+else:
+    logger.warning(f"Visual evidence directory not found: {VISUALS_DIR}")
+
 
 @app.post("/analyze")
 def analyze(
+    request: Request,
     file: UploadFile = File(...),
     hand: str = Form(...),
     bowler_type: str = Form(None),  # retained for backward compatibility
 ):
     """
     ActionLab V14 – Orchestrator
-
-    Pipeline:
-    - load video + pose
-    - detect Release → UAH
-    - detect FFC → BFC
-    - classify action (BFC-anchored)
-    - compute risks (V14 injury/stress model)
-    - compute basics (V14 coaching diagnostics, non-risk)
-    - interpret risks (KEYED)
-    - compute elbow legality (LOCKED)
-    - clinician layer (YAML) builds UI-ready explanations
-    - assemble response
-    - persist analysis (best-effort, non-blocking)
     """
     logger.info("Analyze request received")
 
@@ -77,10 +85,9 @@ def analyze(
         hand=hand,
         fps=fps_val,
     )
-    logger.info(f"Detected events (release/uah): {events}")
 
     # ------------------------------------------------------------
-    # FFC/BFC anchored off UAH (ACTION anchoring)
+    # FFC/BFC anchored off UAH
     # ------------------------------------------------------------
     uah_frame = (events.get("uah") or {}).get("frame")
     if uah_frame is not None:
@@ -106,7 +113,7 @@ def analyze(
     )
 
     # ------------------------------------------------------------
-    # Risk computation (V14 unified risk model)
+    # Risk computation
     # ------------------------------------------------------------
     risks = run_risk_worker(
         pose_frames=pose_frames,
@@ -116,7 +123,21 @@ def analyze(
     )
 
     # ------------------------------------------------------------
-    # Basics (non-risk coaching diagnostics)
+    # 🔹 PATCH: Convert image_path → image_url
+    # ------------------------------------------------------------
+    base_url = str(request.base_url).rstrip("/")
+
+    for risk in risks:
+        visual = (risk.get("visual") or {})
+        image_path = visual.get("image_path")
+
+        if image_path and image_path.startswith(VISUALS_DIR):
+            filename = os.path.basename(image_path)
+            visual["image_url"] = f"{base_url}/visuals/{filename}"
+            visual.pop("image_path", None)
+
+    # ------------------------------------------------------------
+    # Basics
     # ------------------------------------------------------------
     basics = analyze_basics(
         pose_frames=pose_frames,
@@ -126,12 +147,12 @@ def analyze(
     )
 
     # ------------------------------------------------------------
-    # Interpretation (KEYED, backend-friendly)
+    # Interpretation
     # ------------------------------------------------------------
     interpretation = interpret_risks(risks)
 
     # ------------------------------------------------------------
-    # Elbow signal + legality (LOCKED)
+    # Elbow (LOCKED)
     # ------------------------------------------------------------
     elbow_signal = compute_elbow_signal(
         pose_frames=pose_frames,
@@ -142,11 +163,11 @@ def analyze(
         elbow_signal=elbow_signal,
         events=events,
         fps=fps_val,
-        pose_frames=pose_frames,  # IMPORTANT: prevents INCONCLUSIVE
+        pose_frames=pose_frames,
     )
 
     # ------------------------------------------------------------
-    # Clinician layer (YAML → UI payload)
+    # Clinician layer
     # ------------------------------------------------------------
     clinician = clinician_engine.build(
         elbow=elbow,
@@ -155,7 +176,7 @@ def analyze(
     )
 
     # ------------------------------------------------------------
-    # Assemble final response (SOURCE OF TRUTH)
+    # Assemble response
     # ------------------------------------------------------------
     result = {
         "schema": "actionlab.v14",
@@ -163,7 +184,7 @@ def analyze(
         "video": {
             "fps": video.get("fps"),
             "total_frames": video.get("total_frames"),
-            "file_path": video.get("path"),  # used for persistence + replay
+            "file_path": video.get("path"),
         },
         "events": events,
         "elbow": elbow,
@@ -175,7 +196,7 @@ def analyze(
     }
 
     # ------------------------------------------------------------
-    # 🔒 Best-effort persistence (MUST NOT break analysis)
+    # Persistence (best-effort)
     # ------------------------------------------------------------
     try:
         write_analysis(
