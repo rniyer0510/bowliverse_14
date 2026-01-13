@@ -1,12 +1,13 @@
 import os
 import cv2
-import math
 from typing import Optional, Tuple
 
 # ---------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------
 
+# DO NOT hardcode host / port / protocol
+# This directory is mounted by FastAPI at /visuals
 VISUAL_DIR = "/tmp/actionlab_frames"
 os.makedirs(VISUAL_DIR, exist_ok=True)
 
@@ -60,7 +61,7 @@ def draw_and_save_visual(
     h, w = frame.shape[:2]
     cx, cy = w // 2, h // 2
 
-    # Minimal explanatory arrow
+    # Minimal explanatory arrow (generic but informative)
     cv2.arrowedLine(
         frame,
         (cx, cy + 40),
@@ -74,11 +75,12 @@ def draw_and_save_visual(
     path = os.path.join(VISUAL_DIR, fname)
     cv2.imwrite(path, frame)
 
+    # 🔒 CRITICAL FIX: RELATIVE URL ONLY
     return {
         "frame": frame_idx,
         "anchor": "center",
         "visual_confidence": visual_confidence,
-        "image_url": f"http://127.0.0.1:8000/visuals/{fname}",
+        "image_url": f"/visuals/{fname}",
     }
 
 
@@ -104,7 +106,7 @@ def select_best_visual_frame(
             return anchor_frame
 
     mid = (window[0] + window[1]) // 2
-    if mid >= window[0] and mid <= window[1]:
+    if window[0] <= mid <= window[1]:
         return mid
 
     return fallback
@@ -152,13 +154,13 @@ def save_visual(
 
     fname = f"{risk_id}_{frame_idx}.png"
     path = os.path.join(VISUAL_DIR, fname)
-
     cv2.imwrite(path, image)
 
+    # 🔒 SAME FIX HERE
     return {
         "frame": frame_idx,
         "anchor": "center",
         "visual_confidence": "LOW",
-        "image_url": f"http://127.0.0.1:8000/visuals/{fname}",
+        "image_url": f"/visuals/{fname}",
     }
 
