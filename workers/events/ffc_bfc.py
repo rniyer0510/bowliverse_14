@@ -1,267 +1,237 @@
-"""
-ActionLab V14 — FFC + BFC detector (rigorous, contract-safe)
-
-Contracts preserved:
-- Reverse event identification
-- FFC is found relative to Release (reverse search)
-- BFC is anchored to FFC (NOT Release)
-- Typical priors:
-    FFC ≈ Release - (4..5) frames
-    BFC ≈ FFC - (3..4) frames
-- No "not found" allowed — always return a frame with confidence + method
-- Debuggable: logs + frame dumps
-"""
-
-from typing import Any, Dict, List, Optional, Tuple
-import os
-import cv2
-import math
+from typing import Dict, List, Optional, Tuple
+import numpy as np
 
 from app.common.logger import get_logger
-from app.workers.pose.landmarks import get_lm, vis_ok
 
 logger = get_logger(__name__)
 
-DEBUG = True
-DEBUG_DIR = "/tmp/actionlab_debug/ffc_bfc"
-os.makedirs(DEBUG_DIR, exist_ok=True)
+# ------------------------------------------------------------
+# MediaPipe landmark indices (LOCKED)
+# ------------------------------------------------------------
+LEFT_FOOT_INDEX = 31
+RIGHT_FOOT_INDEX = 32
 
-def _dump(video_path: Optional[str], frame_idx: int, tag: str):
-    if not DEBUG or not video_path:
-        return
-    try:
-        cap = cv2.VideoCapture(video_path)
-        cap.set(cv2.CAP_PROP_POS_FRAMES, int(frame_idx))
-        ok, frame = cap.read()
-        cap.release()
-        if ok:
-            cv2.imwrite(os.path.join(DEBUG_DIR, f"{tag}_{int(frame_idx)}.png"), frame)
-    except Exception as e:
-        logger.warning(f"[FFC/BFC] frame dump failed: {e}")
 
-def _xy(pf, name: str) -> Optional[Tuple[float, float]]:
-    lm = get_lm(pf, name)
-    if not vis_ok(lm):
-        return None
-    try:
-        return (float(lm["x"]), float(lm["y"]))
-    except Exception:
-        return None
+# ------------------------------------------------------------
+# Tunable biomechanical constants (TIME-BASED)
+# ------------------------------------------------------------
+FFC_LOOKBACK_MS = 300        # how far BEFORE release to search
+FFC_LOOKAHEAD_MS = 30        # stop slightly before release
+STABILIZATION_MS = 100       # foot must remain stable this long
 
-def _visible_score(pf, a: str, b: str) -> int:
-    return int(vis_ok(get_lm(pf, a))) + int(vis_ok(get_lm(pf, b)))
+VERTICAL_JITTER_EPS = 0.015
+HORIZONTAL_JITTER_EPS = 0.020
 
-def _foot_com(pf, heel: str, toe: str) -> Optional[Tuple[float, float]]:
-    h = _xy(pf, heel)
-    t = _xy(pf, toe)
-    if h and t:
-        return ((h[0] + t[0]) * 0.5, (h[1] + t[1]) * 0.5)
-    return h or t
 
-def _stability_score(pose_frames: List[Dict[str, Any]], i: int, heel: str, toe: str, K: int) -> float:
+# ------------------------------------------------------------
+# Utility helpers
+# ------------------------------------------------------------
+
+def ms_to_frames(ms: float, fps: float) -> int:
+    return max(1, int(round((ms / 1000.0) * fps)))
+
+
+def clamp(v: int, lo: int, hi: int) -> int:
+    return max(lo, min(hi, v))
+
+
+def extract_front_foot_series(
+    pose_frames: List[Dict],
+    hand: str,
+) -> Tuple[np.ndarray, np.ndarray]:
     """
-    Simple stability proxy: how little the foot COM moves over the next K frames.
-    Smaller movement => more "planted".
+    Extract normalized x/y series for the FRONT foot
+    using MediaPipe landmark indices.
     """
-    n = len(pose_frames)
-    c0 = _foot_com(pose_frames[i], heel, toe)
-    if not c0:
-        return 0.0
-    acc = 0.0
-    cnt = 0
-    for j in range(i+1, min(n, i+1+K)):
-        c1 = _foot_com(pose_frames[j], heel, toe)
-        if not c1:
+
+    xs, ys = [], []
+
+    foot_idx = LEFT_FOOT_INDEX if hand == "R" else RIGHT_FOOT_INDEX
+
+    for f in pose_frames:
+        lms = f.get("landmarks")
+
+        if not isinstance(lms, list) or foot_idx >= len(lms):
+            xs.append(np.nan)
+            ys.append(np.nan)
             continue
-        dx = c1[0] - c0[0]
-        dy = c1[1] - c0[1]
-        acc += math.sqrt(dx*dx + dy*dy)
-        cnt += 1
-        c0 = c1
-    if cnt == 0:
-        return 0.0
-    # invert: lower movement => higher score
-    mean_move = acc / cnt
-    return float(max(0.0, 1.0 - 40.0 * mean_move))  # scale for normalized coords
 
-def _pick_best_in_band(
-    pose_frames: List[Dict[str, Any]],
-    lo: int,
-    hi: int,
-    heel: str,
-    toe: str,
-    K: int
-) -> Tuple[int, float, str]:
+        pt = lms[foot_idx]
+
+        if pt is None:
+            xs.append(np.nan)
+            ys.append(np.nan)
+        else:
+            xs.append(pt.get("x", np.nan))
+            ys.append(pt.get("y", np.nan))
+
+    return np.array(xs), np.array(ys)
+
+
+def is_stable(
+    xs: np.ndarray,
+    ys: np.ndarray,
+    start: int,
+    end: int,
+) -> bool:
     """
-    Return (idx, confidence, method).
-    Confidence is explicit and degrades if we are forced outside priors.
+    Foot considered stable if positional jitter is low.
     """
-    lo = max(0, lo)
-    hi = min(len(pose_frames)-1, hi)
-    if hi < lo:
-        lo, hi = hi, lo
+    seg_x = xs[start:end + 1]
+    seg_y = ys[start:end + 1]
 
-    best_i = lo
-    best_score = -1.0
+    if np.isnan(seg_x).any() or np.isnan(seg_y).any():
+        return False
 
-    for i in range(lo, hi+1):
-        vis = _visible_score(pose_frames[i], heel, toe)  # 0..2
-        stab = _stability_score(pose_frames, i, heel, toe, K)  # 0..1
-        score = (1.6 * vis) + (1.0 * stab)
-        if score > best_score:
-            best_score = score
-            best_i = i
+    dx = np.max(seg_x) - np.min(seg_x)
+    dy = np.max(seg_y) - np.min(seg_y)
 
-    # Confidence mapping
-    vis_best = _visible_score(pose_frames[best_i], heel, toe)
-    conf = 0.35 + 0.25 * (vis_best / 2.0) + 0.35 * min(1.0, best_score / 3.2)
-    conf = float(min(0.90, max(0.25, conf)))
-    method = "band_best_score"
-    return best_i, conf, method
+    return dx < HORIZONTAL_JITTER_EPS and dy < VERTICAL_JITTER_EPS
+
+
+# ------------------------------------------------------------
+# Core detector
+# ------------------------------------------------------------
 
 def detect_ffc_bfc(
-    pose_frames: List[Dict[str, Any]],
+    pose_frames: List[Dict],
     hand: str,
+    uah_frame: Optional[int] = None,      # retained for compatibility
     release_frame: Optional[int] = None,
-    uah_frame: Optional[int] = None,
-    fps: float = 25.0,
-    video_path: Optional[str] = None,
-) -> Dict[str, Any]:
+    fps: Optional[float] = None,
+) -> Dict[str, Dict]:
     """
-    VISUAL FOOT EVENTS — rigorous, contract-safe.
+    Detect Front-Foot Contact (FFC) and Back-Foot Contact (BFC).
 
-    Contracts:
-    - reverse-detected: Release known (or fallback to UAH if needed)
-    - FFC is BEFORE Release in time, but detected by searching backward relative to Release
-    - BFC anchored to FFC
-    - Must always return both frames with confidence + method
+    RULES:
+    - Release is the ONLY anchor
+    - Time-based windows (FPS-aware)
+    - Earliest stabilized contact wins
     """
-    n = len(pose_frames)
-    if n == 0:
-        return {}
 
-    fps = float(fps or 25.0)
-    K = max(3, int(0.12 * fps))
+    total_frames = len(pose_frames)
 
-    # Anchor (prefer Release)
-    if release_frame is not None:
-        rel = int(release_frame)
-        anchor_method = "release"
-    elif uah_frame is not None:
-        rel = int(uah_frame)
-        anchor_method = "uah_fallback"
-    else:
-        rel = n - 1
-        anchor_method = "tail_fallback"
+    logger.warning(
+        f"[FFC/BFC][ENTRY] release_frame={release_frame}, "
+        f"uah_frame={uah_frame}, total_frames={total_frames}"
+    )
 
-    rel = max(0, min(rel, n-1))
-
-    h = (hand or "R").upper()
-    if h == "R":
-        front_heel, front_toe = "RIGHT_HEEL", "RIGHT_FOOT_INDEX"
-        back_heel, back_toe   = "LEFT_HEEL",  "LEFT_FOOT_INDEX"
-    else:
-        front_heel, front_toe = "LEFT_HEEL",  "LEFT_FOOT_INDEX"
-        back_heel, back_toe   = "RIGHT_HEEL", "RIGHT_FOOT_INDEX"
-
-    # Priors (fps-adaptive)
-    min_gap = max(3, int(0.10 * fps))           # "FFC must be at least 3 frames behind Release"
-    d_ffc   = max(min_gap + 1, int(round(0.18 * fps)))  # ~4-5 @25fps
-    d_bfc   = max(3, int(round(0.14 * fps)))            # ~3-4 @25fps
-    buf     = max(3, int(round(0.12 * fps)))            # search buffer
-
-    # -------------------------
-    # FFC: search backward around Release - d_ffc
-    # enforce ffc <= release - min_gap
-    # -------------------------
-    center_ffc = rel - d_ffc
-    band_lo = max(0, center_ffc - buf)
-    band_hi = min(rel - min_gap, center_ffc + buf)
-
-    if band_hi < band_lo:
-        # Ensure a valid band that respects min_gap
-        band_hi = max(0, rel - min_gap)
-        band_lo = max(0, band_hi - (2 * buf))
-
-    ffc_i, ffc_conf, ffc_method = _pick_best_in_band(pose_frames, band_lo, band_hi, front_heel, front_toe, K)
-
-    # If still violates min gap due to short clips, clamp (rigorous invariant)
-    if ffc_i > rel - min_gap:
-        ffc_i = max(0, rel - min_gap)
-        ffc_conf = min(ffc_conf, 0.40)
-        ffc_method = "clamped_to_release_min_gap"
-
-    # If visibility is terrible in the band, widen once (still no 'not found')
-    if _visible_score(pose_frames[ffc_i], front_heel, front_toe) == 0:
-        wide_lo = max(0, rel - int(0.60 * fps))
-        wide_hi = max(0, rel - min_gap)
-        ffc_i2, c2, m2 = _pick_best_in_band(pose_frames, wide_lo, wide_hi, front_heel, front_toe, K)
-        # prefer if better visibility
-        if _visible_score(pose_frames[ffc_i2], front_heel, front_toe) > 0:
-            ffc_i, ffc_conf, ffc_method = ffc_i2, min(0.70, c2), "widened_band_best"
-        else:
-            ffc_conf = min(ffc_conf, 0.45)
-            ffc_method = "forced_low_signal"
-
-    # -------------------------
-    # BFC: anchored to FFC, search backward around FFC - d_bfc
-    # -------------------------
-    center_bfc = ffc_i - d_bfc
-    b_lo = max(0, center_bfc - buf)
-    b_hi = min(ffc_i - 1, center_bfc + buf)
-
-    if b_hi < b_lo:
-        b_hi = max(0, ffc_i - 1)
-        b_lo = max(0, b_hi - (2 * buf))
-
-    bfc_i, bfc_conf, bfc_method = _pick_best_in_band(pose_frames, b_lo, b_hi, back_heel, back_toe, K)
-
-    # If adjacent due to short window, widen once
-    if bfc_i >= ffc_i:
-        bfc_i = max(0, ffc_i - 1)
-        bfc_conf = min(bfc_conf, 0.40)
-        bfc_method = "clamped_before_ffc"
-
-    if _visible_score(pose_frames[bfc_i], back_heel, back_toe) == 0:
-        wide_lo = max(0, ffc_i - int(0.60 * fps))
-        wide_hi = max(0, ffc_i - 1)
-        bfc_i2, c2, m2 = _pick_best_in_band(pose_frames, wide_lo, wide_hi, back_heel, back_toe, K)
-        if _visible_score(pose_frames[bfc_i2], back_heel, back_toe) > 0:
-            bfc_i, bfc_conf, bfc_method = bfc_i2, min(0.70, c2), "widened_band_best"
-        else:
-            bfc_conf = min(bfc_conf, 0.45)
-            bfc_method = "forced_low_signal"
-
-    # -------------------------
-    # Final invariant checks (rigour)
-    # -------------------------
-    # BFC < FFC < Release (in time)
-    if not (bfc_i < ffc_i):
-        # Force ordering, degrade confidence explicitly
-        bfc_i = max(0, ffc_i - 1)
-        bfc_conf = min(bfc_conf, 0.35)
-        bfc_method = "forced_ordering_bfc_before_ffc"
-
-    if not (ffc_i < rel):
-        # Force ordering, degrade explicitly
-        ffc_i = max(0, rel - min_gap)
-        ffc_conf = min(ffc_conf, 0.35)
-        ffc_method = "forced_ordering_ffc_before_release"
-
-    # Debug / frame dumps
-    if DEBUG:
-        logger.info(
-            f"[FFC/BFC] anchor={rel}({anchor_method}) "
-            f"priors: min_gap={min_gap} d_ffc={d_ffc} d_bfc={d_bfc} buf={buf}"
+    if release_frame is None:
+        raise ValueError(
+            "detect_ffc_bfc(): release_frame must be supplied by orchestrator"
         )
-        logger.info(
-            f"[FFC/BFC] ffc={ffc_i}({ffc_method}, conf={ffc_conf:.2f}) "
-            f"bfc={bfc_i}({bfc_method}, conf={bfc_conf:.2f})"
+
+    # ------------------------------------------------------------
+    # FPS handling
+    # ------------------------------------------------------------
+
+    if fps is None or fps <= 0:
+        fps = 25.0
+
+    xs, ys = extract_front_foot_series(pose_frames, hand)
+
+    # ------------------------------------------------------------
+    # Define FFC window (anchored on RELEASE)
+    # ------------------------------------------------------------
+
+    lookback = ms_to_frames(FFC_LOOKBACK_MS, fps)
+    lookahead = ms_to_frames(FFC_LOOKAHEAD_MS, fps)
+    stab_frames = ms_to_frames(STABILIZATION_MS, fps)
+
+    win_start = clamp(release_frame - lookback, 0, total_frames - 1)
+    win_end = clamp(release_frame - lookahead, 0, total_frames - 1)
+
+    logger.info(
+        f"[FFC/BFC][WINDOW] release={release_frame} "
+        f"search=[{win_start}..{win_end}] "
+        f"stab={stab_frames}"
+    )
+
+    # ------------------------------------------------------------
+    # STEP 1: landing candidates (downward Y motion)
+    # ------------------------------------------------------------
+
+    candidates: List[int] = []
+
+    for f in range(win_start + 1, win_end + 1):
+        if np.isnan(ys[f]) or np.isnan(ys[f - 1]):
+            continue
+
+        if ys[f] >= ys[f - 1]:
+            candidates.append(f)
+
+    # ------------------------------------------------------------
+    # STEP 2: stabilization check
+    # ------------------------------------------------------------
+
+    ffc_frame = None
+    ffc_conf = 0.0
+    ffc_method = None
+
+    for f in candidates:
+        stab_end = clamp(f + stab_frames, 0, total_frames - 1)
+        if is_stable(xs, ys, f, stab_end):
+            ffc_frame = f
+            ffc_conf = 0.6
+            ffc_method = "stabilized_contact"
+            break
+
+    # ------------------------------------------------------------
+    # STEP 3: midpoint fallback (LOW confidence)
+    # ------------------------------------------------------------
+
+    if ffc_frame is None:
+        ffc_frame = (win_start + win_end) // 2
+        ffc_conf = 0.0
+        ffc_method = "window_midpoint_fallback"
+
+        logger.warning(
+            f"[FFC/BFC] No stabilized contact — midpoint fallback {ffc_frame}"
         )
-        _dump(video_path, ffc_i, "ffc")
-        _dump(video_path, bfc_i, "bfc")
+
+    # ------------------------------------------------------------
+    # BFC: relative earlier stabilized foot
+    # ------------------------------------------------------------
+
+    bfc_search_start = clamp(ffc_frame - lookback, 0, total_frames - 1)
+    bfc_search_end = clamp(ffc_frame - 2, 0, total_frames - 1)
+
+    bfc_frame = None
+    bfc_conf = 0.0
+    bfc_method = None
+
+    for f in range(bfc_search_start, bfc_search_end + 1):
+        if np.isnan(ys[f]):
+            continue
+
+        stab_end = clamp(f + stab_frames, 0, total_frames - 1)
+        if is_stable(xs, ys, f, stab_end):
+            bfc_frame = f
+            bfc_conf = 0.5
+            bfc_method = "stabilized_contact"
+            break
+
+    if bfc_frame is None:
+        bfc_frame = clamp(ffc_frame - stab_frames, 0, total_frames - 1)
+        bfc_conf = 0.25
+        bfc_method = "relative_fallback"
+
+    logger.info(
+        f"[FFC/BFC][RESULT] anchor={release_frame}(release) "
+        f"ffc={ffc_frame} ({ffc_method}, conf={ffc_conf:.2f}) "
+        f"bfc={bfc_frame} ({bfc_method}, conf={bfc_conf:.2f})"
+    )
 
     return {
-        "ffc": {"frame": int(ffc_i), "confidence": float(ffc_conf), "method": ffc_method},
-        "bfc": {"frame": int(bfc_i), "confidence": float(bfc_conf), "method": bfc_method},
+        "ffc": {
+            "frame": int(ffc_frame),
+            "confidence": float(ffc_conf),
+            "method": ffc_method,
+        },
+        "bfc": {
+            "frame": int(bfc_frame),
+            "confidence": float(bfc_conf),
+            "method": bfc_method,
+        },
     }
+

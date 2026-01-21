@@ -3,20 +3,36 @@ import cv2
 from typing import Optional, Tuple
 
 # ---------------------------------------------------------------------
-# Constants
+# Configuration
 # ---------------------------------------------------------------------
 
-# DO NOT hardcode host / port / protocol
-# This directory is mounted by FastAPI at /visuals
+# Directory served by FastAPI as /visuals
 VISUAL_DIR = "/tmp/actionlab_frames"
 os.makedirs(VISUAL_DIR, exist_ok=True)
 
-DEFAULT_COLOR = (0, 0, 255)   # Red
+# Base public URL (LOCAL / PROD SAFE)
+PUBLIC_BASE_URL = os.environ.get(
+    "ACTIONLAB_PUBLIC_BASE_URL",
+    "http://127.0.0.1:8000",
+)
+
+DEFAULT_COLOR = (0, 0, 255)  # Red
 THICKNESS = 2
 
 
 # ---------------------------------------------------------------------
-# Frame utilities
+# URL helper (🔒 SINGLE SOURCE OF TRUTH)
+# ---------------------------------------------------------------------
+
+def _public_url(path: str) -> str:
+    """
+    Converts a relative path into a fully-qualified public URL.
+    """
+    return PUBLIC_BASE_URL.rstrip("/") + "/" + path.lstrip("/")
+
+
+# ---------------------------------------------------------------------
+# Small utilities
 # ---------------------------------------------------------------------
 
 def _safe_int(x):
@@ -31,7 +47,7 @@ def _clamp(val, lo, hi):
 
 
 # ---------------------------------------------------------------------
-# Core visual renderer (used by risk_worker)
+# Core visual renderer (USED BY risk_worker ONLY)
 # ---------------------------------------------------------------------
 
 def draw_and_save_visual(
@@ -41,13 +57,22 @@ def draw_and_save_visual(
     risk_id: str,
     pose_frames=None,
     visual_confidence: str = "LOW",
+    run_id: Optional[str] = None,
 ):
     """
-    Draws a minimal visual overlay and saves the frame.
-    This is intentionally conservative: arrows/markers only.
+    Draws a minimal explanatory overlay and saves the frame.
+
+    This function is:
+    - risk-agnostic
+    - event-anchored
+    - deterministic
     """
+
     frame_idx = _safe_int(frame_idx)
     if frame_idx is None:
+        return None
+
+    if not video_path or not os.path.exists(video_path):
         return None
 
     cap = cv2.VideoCapture(video_path)
@@ -61,7 +86,7 @@ def draw_and_save_visual(
     h, w = frame.shape[:2]
     cx, cy = w // 2, h // 2
 
-    # Minimal explanatory arrow (generic but informative)
+    # Minimal, neutral arrow (event-centric)
     cv2.arrowedLine(
         frame,
         (cx, cy + 40),
@@ -71,16 +96,22 @@ def draw_and_save_visual(
         tipLength=0.25,
     )
 
-    fname = f"{risk_id}_{frame_idx}.png"
-    path = os.path.join(VISUAL_DIR, fname)
-    cv2.imwrite(path, frame)
+    # Folder per analysis run (prevents collisions)
+    run_id = run_id or "analysis_default"
+    out_dir = os.path.join(VISUAL_DIR, run_id)
+    os.makedirs(out_dir, exist_ok=True)
 
-    # 🔒 CRITICAL FIX: RELATIVE URL ONLY
+    fname = f"{risk_id}_{frame_idx}.png"
+    abs_path = os.path.join(out_dir, fname)
+    cv2.imwrite(abs_path, frame)
+
+    rel_path = f"/visuals/{run_id}/{fname}"
+
     return {
         "frame": frame_idx,
-        "anchor": "center",
+        "anchor": "event",
         "visual_confidence": visual_confidence,
-        "image_url": f"/visuals/{fname}",
+        "image_url": _public_url(rel_path),
     }
 
 
@@ -96,9 +127,10 @@ def select_best_visual_frame(
 ):
     """
     Picks the most reasonable frame inside a window.
+
     Strategy:
-      1. Prefer anchor_frame if inside window
-      2. Else pick mid-point of window
+      1. Use anchor_frame if inside window
+      2. Else midpoint of window
       3. Else fallback
     """
     if anchor_frame is not None:
@@ -113,17 +145,16 @@ def select_best_visual_frame(
 
 
 # ---------------------------------------------------------------------
-# LEGACY COMPATIBILITY HELPERS (DO NOT REMOVE)
-# Required by existing risk modules
+# LEGACY HELPERS (DO NOT REMOVE — REQUIRED BY OLD RISK FILES)
 # ---------------------------------------------------------------------
 
 def extract_frame(video_path: str, frame_idx: int):
     """
-    Legacy helper expected by older risk modules.
+    Legacy helper used by older risk modules.
     Returns raw BGR frame or None.
     """
     frame_idx = _safe_int(frame_idx)
-    if frame_idx is None:
+    if frame_idx is None or not video_path:
         return None
 
     cap = cv2.VideoCapture(video_path)
@@ -140,11 +171,13 @@ def save_visual(
     image,
     risk_id: str,
     frame_idx: int,
+    run_id: Optional[str] = None,
 ):
     """
     Legacy helper expected by older risk modules.
-    Saves raw image without overlays.
+    Saves raw frame without overlays.
     """
+
     if image is None:
         return None
 
@@ -152,15 +185,20 @@ def save_visual(
     if frame_idx is None:
         return None
 
-    fname = f"{risk_id}_{frame_idx}.png"
-    path = os.path.join(VISUAL_DIR, fname)
-    cv2.imwrite(path, image)
+    run_id = run_id or "analysis_default"
+    out_dir = os.path.join(VISUAL_DIR, run_id)
+    os.makedirs(out_dir, exist_ok=True)
 
-    # 🔒 SAME FIX HERE
+    fname = f"{risk_id}_{frame_idx}.png"
+    abs_path = os.path.join(out_dir, fname)
+    cv2.imwrite(abs_path, image)
+
+    rel_path = f"/visuals/{run_id}/{fname}"
+
     return {
         "frame": frame_idx,
-        "anchor": "center",
+        "anchor": "event",
         "visual_confidence": "LOW",
-        "image_url": f"/visuals/{fname}",
+        "image_url": _public_url(rel_path),
     }
 

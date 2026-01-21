@@ -87,17 +87,23 @@ def analyze(
     )
 
     # ------------------------------------------------------------
-    # FFC/BFC anchored off UAH
+    # FFC/BFC (STRICTLY anchored off RELEASE)
     # ------------------------------------------------------------
+    release_frame = (events.get("release") or {}).get("frame")
     uah_frame = (events.get("uah") or {}).get("frame")
-    if uah_frame is not None:
+
+    if release_frame is not None:
         foot_events = detect_ffc_bfc(
             pose_frames=pose_frames,
             hand=hand,
+            release_frame=release_frame,   # ✅ REQUIRED FIX
             uah_frame=uah_frame,
+            fps=fps_val,
         )
         if foot_events:
             events.update(foot_events)
+    else:
+        logger.error("[Orchestrator] Release frame missing — cannot run FFC/BFC")
 
     bfc_frame = (events.get("bfc") or {}).get("frame")
     ffc_frame = (events.get("ffc") or {}).get("frame")
