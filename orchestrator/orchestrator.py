@@ -1,6 +1,7 @@
 from fastapi import FastAPI, UploadFile, File, Form, Request
 from fastapi.staticfiles import StaticFiles
 import os
+import uuid  # ✅ ADDED
 
 from app.common.logger import get_logger
 from app.io.loader import load_video
@@ -68,6 +69,11 @@ def analyze(
     logger.info("Analyze request received")
 
     # ------------------------------------------------------------
+    # ✅ UNIQUE ANALYSIS RUN ID (PER REQUEST)
+    # ------------------------------------------------------------
+    analysis_run_id = f"analysis_{uuid.uuid4().hex[:12]}"
+
+    # ------------------------------------------------------------
     # Load video + pose
     # ------------------------------------------------------------
     video, pose_frames, _ = load_video(file)
@@ -119,28 +125,15 @@ def analyze(
     )
 
     # ------------------------------------------------------------
-    # Risk computation
+    # Risk computation (EVENT-DRIVEN VISUALS)
     # ------------------------------------------------------------
     risks = run_risk_worker(
         pose_frames=pose_frames,
         video=video,
         events=events,
         action=action,
+        run_id=analysis_run_id,   # ✅ FIXED
     )
-
-    # ------------------------------------------------------------
-    # 🔹 PATCH: Convert image_path → image_url
-    # ------------------------------------------------------------
-    base_url = str(request.base_url).rstrip("/")
-
-    for risk in risks:
-        visual = (risk.get("visual") or {})
-        image_path = visual.get("image_path")
-
-        if image_path and image_path.startswith(VISUALS_DIR):
-            filename = os.path.basename(image_path)
-            visual["image_url"] = f"{base_url}/visuals/{filename}"
-            visual.pop("image_path", None)
 
     # ------------------------------------------------------------
     # Basics
