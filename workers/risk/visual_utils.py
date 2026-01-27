@@ -16,13 +16,13 @@ PUBLIC_BASE_URL = os.environ.get(
 )
 
 # ---------------------------------------------------------------------
-# Vertical anchors
+# Vertical anchors (fractions of frame height)
 # ---------------------------------------------------------------------
 
-FFBS_BASE_Y_FRAC = 0.69
-KNEE_BASE_Y_FRAC = 0.70
-TORSO_Y_FRAC = 0.52
-UPPER_TORSO_FRAC = 0.45
+FFBS_BASE_Y_FRAC   = 0.69
+KNEE_BASE_Y_FRAC   = 0.70
+TORSO_Y_FRAC       = 0.52
+UPPER_TORSO_FRAC   = 0.45
 
 # ---------------------------------------------------------------------
 # Helpers
@@ -40,14 +40,11 @@ def _safe_int(x):
 
 
 def _risk_style(conf: str, scale: int):
-    # IMPORTANT: visual thickness must have a hard floor
-    base = max(4, int(scale * 0.018))
-
     if conf == "HIGH":
-        return (0, 0, 255), base + 2
+        return (0, 0, 255), max(2, int(scale * 0.015))
     elif conf == "MEDIUM":
-        return (0, 165, 255), base + 1
-    return (255, 200, 0), base
+        return (0, 165, 255), max(2, int(scale * 0.012))
+    return (255, 200, 0), max(2, int(scale * 0.010))
 
 
 # ---------------------------------------------------------------------
@@ -94,7 +91,6 @@ def _refine_front_foot(frame, cx):
     roi = frame[int(h*0.62):int(h*0.80), :]
     gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
     _, mask = cv2.threshold(gray, 40, 255, cv2.THRESH_BINARY)
-
     xs = np.where(mask > 0)[1]
     if len(xs) < 200:
         return cx
@@ -108,15 +104,12 @@ def _refine_mid_body(frame, cx, y_frac):
     h, _ = frame.shape[:2]
     y1 = int(h * (y_frac - 0.05))
     y2 = int(h * (y_frac + 0.05))
-
     roi = frame[y1:y2, :]
     gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
     _, mask = cv2.threshold(gray, 40, 255, cv2.THRESH_BINARY)
-
     xs = np.where(mask > 0)[1]
     if len(xs) < 200:
         return cx
-
     return int(0.8*cx + 0.2*int(xs.mean()))
 
 
@@ -133,17 +126,8 @@ def _draw_ffbs(frame, conf):
     base_y = int(h * FFBS_BASE_Y_FRAC)
     arrow_len = int(subject_h * 0.45)
 
-    cv2.arrowedLine(
-        frame,
-        (cx, base_y),
-        (cx, base_y - arrow_len),
-        color,
-        t,
-        tipLength=0.18,
-        line_type=cv2.LINE_AA
-    )
-
-    cv2.circle(frame, (cx, base_y), max(4, int(subject_h*0.05)), color, -1)
+    cv2.line(frame, (cx, base_y), (cx, base_y-arrow_len), color, t, cv2.LINE_AA)
+    cv2.circle(frame, (cx, base_y), max(3,int(subject_h*0.05)), color, -1)
 
 
 def _draw_knee_brace(frame, conf):
@@ -154,17 +138,8 @@ def _draw_knee_brace(frame, conf):
     color, t = _risk_style(conf, subject_h)
     knee_y = int(h * KNEE_BASE_Y_FRAC)
 
-    cv2.arrowedLine(
-        frame,
-        (cx, knee_y + int(subject_h*0.15)),
-        (cx, knee_y - int(subject_h*0.12)),
-        color,
-        t,
-        tipLength=0.25,
-        line_type=cv2.LINE_AA
-    )
-
-    cv2.circle(frame, (cx, knee_y), max(4, int(subject_h*0.045)), color, -1)
+    cv2.line(frame, (cx, knee_y-int(subject_h*0.1)), (cx, knee_y+int(subject_h*0.15)), color, t, cv2.LINE_AA)
+    cv2.circle(frame, (cx, knee_y), max(3,int(subject_h*0.045)), color, -1)
 
 
 def _draw_hip_shoulder(frame, conf):
@@ -173,17 +148,10 @@ def _draw_hip_shoulder(frame, conf):
     cx = _refine_mid_body(frame, cx, TORSO_Y_FRAC)
 
     color, t = _risk_style(conf, subject_h)
-    offset = int(subject_h * 0.22)
+    y1, y2 = int(h*0.60), int(h*0.45)
+    offset = int(subject_h*0.22)
 
-    cv2.arrowedLine(
-        frame,
-        (cx - offset, int(h*0.60)),
-        (cx + offset, int(h*0.45)),
-        color,
-        t,
-        tipLength=0.20,
-        line_type=cv2.LINE_AA
-    )
+    cv2.line(frame, (cx-offset,y1), (cx+offset,y2), color, t, cv2.LINE_AA)
 
 
 def _draw_trunk_rotation(frame, conf):
@@ -192,11 +160,11 @@ def _draw_trunk_rotation(frame, conf):
     cx = _refine_mid_body(frame, cx, TORSO_Y_FRAC)
 
     color, t = _risk_style(conf, subject_h)
-    span = int(subject_h * 0.40)
+    span = int(subject_h*0.4)
     y = int(h * TORSO_Y_FRAC)
 
-    cv2.arrowedLine(frame, (cx - span, y), (cx + span, y), color, t, 0.18)
-    cv2.arrowedLine(frame, (cx + span, y), (cx - span, y), color, t, 0.18)
+    cv2.line(frame, (cx-span,y), (cx+span,y), color, t, cv2.LINE_AA)
+    cv2.line(frame, (cx+span,y), (cx-span,y), color, t, cv2.LINE_AA)
 
 
 def _draw_lateral_trunk(frame, conf):
@@ -205,11 +173,11 @@ def _draw_lateral_trunk(frame, conf):
     cx = _refine_mid_body(frame, cx, UPPER_TORSO_FRAC)
 
     color, t = _risk_style(conf, subject_h)
-    span = int(subject_h * 0.45)
+    span = int(subject_h*0.45)
     y = int(h * UPPER_TORSO_FRAC)
 
-    cv2.arrowedLine(frame, (cx - span, y), (cx + span, y), color, t, 0.18)
-    cv2.arrowedLine(frame, (cx + span, y), (cx - span, y), color, t, 0.18)
+    cv2.line(frame, (cx-span,y), (cx+span,y), color, t, cv2.LINE_AA)
+    cv2.line(frame, (cx+span,y), (cx-span,y), color, t, cv2.LINE_AA)
 
 
 # ---------------------------------------------------------------------
