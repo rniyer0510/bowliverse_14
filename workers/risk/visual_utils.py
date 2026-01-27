@@ -1,5 +1,6 @@
 import os
 import cv2
+import numpy as np
 from typing import Optional, Tuple
 
 # ---------------------------------------------------------------------
@@ -14,18 +15,14 @@ PUBLIC_BASE_URL = os.environ.get(
     "http://127.0.0.1:8000",
 )
 
-DEFAULT_COLOR = (0, 0, 255)
-THICKNESS = 2
-
 # ---------------------------------------------------------------------
-# Normalized visual geometry (NO hardcoded pixels)
+# Vertical anchors
 # ---------------------------------------------------------------------
 
-GROUND_PAD_FRAC   = 0.04
-PELVIS_FRAC       = 0.58
-KNEE_FRAC         = 0.72
-TORSO_FRAC        = 0.52
-TORSO_SPAN_FRAC   = 0.22
+FFBS_BASE_Y_FRAC = 0.69
+KNEE_BASE_Y_FRAC = 0.70
+TORSO_Y_FRAC = 0.52
+UPPER_TORSO_FRAC = 0.45
 
 # ---------------------------------------------------------------------
 # Helpers
@@ -42,161 +39,211 @@ def _safe_int(x):
         return None
 
 
-def _ground_y(h: int) -> int:
-    return int(h * (1.0 - GROUND_PAD_FRAC))
+def _risk_style(conf: str, scale: int):
+    # IMPORTANT: visual thickness must have a hard floor
+    base = max(4, int(scale * 0.018))
 
-
-def _risk_style(conf: str):
     if conf == "HIGH":
-        return (0, 0, 255), THICKNESS + 2
+        return (0, 0, 255), base + 2
     elif conf == "MEDIUM":
-        return (0, 165, 255), THICKNESS + 1
-    return (255, 200, 0), THICKNESS
+        return (0, 165, 255), base + 1
+    return (255, 200, 0), base
 
 
 # ---------------------------------------------------------------------
-# Risk visuals (FRAME ONLY — NO POSE)
+# Subject geometry (FRAME ONLY)
+# ---------------------------------------------------------------------
+
+_HOG = None
+
+def _get_hog():
+    global _HOG
+    if _HOG is None:
+        hog = cv2.HOGDescriptor()
+        hog.setSVMDetector(cv2.HOGDescriptor_getDefaultPeopleDetector())
+        _HOG = hog
+    return _HOG
+
+
+def _estimate_subject_geometry(frame) -> Tuple[int, int]:
+    h, w = frame.shape[:2]
+    min_x, max_x = int(w * 0.15), int(w * 0.85)
+
+    try:
+        hog = _get_hog()
+        scale_down = 640 / max(w, 1)
+        small = cv2.resize(frame, (int(w * scale_down), int(h * scale_down))) if scale_down < 1 else frame
+
+        rects, _ = hog.detectMultiScale(small, winStride=(8,8), padding=(8,8), scale=1.05)
+        if len(rects):
+            x, y, rw, rh = max(rects, key=lambda r: r[2]*r[3])
+            cx = int((x + rw//2) / max(scale_down, 1e-6))
+            return max(min_x, min(max_x, cx)), max(1, int(rh / max(scale_down,1e-6)))
+    except Exception:
+        pass
+
+    return int(w * 0.5), int(h * 0.45)
+
+
+# ---------------------------------------------------------------------
+# Horizontal refinements
+# ---------------------------------------------------------------------
+
+def _refine_front_foot(frame, cx):
+    h, _ = frame.shape[:2]
+    roi = frame[int(h*0.62):int(h*0.80), :]
+    gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
+    _, mask = cv2.threshold(gray, 40, 255, cv2.THRESH_BINARY)
+
+    xs = np.where(mask > 0)[1]
+    if len(xs) < 200:
+        return cx
+
+    p90, p10 = np.percentile(xs, [90, 10])
+    lead = p90 if abs(p90-cx) > abs(p10-cx) else p10
+    return int(0.75*cx + 0.25*lead)
+
+
+def _refine_mid_body(frame, cx, y_frac):
+    h, _ = frame.shape[:2]
+    y1 = int(h * (y_frac - 0.05))
+    y2 = int(h * (y_frac + 0.05))
+
+    roi = frame[y1:y2, :]
+    gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
+    _, mask = cv2.threshold(gray, 40, 255, cv2.THRESH_BINARY)
+
+    xs = np.where(mask > 0)[1]
+    if len(xs) < 200:
+        return cx
+
+    return int(0.8*cx + 0.2*int(xs.mean()))
+
+
+# ---------------------------------------------------------------------
+# Risk visuals
 # ---------------------------------------------------------------------
 
 def _draw_ffbs(frame, conf):
-    h, w = frame.shape[:2]
-    color, t = _risk_style(conf)
+    h, _ = frame.shape[:2]
+    cx, subject_h = _estimate_subject_geometry(frame)
+    cx = _refine_front_foot(frame, cx)
 
-    x = int(w * 0.55)
-    ground = _ground_y(h)
-    pelvis = int(h * PELVIS_FRAC)
+    color, t = _risk_style(conf, subject_h)
+    base_y = int(h * FFBS_BASE_Y_FRAC)
+    arrow_len = int(subject_h * 0.45)
 
     cv2.arrowedLine(
         frame,
-        (x, ground),
-        (x, pelvis),
+        (cx, base_y),
+        (cx, base_y - arrow_len),
         color,
-        t + 1,
-        tipLength=0.30,
-        line_type=cv2.LINE_AA,
+        t,
+        tipLength=0.18,
+        line_type=cv2.LINE_AA
     )
-    cv2.circle(frame, (x, ground), 6, color, -1)
+
+    cv2.circle(frame, (cx, base_y), max(4, int(subject_h*0.05)), color, -1)
 
 
 def _draw_knee_brace(frame, conf):
-    h, w = frame.shape[:2]
-    color, t = _risk_style(conf)
+    h, _ = frame.shape[:2]
+    cx, subject_h = _estimate_subject_geometry(frame)
+    cx = _refine_front_foot(frame, cx)
 
-    x = int(w * 0.55)
-    knee_y = int(h * KNEE_FRAC)
+    color, t = _risk_style(conf, subject_h)
+    knee_y = int(h * KNEE_BASE_Y_FRAC)
 
     cv2.arrowedLine(
         frame,
-        (x, knee_y - int(h * 0.04)),
-        (x, knee_y + int(h * 0.10)),
+        (cx, knee_y + int(subject_h*0.15)),
+        (cx, knee_y - int(subject_h*0.12)),
         color,
-        t + 2,
-        tipLength=0.40,
-        line_type=cv2.LINE_AA,
+        t,
+        tipLength=0.25,
+        line_type=cv2.LINE_AA
     )
-    cv2.circle(frame, (x, knee_y), 10, color, -1)
 
-
-def _draw_trunk_rotation(frame, conf):
-    h, w = frame.shape[:2]
-    color, t = _risk_style(conf)
-
-    y = int(h * TORSO_FRAC)
-    left  = (int(w * 0.40), y)
-    right = (int(w * 0.60), y)
-
-    cv2.arrowedLine(frame, left,  right, color, t + 1, tipLength=0.35)
-    cv2.arrowedLine(frame, right, left,  color, t + 1, tipLength=0.35)
+    cv2.circle(frame, (cx, knee_y), max(4, int(subject_h*0.045)), color, -1)
 
 
 def _draw_hip_shoulder(frame, conf):
-    h, w = frame.shape[:2]
-    color, t = _risk_style(conf)
+    h, _ = frame.shape[:2]
+    cx, subject_h = _estimate_subject_geometry(frame)
+    cx = _refine_mid_body(frame, cx, TORSO_Y_FRAC)
 
-    start = (int(w * 0.48), int(h * 0.60))
-    end   = (int(w * 0.56), int(h * 0.45))
+    color, t = _risk_style(conf, subject_h)
+    offset = int(subject_h * 0.22)
 
     cv2.arrowedLine(
         frame,
-        start,
-        end,
+        (cx - offset, int(h*0.60)),
+        (cx + offset, int(h*0.45)),
         color,
-        t + 1,
-        tipLength=0.30,
-        line_type=cv2.LINE_AA,
+        t,
+        tipLength=0.20,
+        line_type=cv2.LINE_AA
     )
 
 
+def _draw_trunk_rotation(frame, conf):
+    h, _ = frame.shape[:2]
+    cx, subject_h = _estimate_subject_geometry(frame)
+    cx = _refine_mid_body(frame, cx, TORSO_Y_FRAC)
+
+    color, t = _risk_style(conf, subject_h)
+    span = int(subject_h * 0.40)
+    y = int(h * TORSO_Y_FRAC)
+
+    cv2.arrowedLine(frame, (cx - span, y), (cx + span, y), color, t, 0.18)
+    cv2.arrowedLine(frame, (cx + span, y), (cx - span, y), color, t, 0.18)
+
+
 def _draw_lateral_trunk(frame, conf):
-    h, w = frame.shape[:2]
-    color, t = _risk_style(conf)
+    h, _ = frame.shape[:2]
+    cx, subject_h = _estimate_subject_geometry(frame)
+    cx = _refine_mid_body(frame, cx, UPPER_TORSO_FRAC)
 
-    torso_y = int(h * TORSO_FRAC)
-    span = int(w * TORSO_SPAN_FRAC)
-    cx = int(w * 0.52)
+    color, t = _risk_style(conf, subject_h)
+    span = int(subject_h * 0.45)
+    y = int(h * UPPER_TORSO_FRAC)
 
-    left  = (cx - span, torso_y)
-    right = (cx + span, torso_y)
-
-    cv2.arrowedLine(frame, left,  right, color, t + 2, tipLength=0.40)
-    cv2.arrowedLine(frame, right, left,  color, t + 2, tipLength=0.40)
+    cv2.arrowedLine(frame, (cx - span, y), (cx + span, y), color, t, 0.18)
+    cv2.arrowedLine(frame, (cx + span, y), (cx - span, y), color, t, 0.18)
 
 
 # ---------------------------------------------------------------------
-# Core visual renderer
+# Renderer
 # ---------------------------------------------------------------------
 
 def draw_and_save_visual(
-    *,
-    video_path: str,
-    frame_idx: int,
-    risk_id: str,
-    pose_frames=None,   # intentionally ignored
-    visual_confidence: str = "LOW",
-    run_id: Optional[str] = None,
+    *, video_path: str, frame_idx: int, risk_id: str,
+    pose_frames=None, visual_confidence: str = "LOW", run_id: Optional[str] = None
 ):
-    # ---------------------------
-    # Enforce per-analysis isolation
-    # ---------------------------
     if not run_id:
-        raise ValueError("run_id is required for visual generation")
+        raise ValueError("run_id required")
 
     frame_idx = _safe_int(frame_idx)
-    if frame_idx is None or not video_path or not os.path.exists(video_path):
+    if frame_idx is None or not os.path.exists(video_path):
         return None
 
     cap = cv2.VideoCapture(video_path)
     cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
     ok, frame = cap.read()
     cap.release()
-    if not ok or frame is None:
+    if not ok:
         return None
 
-    if risk_id == "front_foot_braking_shock":
-        _draw_ffbs(frame, visual_confidence)
-    elif risk_id == "knee_brace_failure":
-        _draw_knee_brace(frame, visual_confidence)
-    elif risk_id == "trunk_rotation_snap":
-        _draw_trunk_rotation(frame, visual_confidence)
-    elif risk_id == "hip_shoulder_mismatch":
-        _draw_hip_shoulder(frame, visual_confidence)
-    elif risk_id == "lateral_trunk_lean":
-        _draw_lateral_trunk(frame, visual_confidence)
-    else:
-        h, w = frame.shape[:2]
-        cx, cy = w // 2, h // 2
-        cv2.arrowedLine(
-            frame,
-            (cx, cy + 40),
-            (cx, cy - 40),
-            DEFAULT_COLOR,
-            THICKNESS,
-            tipLength=0.25,
-        )
+    {
+        "front_foot_braking_shock": _draw_ffbs,
+        "knee_brace_failure": _draw_knee_brace,
+        "hip_shoulder_mismatch": _draw_hip_shoulder,
+        "trunk_rotation_snap": _draw_trunk_rotation,
+        "lateral_trunk_lean": _draw_lateral_trunk,
+    }.get(risk_id, lambda *_: None)(frame, visual_confidence)
 
     out_dir = os.path.join(VISUAL_DIR, run_id)
     os.makedirs(out_dir, exist_ok=True)
-
     fname = f"{risk_id}_{frame_idx}.png"
     cv2.imwrite(os.path.join(out_dir, fname), frame)
 
