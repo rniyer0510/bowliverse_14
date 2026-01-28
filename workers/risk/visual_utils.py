@@ -243,119 +243,124 @@ def _draw_knee_brace(frame, conf, anchor_x: Optional[int] = None):
 
 
 def _draw_trunk_rotation(frame, conf):
-    h, w = frame.shape[:2]
-    cx, subject_h = _estimate_subject_geometry(frame)
-
-    color, t = _risk_style(conf, subject_h)
-
-    y = int(h * TORSO_Y_FRAC)
-    span = int(subject_h * 0.40)
-
-    cv2.line(frame, (cx - span, y), (cx + span, y), color, t, cv2.LINE_AA)
-    cv2.line(frame, (cx + span, y), (cx - span, y), color, t, cv2.LINE_AA)
-
-
-def _draw_hip_shoulder(frame, conf):
     """
-    Hip–Shoulder Separation / Sequencing cue (FRAME ONLY — NO POSE)
-
-    Visual language (borrows the "FFBS/Knee Brace discipline"):
-    - One primary mark only: a slanted "separation axis" arrow through torso.
-    - Magnitude encoded via arrow length (LOW < MEDIUM < HIGH).
-    - Timing encoded via a subtle vertical shift (HIGH shifts slightly upward = early shoulder open cue).
-    - Sequencing quality (jerk) encoded via a subtle "double-stroke" + small chevrons for HIGH only.
-    - Color stays driven by _risk_style(conf, scale). (No special-casing.)
+    Trunk Rotation Snap
+    Visual: short, thick horizontal arrow at mid-upper trunk,
+    indicating abrupt rotational snap (angular acceleration),
+    not lateral lean or directional movement.
     """
     h, w = frame.shape[:2]
 
     cx, subject_h = _estimate_subject_geometry(frame)
     color, base_t = _risk_style(conf, subject_h)
 
-    # -------------------------
-    # Anchor band (torso)
-    # -------------------------
-    # Keep this near the torso band, not the ground.
-    # Slight upward shift on HIGH (proxy for "early shoulder open / timing fault").
-    torso_y = int(h * TORSO_Y_FRAC)
-    if conf == "HIGH":
-        torso_y = max(0, torso_y - int(subject_h * 0.04))  # subtle, not dramatic
-    elif conf == "LOW":
-        torso_y = min(h - 1, torso_y + int(subject_h * 0.01))  # tiny stabilizing shift
+    # ── SUBJECT-RELATIVE torso anchor (critical fix) ───────────────────
+    # Anchor slightly ABOVE hip-shoulder midpoint → true trunk / ribcage
+    subject_top = int(h * 0.5) - subject_h // 2
+    torso_y = int(subject_top + subject_h * 0.40)   # 0.38–0.42 sweet spot
 
-    # -------------------------
-    # Magnitude (arrow length)
-    # -------------------------
-    # Keep it local (technique cue), not FFBS-big.
-    # Knee brace taught us: avoid cartoonish spans.
+    torso_y = max(0, min(h - 1, torso_y))
+
+    # ── SNAP length (short, impulsive) ──────────────────────────────────
     if conf == "HIGH":
-        L = int(subject_h * 0.40)
+        span = int(subject_h * 0.32)
     elif conf == "MEDIUM":
-        L = int(subject_h * 0.34)
+        span = int(subject_h * 0.26)
     else:
-        L = int(subject_h * 0.28)
+        span = int(subject_h * 0.22)
 
-    # Slant: hips vs shoulders differential reads best as an up-and-across axis.
-    # (Not vertical. Not symmetric horizontal.)
-    dx = int(L * 0.78)
-    dy = int(L * 0.28)  # vertical component
+    x1 = max(0, cx - span // 2)
+    x2 = min(w - 1, cx + span // 2)
 
-    # Define endpoints (hip lower, shoulder higher)
-    hip_y = min(h - 1, torso_y + dy)
-    sh_y  = max(0,     torso_y - dy)
-    x1 = max(0, min(w - 1, cx - dx // 2))
-    x2 = max(0, min(w - 1, cx + dx // 2))
+    thickness = max(5, int(base_t * 2.0))
 
-    # -------------------------
-    # Thickness (load emphasis)
-    # -------------------------
-    # Forceful but not impact-level (FFBS).
-    thickness = max(4, int(base_t * 1.8))
-
-    # Main separation arrow (hip -> shoulder)
+    # Main snap arrow
     cv2.arrowedLine(
         frame,
-        (x1, hip_y),
-        (x2, sh_y),
+        (x1, torso_y),
+        (x2, torso_y),
         color,
         thickness,
-        tipLength=0.14,  # compact head (knee brace style)
+        tipLength=0.12,
         line_type=cv2.LINE_AA,
     )
 
-    # Small anatomical anchors (subtle, not blobs)
-    r = max(3, int(subject_h * 0.018))
-    cv2.circle(frame, (x1, hip_y), r, color, -1)
-    cv2.circle(frame, (x2, sh_y), r, color, -1)
+    # Counter-stroke → rotational cue (subtle)
+    cv2.line(
+        frame,
+        (x2 - int(span * 0.15), torso_y),
+        (x1 + int(span * 0.15), torso_y),
+        color,
+        max(2, thickness // 3),
+        cv2.LINE_AA,
+    )
 
-    # -------------------------
-    # Sequencing quality (jerk) — HIGH only
-    # -------------------------
+    # Central pivot marker
+    pivot_r = max(3, int(subject_h * 0.018))
+    cv2.circle(
+        frame,
+        (cx, torso_y),
+        pivot_r,
+        color,
+        -1,
+    )
+
+
+def _draw_hip_shoulder(frame, conf):
+    """
+    Hip–Shoulder Mismatch
+    Visual: diagonal torsional cue spanning hip → shoulder region,
+    indicating poor sequencing / mismatch (not pure rotation, not impact).
+    """
+    h, w = frame.shape[:2]
+    cx, subject_h = _estimate_subject_geometry(frame)
+
+    color, base_t = _risk_style(conf, subject_h)
+
+    # ── Anchor in torso band (balanced, not hip-heavy) ──────────────────
+    torso_y = int(h * TORSO_Y_FRAC)
+
+    # Slight confidence-based vertical nuance (purely visual)
     if conf == "HIGH":
-        # 1) A subtle parallel "double-stroke" to imply abrupt snap (without turning everything red)
-        off = max(2, thickness // 3)
-        cv2.line(
-            frame,
-            (max(0, x1), min(h - 1, hip_y + off)),
-            (min(w - 1, x2), max(0, sh_y + off)),
-            color,
-            max(2, thickness // 2),
-            cv2.LINE_AA,
-        )
+        torso_y -= int(subject_h * 0.03)
+    elif conf == "LOW":
+        torso_y += int(subject_h * 0.01)
 
-        # 2) Tiny chevrons along the shaft (reads as "snap/jerk" on mobile)
-        # Place them around the middle third.
-        mx1 = int(0.60 * x1 + 0.40 * x2)
-        my1 = int(0.60 * hip_y + 0.40 * sh_y)
-        mx2 = int(0.40 * x1 + 0.60 * x2)
-        my2 = int(0.40 * hip_y + 0.60 * sh_y)
+    # ── Length: technique cue, not force cue ────────────────────────────
+    if conf == "HIGH":
+        L = int(subject_h * 0.38)
+    elif conf == "MEDIUM":
+        L = int(subject_h * 0.32)
+    else:
+        L = int(subject_h * 0.26)
 
-        che = max(4, int(subject_h * 0.025))
-        ct = max(2, thickness // 3)
-        # Two small V's oriented roughly perpendicular to the axis
-        cv2.line(frame, (mx1, my1), (mx1 - che, my1 + che // 2), color, ct, cv2.LINE_AA)
-        cv2.line(frame, (mx1, my1), (mx1 + che, my1 - che // 2), color, ct, cv2.LINE_AA)
-        cv2.line(frame, (mx2, my2), (mx2 - che, my2 + che // 2), color, ct, cv2.LINE_AA)
-        cv2.line(frame, (mx2, my2), (mx2 + che, my2 - che // 2), color, ct, cv2.LINE_AA)
+    # Diagonal span (clear hip ↔ shoulder separation)
+    dx = int(L * 0.75)
+    dy = int(L * 0.35)   # ↑ slightly more vertical than before
+
+    # Hip (lower) → Shoulder (upper)
+    x1 = max(0, min(w - 1, cx - dx // 2))
+    x2 = max(0, min(w - 1, cx + dx // 2))
+    y1 = min(h - 1, torso_y + dy)
+    y2 = max(0, torso_y - dy)
+
+    thickness = max(4, int(base_t * 1.8))
+
+    # Main torsional arrow
+    cv2.arrowedLine(
+        frame,
+        (x1, y1),
+        (x2, y2),
+        color,
+        thickness,
+        tipLength=0.12,   # smaller head → informational, not forceful
+        line_type=cv2.LINE_AA,
+    )
+
+    # Subtle anatomical anchors (avoid blobs)
+    r = max(3, int(subject_h * 0.018))
+    cv2.circle(frame, (x1, y1), r, color, -1)
+    cv2.circle(frame, (x2, y2), r, color, -1)
 
 
 def _draw_lateral_trunk(frame, conf):
