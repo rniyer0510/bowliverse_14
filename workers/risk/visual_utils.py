@@ -256,16 +256,106 @@ def _draw_trunk_rotation(frame, conf):
 
 
 def _draw_hip_shoulder(frame, conf):
+    """
+    Hip–Shoulder Separation / Sequencing cue (FRAME ONLY — NO POSE)
+
+    Visual language (borrows the "FFBS/Knee Brace discipline"):
+    - One primary mark only: a slanted "separation axis" arrow through torso.
+    - Magnitude encoded via arrow length (LOW < MEDIUM < HIGH).
+    - Timing encoded via a subtle vertical shift (HIGH shifts slightly upward = early shoulder open cue).
+    - Sequencing quality (jerk) encoded via a subtle "double-stroke" + small chevrons for HIGH only.
+    - Color stays driven by _risk_style(conf, scale). (No special-casing.)
+    """
     h, w = frame.shape[:2]
+
     cx, subject_h = _estimate_subject_geometry(frame)
+    color, base_t = _risk_style(conf, subject_h)
 
-    color, t = _risk_style(conf, subject_h)
+    # -------------------------
+    # Anchor band (torso)
+    # -------------------------
+    # Keep this near the torso band, not the ground.
+    # Slight upward shift on HIGH (proxy for "early shoulder open / timing fault").
+    torso_y = int(h * TORSO_Y_FRAC)
+    if conf == "HIGH":
+        torso_y = max(0, torso_y - int(subject_h * 0.04))  # subtle, not dramatic
+    elif conf == "LOW":
+        torso_y = min(h - 1, torso_y + int(subject_h * 0.01))  # tiny stabilizing shift
 
-    y1 = int(h * 0.60)
-    y2 = int(h * 0.45)
-    offset = int(subject_h * 0.22)
+    # -------------------------
+    # Magnitude (arrow length)
+    # -------------------------
+    # Keep it local (technique cue), not FFBS-big.
+    # Knee brace taught us: avoid cartoonish spans.
+    if conf == "HIGH":
+        L = int(subject_h * 0.40)
+    elif conf == "MEDIUM":
+        L = int(subject_h * 0.34)
+    else:
+        L = int(subject_h * 0.28)
 
-    cv2.line(frame, (cx - offset, y1), (cx + offset, y2), color, t, cv2.LINE_AA)
+    # Slant: hips vs shoulders differential reads best as an up-and-across axis.
+    # (Not vertical. Not symmetric horizontal.)
+    dx = int(L * 0.78)
+    dy = int(L * 0.28)  # vertical component
+
+    # Define endpoints (hip lower, shoulder higher)
+    hip_y = min(h - 1, torso_y + dy)
+    sh_y  = max(0,     torso_y - dy)
+    x1 = max(0, min(w - 1, cx - dx // 2))
+    x2 = max(0, min(w - 1, cx + dx // 2))
+
+    # -------------------------
+    # Thickness (load emphasis)
+    # -------------------------
+    # Forceful but not impact-level (FFBS).
+    thickness = max(4, int(base_t * 1.8))
+
+    # Main separation arrow (hip -> shoulder)
+    cv2.arrowedLine(
+        frame,
+        (x1, hip_y),
+        (x2, sh_y),
+        color,
+        thickness,
+        tipLength=0.14,  # compact head (knee brace style)
+        line_type=cv2.LINE_AA,
+    )
+
+    # Small anatomical anchors (subtle, not blobs)
+    r = max(3, int(subject_h * 0.018))
+    cv2.circle(frame, (x1, hip_y), r, color, -1)
+    cv2.circle(frame, (x2, sh_y), r, color, -1)
+
+    # -------------------------
+    # Sequencing quality (jerk) — HIGH only
+    # -------------------------
+    if conf == "HIGH":
+        # 1) A subtle parallel "double-stroke" to imply abrupt snap (without turning everything red)
+        off = max(2, thickness // 3)
+        cv2.line(
+            frame,
+            (max(0, x1), min(h - 1, hip_y + off)),
+            (min(w - 1, x2), max(0, sh_y + off)),
+            color,
+            max(2, thickness // 2),
+            cv2.LINE_AA,
+        )
+
+        # 2) Tiny chevrons along the shaft (reads as "snap/jerk" on mobile)
+        # Place them around the middle third.
+        mx1 = int(0.60 * x1 + 0.40 * x2)
+        my1 = int(0.60 * hip_y + 0.40 * sh_y)
+        mx2 = int(0.40 * x1 + 0.60 * x2)
+        my2 = int(0.40 * hip_y + 0.60 * sh_y)
+
+        che = max(4, int(subject_h * 0.025))
+        ct = max(2, thickness // 3)
+        # Two small V's oriented roughly perpendicular to the axis
+        cv2.line(frame, (mx1, my1), (mx1 - che, my1 + che // 2), color, ct, cv2.LINE_AA)
+        cv2.line(frame, (mx1, my1), (mx1 + che, my1 - che // 2), color, ct, cv2.LINE_AA)
+        cv2.line(frame, (mx2, my2), (mx2 - che, my2 + che // 2), color, ct, cv2.LINE_AA)
+        cv2.line(frame, (mx2, my2), (mx2 + che, my2 - che // 2), color, ct, cv2.LINE_AA)
 
 
 def _draw_lateral_trunk(frame, conf):
