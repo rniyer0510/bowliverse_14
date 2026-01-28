@@ -15,14 +15,15 @@ PUBLIC_BASE_URL = os.environ.get(
     "http://127.0.0.1:8000",
 )
 
+DEFAULT_COLOR = (0, 0, 255)
+
 # ---------------------------------------------------------------------
-# Vertical anchors (fractions of frame height)
+# Semantic vertical anchors (fractions of frame height)
 # ---------------------------------------------------------------------
 
-FFBS_BASE_Y_FRAC   = 0.69
-KNEE_BASE_Y_FRAC   = 0.70
-TORSO_Y_FRAC       = 0.52
-UPPER_TORSO_FRAC   = 0.45
+FFBS_BASE_Y_FRAC = 0.69
+KNEE_BASE_Y_FRAC = 0.70
+TORSO_Y_FRAC = 0.52
 
 # ---------------------------------------------------------------------
 # Helpers
@@ -48,7 +49,7 @@ def _risk_style(conf: str, scale: int):
 
 
 # ---------------------------------------------------------------------
-# Subject geometry (FRAME ONLY)
+# Subject geometry estimation (FRAME ONLY — NO POSE)
 # ---------------------------------------------------------------------
 
 _HOG = None
@@ -63,155 +64,301 @@ def _get_hog():
 
 
 def _estimate_subject_geometry(frame) -> Tuple[int, int]:
+    """
+    Returns:
+        (cx, subject_height_px)
+    """
     h, w = frame.shape[:2]
-    min_x, max_x = int(w * 0.15), int(w * 0.85)
+    min_x = int(w * 0.15)
+    max_x = int(w * 0.85)
 
     try:
         hog = _get_hog()
         scale_down = 640 / max(w, 1)
-        small = cv2.resize(frame, (int(w * scale_down), int(h * scale_down))) if scale_down < 1 else frame
 
-        rects, _ = hog.detectMultiScale(small, winStride=(8,8), padding=(8,8), scale=1.05)
-        if len(rects):
-            x, y, rw, rh = max(rects, key=lambda r: r[2]*r[3])
-            cx = int((x + rw//2) / max(scale_down, 1e-6))
-            return max(min_x, min(max_x, cx)), max(1, int(rh / max(scale_down,1e-6)))
+        if scale_down < 1.0:
+            small = cv2.resize(
+                frame,
+                (int(w * scale_down), int(h * scale_down))
+            )
+        else:
+            small = frame
+
+        rects, _ = hog.detectMultiScale(
+            small,
+            winStride=(8, 8),
+            padding=(8, 8),
+            scale=1.05
+        )
+
+        if rects is not None and len(rects) > 0:
+            x, y, rw, rh = max(rects, key=lambda r: r[2] * r[3])
+            cx_small = x + rw // 2
+
+            cx = int(cx_small / max(scale_down, 1e-6))
+            subject_h = int(rh / max(scale_down, 1e-6))
+
+            return (
+                max(min_x, min(max_x, cx)),
+                max(1, subject_h),
+            )
     except Exception:
         pass
 
-    return int(w * 0.5), int(h * 0.45)
+    # Fallback
+    return int(w * 0.50), int(h * 0.45)
 
 
 # ---------------------------------------------------------------------
-# Horizontal refinements
+# Horizontal refinement for FRONT FOOT (not centroid)
 # ---------------------------------------------------------------------
 
-def _refine_front_foot(frame, cx):
-    h, _ = frame.shape[:2]
-    roi = frame[int(h*0.62):int(h*0.80), :]
-    gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
-    _, mask = cv2.threshold(gray, 40, 255, cv2.THRESH_BINARY)
-    xs = np.where(mask > 0)[1]
-    if len(xs) < 200:
-        return cx
+def _refine_x_using_ground_mass(frame, cx):
+    """
+    Bias x toward the LEADING (front) foot using foreground mass
+    in the ground-contact band.
+    """
+    h, w = frame.shape[:2]
 
-    p90, p10 = np.percentile(xs, [90, 10])
-    lead = p90 if abs(p90-cx) > abs(p10-cx) else p10
-    return int(0.75*cx + 0.25*lead)
+    y1 = int(h * 0.62)
+    y2 = int(h * 0.80)
 
-
-def _refine_mid_body(frame, cx, y_frac):
-    h, _ = frame.shape[:2]
-    y1 = int(h * (y_frac - 0.05))
-    y2 = int(h * (y_frac + 0.05))
     roi = frame[y1:y2, :]
     gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
     _, mask = cv2.threshold(gray, 40, 255, cv2.THRESH_BINARY)
+
     xs = np.where(mask > 0)[1]
     if len(xs) < 200:
         return cx
-    return int(0.8*cx + 0.2*int(xs.mean()))
+
+    # Leading edge, not centroid
+    p90 = int(np.percentile(xs, 90))
+    p10 = int(np.percentile(xs, 10))
+
+    # Pick forward-most side relative to body center
+    if abs(p90 - cx) > abs(p10 - cx):
+        lead_x = p90
+    else:
+        lead_x = p10
+
+    # Gentle bias toward front foot
+    return int(0.75 * cx + 0.25 * lead_x)
 
 
 # ---------------------------------------------------------------------
-# Risk visuals
+# Risk visuals (FRAME ONLY — NO POSE)
 # ---------------------------------------------------------------------
 
 def _draw_ffbs(frame, conf):
-    h, _ = frame.shape[:2]
+    """
+    Front Foot Braking Shock
+    """
+    h, w = frame.shape[:2]
+
     cx, subject_h = _estimate_subject_geometry(frame)
-    cx = _refine_front_foot(frame, cx)
+    cx = _refine_x_using_ground_mass(frame, cx)
 
     color, t = _risk_style(conf, subject_h)
+
     base_y = int(h * FFBS_BASE_Y_FRAC)
     arrow_len = int(subject_h * 0.45)
+    end_y = max(0, base_y - arrow_len)
 
-    cv2.line(frame, (cx, base_y), (cx, base_y-arrow_len), color, t, cv2.LINE_AA)
-    cv2.circle(frame, (cx, base_y), max(3,int(subject_h*0.05)), color, -1)
+    cv2.line(frame, (cx, base_y), (cx, end_y), color, t, cv2.LINE_AA)
+
+    head = max(4, int(subject_h * 0.05))
+    cv2.line(frame, (cx, end_y), (cx - head, end_y + head), color, t, cv2.LINE_AA)
+    cv2.line(frame, (cx, end_y), (cx + head, end_y + head), color, t, cv2.LINE_AA)
+
+    cv2.circle(
+        frame,
+        (cx, base_y),
+        max(3, int(subject_h * 0.05)),
+        color,
+        -1,
+    )
 
 
-def _draw_knee_brace(frame, conf):
-    h, _ = frame.shape[:2]
+def _draw_knee_brace(frame, conf, anchor_x: Optional[int] = None):
+    """
+    Knee Brace Failure
+    Visual: thick downward arrow crossing the knee joint,
+    indicating front knee yielding / failing to brace under load.
+    """
+    h, w = frame.shape[:2]
+
+    # Use same geometry logic as rest of visual_utils
     cx, subject_h = _estimate_subject_geometry(frame)
-    cx = _refine_front_foot(frame, cx)
+    cx = _refine_x_using_ground_mass(frame, cx)
 
-    color, t = _risk_style(conf, subject_h)
-    knee_y = int(h * KNEE_BASE_Y_FRAC)
+    scale = subject_h
+    color, base_t = _risk_style(conf, scale)
 
-    cv2.line(frame, (cx, knee_y-int(subject_h*0.1)), (cx, knee_y+int(subject_h*0.15)), color, t, cv2.LINE_AA)
-    cv2.circle(frame, (cx, knee_y), max(3,int(subject_h*0.045)), color, -1)
+    # Knee joint anchor (stable for your footage)
+    KNEE_FRAC = 0.615
+    knee_y = int(h * KNEE_FRAC)
 
+    # Arrow length scales with bowler size
+    arrow_len = int(scale * 0.45)
 
-def _draw_hip_shoulder(frame, conf):
-    h, _ = frame.shape[:2]
-    cx, subject_h = _estimate_subject_geometry(frame)
-    cx = _refine_mid_body(frame, cx, TORSO_Y_FRAC)
+    # Arrow crosses the joint
+    start_y = max(0, knee_y - int(arrow_len * 0.40))
+    end_y   = min(h - 1, knee_y + int(arrow_len * 0.60))
 
-    color, t = _risk_style(conf, subject_h)
-    y1, y2 = int(h*0.60), int(h*0.45)
-    offset = int(subject_h*0.22)
+    thickness = max(6, int(base_t * 2.3))
 
-    cv2.line(frame, (cx-offset,y1), (cx+offset,y2), color, t, cv2.LINE_AA)
+    cv2.arrowedLine(
+        frame,
+        (cx, start_y),
+        (cx, end_y),
+        color,
+        thickness,
+        tipLength=0.16,          # ↓ smaller, force-like
+        line_type=cv2.LINE_AA,
+    )
+
+    # Small anatomical knee hinge
+    joint_radius = max(4, int(scale * 0.035))
+    cv2.circle(
+        frame,
+        (cx, knee_y),
+        joint_radius,
+        color,
+        -1,
+    )
+
+    if conf == "HIGH":
+        rad = int(joint_radius * 1.4)
+        for angle in (-35, 35):
+            dx = int(rad * np.cos(np.deg2rad(angle)))
+            dy = int(rad * np.sin(np.deg2rad(angle)))
+            cv2.line(
+                frame,
+                (cx, knee_y),
+                (cx + dx, knee_y + dy),
+                color,
+                max(2, thickness // 3),
+                cv2.LINE_AA,
+            )
 
 
 def _draw_trunk_rotation(frame, conf):
-    h, _ = frame.shape[:2]
+    h, w = frame.shape[:2]
     cx, subject_h = _estimate_subject_geometry(frame)
-    cx = _refine_mid_body(frame, cx, TORSO_Y_FRAC)
 
     color, t = _risk_style(conf, subject_h)
-    span = int(subject_h*0.4)
-    y = int(h * TORSO_Y_FRAC)
 
-    cv2.line(frame, (cx-span,y), (cx+span,y), color, t, cv2.LINE_AA)
-    cv2.line(frame, (cx+span,y), (cx-span,y), color, t, cv2.LINE_AA)
+    y = int(h * TORSO_Y_FRAC)
+    span = int(subject_h * 0.40)
+
+    cv2.line(frame, (cx - span, y), (cx + span, y), color, t, cv2.LINE_AA)
+    cv2.line(frame, (cx + span, y), (cx - span, y), color, t, cv2.LINE_AA)
+
+
+def _draw_hip_shoulder(frame, conf):
+    h, w = frame.shape[:2]
+    cx, subject_h = _estimate_subject_geometry(frame)
+
+    color, t = _risk_style(conf, subject_h)
+
+    y1 = int(h * 0.60)
+    y2 = int(h * 0.45)
+    offset = int(subject_h * 0.22)
+
+    cv2.line(frame, (cx - offset, y1), (cx + offset, y2), color, t, cv2.LINE_AA)
 
 
 def _draw_lateral_trunk(frame, conf):
-    h, _ = frame.shape[:2]
+    """
+    Lateral Trunk Lean
+    Visual: short diagonal arrow indicating sideways collapse of torso mass.
+    """
+    h, w = frame.shape[:2]
+
     cx, subject_h = _estimate_subject_geometry(frame)
-    cx = _refine_mid_body(frame, cx, UPPER_TORSO_FRAC)
+    color, base_t = _risk_style(conf, subject_h)
 
-    color, t = _risk_style(conf, subject_h)
-    span = int(subject_h*0.45)
-    y = int(h * UPPER_TORSO_FRAC)
+    # Torso anchor (same semantic level as other torso visuals)
+    y = int(h * TORSO_Y_FRAC)
 
-    cv2.line(frame, (cx-span,y), (cx+span,y), color, t, cv2.LINE_AA)
-    cv2.line(frame, (cx+span,y), (cx-span,y), color, t, cv2.LINE_AA)
+    # ── Arrow sizing (learned from knee brace) ──────────────────────────
+    # Must be local, not body-dominant
+    arrow_len = int(subject_h * 0.30)   # shorter than FFBS, similar to knee brace
+
+    # Slight diagonal downward lean (COM collapse)
+    dx = int(arrow_len * 0.70)
+    dy = int(arrow_len * 0.35)
+
+    # Thickness communicates load, not impact
+    thickness = max(5, int(base_t * 1.8))
+
+    start_pt = (cx, y)
+    end_pt   = (cx + dx, y + dy)
+
+    cv2.arrowedLine(
+        frame,
+        start_pt,
+        end_pt,
+        color,
+        thickness,
+        tipLength=0.14,          # small head, consistent with knee brace
+        line_type=cv2.LINE_AA,
+    )
+
+    # Optional HIGH confidence accent (subtle)
+    if conf == "HIGH":
+        accent_len = int(arrow_len * 0.35)
+        cv2.line(
+            frame,
+            (cx - accent_len, y - accent_len // 2),
+            (cx + accent_len, y + accent_len // 2),
+            color,
+            max(2, thickness // 3),
+            cv2.LINE_AA,
+        )
 
 
 # ---------------------------------------------------------------------
-# Renderer
+# Core visual renderer
 # ---------------------------------------------------------------------
 
 def draw_and_save_visual(
-    *, video_path: str, frame_idx: int, risk_id: str,
-    pose_frames=None, visual_confidence: str = "LOW", run_id: Optional[str] = None
+    *,
+    video_path: str,
+    frame_idx: int,
+    risk_id: str,
+    pose_frames=None,  # intentionally ignored
+    visual_confidence: str = "LOW",
+    run_id: Optional[str] = None,
 ):
     if not run_id:
-        raise ValueError("run_id required")
+        raise ValueError("run_id is required for visual generation")
 
     frame_idx = _safe_int(frame_idx)
-    if frame_idx is None or not os.path.exists(video_path):
+    if frame_idx is None or not video_path or not os.path.exists(video_path):
         return None
 
     cap = cv2.VideoCapture(video_path)
     cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
     ok, frame = cap.read()
     cap.release()
-    if not ok:
+    if not ok or frame is None:
         return None
 
-    {
-        "front_foot_braking_shock": _draw_ffbs,
-        "knee_brace_failure": _draw_knee_brace,
-        "hip_shoulder_mismatch": _draw_hip_shoulder,
-        "trunk_rotation_snap": _draw_trunk_rotation,
-        "lateral_trunk_lean": _draw_lateral_trunk,
-    }.get(risk_id, lambda *_: None)(frame, visual_confidence)
+    if risk_id == "front_foot_braking_shock":
+        _draw_ffbs(frame, visual_confidence)
+    elif risk_id == "knee_brace_failure":
+        _draw_knee_brace(frame, visual_confidence)
+    elif risk_id == "trunk_rotation_snap":
+        _draw_trunk_rotation(frame, visual_confidence)
+    elif risk_id == "hip_shoulder_mismatch":
+        _draw_hip_shoulder(frame, visual_confidence)
+    elif risk_id == "lateral_trunk_lean":
+        _draw_lateral_trunk(frame, visual_confidence)
 
     out_dir = os.path.join(VISUAL_DIR, run_id)
     os.makedirs(out_dir, exist_ok=True)
+
     fname = f"{risk_id}_{frame_idx}.png"
     cv2.imwrite(os.path.join(out_dir, fname), frame)
 
