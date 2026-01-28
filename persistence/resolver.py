@@ -11,7 +11,7 @@ def resolve_account(db, actor: dict):
     mkdir -p semantics for Account
     Reuse if exists, create if missing.
     """
-    role = actor.get("role", "PLAYER").upper()
+    role = actor.get("role", "player").lower()
     name = actor.get("account_name", "Default")
 
     account = (
@@ -44,10 +44,12 @@ def resolve_player(db, account: Account, actor: dict):
         * else create new (subject to limits)
     """
 
+    role = account.role.lower()
+
     # ======================================================
     # PLAYER → self
     # ======================================================
-    if account.role == "PLAYER":
+    if role == "player":
         link = (
             db.query(AccountPlayerLink)
             .filter_by(
@@ -62,7 +64,6 @@ def resolve_player(db, account: Account, actor: dict):
         player = Player(
             primary_owner_account_id=account.account_id,
             created_by_account_id=account.account_id,
-            name=actor.get("player_name"),
         )
         db.add(player)
         db.flush()
@@ -72,6 +73,7 @@ def resolve_player(db, account: Account, actor: dict):
                 account_id=account.account_id,
                 player_id=player.player_id,
                 link_type="self",
+                player_name=actor.get("player_name"),
             )
         )
 
@@ -95,24 +97,19 @@ def resolve_player(db, account: Account, actor: dict):
         )
 
     # 2️⃣ Reuse existing linked player by name (mkdir -p)
-    existing = (
-        db.query(Player)
-        .join(
-            AccountPlayerLink,
-            Player.player_id == AccountPlayerLink.player_id,
-        )
-        .filter(
-            AccountPlayerLink.account_id == account.account_id,
-            Player.name == player_name,
+    existing_link = (
+        db.query(AccountPlayerLink)
+        .filter_by(
+            account_id=account.account_id,
+            player_name=player_name,
         )
         .first()
     )
-
-    if existing:
-        return existing.player_id
+    if existing_link:
+        return existing_link.player_id
 
     # 3️⃣ Enforce parent limit BEFORE creation
-    if account.role == "PARENT":
+    if role == "parent":
         count = (
             db.query(AccountPlayerLink)
             .filter_by(
@@ -125,12 +122,11 @@ def resolve_player(db, account: Account, actor: dict):
             raise ValueError("Parent cannot have more than 3 players")
 
     # 4️⃣ Create new player + link
-    link_type = "child" if account.role == "PARENT" else "trainee"
+    link_type = "child" if role == "parent" else "trainee"
 
     player = Player(
         primary_owner_account_id=account.account_id,
         created_by_account_id=account.account_id,
-        name=player_name,
     )
     db.add(player)
     db.flush()
@@ -140,6 +136,7 @@ def resolve_player(db, account: Account, actor: dict):
             account_id=account.account_id,
             player_id=player.player_id,
             link_type=link_type,
+            player_name=player_name,
         )
     )
 

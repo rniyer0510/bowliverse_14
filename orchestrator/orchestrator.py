@@ -1,7 +1,8 @@
-from fastapi import FastAPI, UploadFile, File, Form, Request
+from fastapi import FastAPI, UploadFile, File, Form, Request, HTTPException
 from fastapi.staticfiles import StaticFiles
 import os
-import uuid  # ✅ ADDED
+import uuid
+import json
 
 from app.common.logger import get_logger
 from app.io.loader import load_video
@@ -62,6 +63,7 @@ def analyze(
     file: UploadFile = File(...),
     hand: str = Form(...),
     bowler_type: str = Form(None),  # retained for backward compatibility
+    actor: str = Form(None),        # actor JSON string
 ):
     """
     ActionLab V14 – Orchestrator
@@ -72,6 +74,31 @@ def analyze(
     # ✅ UNIQUE ANALYSIS RUN ID (PER REQUEST)
     # ------------------------------------------------------------
     analysis_run_id = f"analysis_{uuid.uuid4().hex[:12]}"
+
+    # ------------------------------------------------------------
+    # ✅ ACTOR (STRICT PARSING — NO SILENT FALLBACK)
+    # ------------------------------------------------------------
+    actor_obj = {}
+
+    if actor is not None:
+        try:
+            parsed = json.loads(actor)
+        except Exception as e:
+            logger.error(f"[actor] invalid JSON: {actor}")
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid actor JSON"
+            )
+
+        if not isinstance(parsed, dict):
+            logger.error(f"[actor] must be a JSON object: {parsed}")
+            raise HTTPException(
+                status_code=400,
+                detail="actor must be a JSON object"
+            )
+
+        actor_obj = parsed
+        logger.info(f"[actor] parsed successfully: {actor_obj}")
 
     # ------------------------------------------------------------
     # Load video + pose
@@ -102,7 +129,7 @@ def analyze(
         foot_events = detect_ffc_bfc(
             pose_frames=pose_frames,
             hand=hand,
-            release_frame=release_frame,   # ✅ REQUIRED FIX
+            release_frame=release_frame,
             uah_frame=uah_frame,
             fps=fps_val,
         )
@@ -132,7 +159,7 @@ def analyze(
         video=video,
         events=events,
         action=action,
-        run_id=analysis_run_id,   # ✅ FIXED
+        run_id=analysis_run_id,
     )
 
     # ------------------------------------------------------------
@@ -195,7 +222,7 @@ def analyze(
     }
 
     # ------------------------------------------------------------
-    # Persistence (best-effort)
+    # Persistence (best-effort, actor-aware)
     # ------------------------------------------------------------
     try:
         write_analysis(
@@ -203,9 +230,15 @@ def analyze(
             file_path=video.get("path"),
             hand=hand,
             bowler_type=bowler_type,
+            actor=actor_obj,
         )
     except Exception as e:
         logger.warning(f"Persistence skipped: {e}")
 
     return result
 
+# ------------------------------------------------------------
+# 📖 Read-only persistence APIs (Phase-I)
+# ------------------------------------------------------------
+from app.persistence.read_api import router as persistence_read_router
+app.include_router(persistence_read_router)

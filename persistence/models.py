@@ -107,6 +107,12 @@ class AccountPlayerLink(Base):
 
     link_type: Mapped[str] = mapped_column(String, nullable=False)
 
+    # ✅ ADDED: relationship-level player label
+    player_name: Mapped[Optional[str]] = mapped_column(
+        String,
+        nullable=True,
+    )
+
     created_at: Mapped[datetime] = mapped_column(
         TIMESTAMP(timezone=True),
         default=datetime.utcnow,
@@ -115,7 +121,7 @@ class AccountPlayerLink(Base):
 
     __table_args__ = (
         CheckConstraint(
-            "link_type IN ('owner','self','coach','parent')",
+            "link_type IN ('owner','self','coach','parent','child','trainee')",
             name="ck_account_player_link_type",
         ),
     )
@@ -269,3 +275,4 @@ class AnalysisResultRaw(Base):
     )
 
     result_json: Mapped[dict] = mapped_column(JSONB, nullable=False)
+
