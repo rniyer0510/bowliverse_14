@@ -1,8 +1,11 @@
+import os
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-# IMPORTANT: point to the ActionLab database, not the default postgres DB
-DATABASE_URL = "postgresql://postgres@localhost/actionlab"
+DATABASE_URL = os.getenv(
+    "ACTIONLAB_DB_URL",
+    "postgresql+psycopg2://actionlab@localhost/actionlab"
+)
 
 engine = create_engine(
     DATABASE_URL,
@@ -15,4 +18,3 @@ SessionLocal = sessionmaker(
     autoflush=False,
     autocommit=False,
 )
-

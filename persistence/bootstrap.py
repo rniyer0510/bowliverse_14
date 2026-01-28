@@ -6,5 +6,6 @@ logger = get_logger(__name__)
 
 
 def init_db():
-    logger.info("Creating DB tables if missing")
+    logger.info("Creating ActionLab Phase-I tables (if missing)")
     Base.metadata.create_all(bind=engine)
+
