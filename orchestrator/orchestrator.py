@@ -21,17 +21,19 @@ from app.workers.action.action_classifier import classify_action
 # Risk (v14 – cricket-native, baseball-style mechanics)
 from app.workers.risk.risk_worker import run_risk_worker
 
-# Interpretation (KEYED; no English strings)
+# Interpretation
 from app.interpretation.interpret_risks import interpret_risks
 
-# Basic coaching diagnostics (NON-RISK)
+# Basics
 from app.workers.efficiency.basic_coaching import analyze_basics
 
-# Clinician (YAML-driven explanations)
+# Clinician
 from app.clinician.interpreter import ClinicianInterpreter
 
-# Persistence (best-effort, side-effect only)
+# Persistence
 from app.persistence.writer import write_analysis
+from app.persistence.session import SessionLocal
+from app.persistence.models import Player
 
 
 # ------------------------------------------------------------
@@ -42,16 +44,12 @@ logger = get_logger(__name__)
 clinician_engine = ClinicianInterpreter()
 
 # ------------------------------------------------------------
-# 🔹 Serve visual evidence over HTTP
+# 🔹 Serve visual evidence
 # ------------------------------------------------------------
 VISUALS_DIR = "/tmp/actionlab_frames"
 
 if os.path.isdir(VISUALS_DIR):
-    app.mount(
-        "/visuals",
-        StaticFiles(directory=VISUALS_DIR),
-        name="visuals",
-    )
+    app.mount("/visuals", StaticFiles(directory=VISUALS_DIR), name="visuals")
     logger.info(f"Mounted visual evidence directory: {VISUALS_DIR}")
 else:
     logger.warning(f"Visual evidence directory not found: {VISUALS_DIR}")
@@ -61,44 +59,58 @@ else:
 def analyze(
     request: Request,
     file: UploadFile = File(...),
-    hand: str = Form(...),
-    bowler_type: str = Form(None),  # retained for backward compatibility
-    actor: str = Form(None),        # actor JSON string
+    player_id: str = Form(...),
+    bowler_type: str = Form(None),
+    actor: str = Form(None),
 ):
     """
     ActionLab V14 – Orchestrator
+    Player-centric analysis (handedness resolved from Player profile)
     """
     logger.info("Analyze request received")
 
-    # ------------------------------------------------------------
-    # ✅ UNIQUE ANALYSIS RUN ID (PER REQUEST)
-    # ------------------------------------------------------------
     analysis_run_id = f"analysis_{uuid.uuid4().hex[:12]}"
 
     # ------------------------------------------------------------
-    # ✅ ACTOR (STRICT PARSING — NO SILENT FALLBACK)
+    # Actor (strict)
     # ------------------------------------------------------------
     actor_obj = {}
-
     if actor is not None:
         try:
             parsed = json.loads(actor)
-        except Exception as e:
-            logger.error(f"[actor] invalid JSON: {actor}")
+            if not isinstance(parsed, dict):
+                raise ValueError
+            actor_obj = parsed
+        except Exception:
+            raise HTTPException(status_code=400, detail="Invalid actor JSON")
+
+    # ------------------------------------------------------------
+    # Resolve player + handedness
+    # ------------------------------------------------------------
+    db = SessionLocal()
+    try:
+        player = (
+            db.query(Player)
+            .filter(Player.player_id == player_id)
+            .first()
+        )
+        if not player:
             raise HTTPException(
-                status_code=400,
-                detail="Invalid actor JSON"
+                status_code=404,
+                detail="Player not found"
             )
 
-        if not isinstance(parsed, dict):
-            logger.error(f"[actor] must be a JSON object: {parsed}")
+        if not player.handedness:
             raise HTTPException(
                 status_code=400,
-                detail="actor must be a JSON object"
+                detail="Player handedness not set"
             )
 
-        actor_obj = parsed
-        logger.info(f"[actor] parsed successfully: {actor_obj}")
+        hand = player.handedness.upper()
+        logger.info(f"[context] player={player_id} hand={hand}")
+
+    finally:
+        db.close()
 
     # ------------------------------------------------------------
     # Load video + pose
@@ -120,7 +132,7 @@ def analyze(
     )
 
     # ------------------------------------------------------------
-    # FFC/BFC (STRICTLY anchored off RELEASE)
+    # FFC/BFC
     # ------------------------------------------------------------
     release_frame = (events.get("release") or {}).get("frame")
     uah_frame = (events.get("uah") or {}).get("frame")
@@ -136,13 +148,13 @@ def analyze(
         if foot_events:
             events.update(foot_events)
     else:
-        logger.error("[Orchestrator] Release frame missing — cannot run FFC/BFC")
+        logger.error("Release frame missing — cannot run FFC/BFC")
 
     bfc_frame = (events.get("bfc") or {}).get("frame")
     ffc_frame = (events.get("ffc") or {}).get("frame")
 
     # ------------------------------------------------------------
-    # Action classification
+    # Action
     # ------------------------------------------------------------
     action = classify_action(
         pose_frames=pose_frames,
@@ -152,7 +164,7 @@ def analyze(
     )
 
     # ------------------------------------------------------------
-    # Risk computation (EVENT-DRIVEN VISUALS)
+    # Risks
     # ------------------------------------------------------------
     risks = run_risk_worker(
         pose_frames=pose_frames,
@@ -193,7 +205,7 @@ def analyze(
     )
 
     # ------------------------------------------------------------
-    # Clinician layer
+    # Clinician
     # ------------------------------------------------------------
     clinician = clinician_engine.build(
         elbow=elbow,
@@ -202,11 +214,14 @@ def analyze(
     )
 
     # ------------------------------------------------------------
-    # Assemble response
+    # Response
     # ------------------------------------------------------------
     result = {
         "schema": "actionlab.v14",
-        "input": {"hand": hand},
+        "input": {
+            "player_id": player_id,
+            "hand": hand,
+        },
         "video": {
             "fps": video.get("fps"),
             "total_frames": video.get("total_frames"),
@@ -222,13 +237,12 @@ def analyze(
     }
 
     # ------------------------------------------------------------
-    # Persistence (best-effort, actor-aware)
+    # Persistence (best-effort)
     # ------------------------------------------------------------
     try:
         write_analysis(
             result=result,
             file_path=video.get("path"),
-            hand=hand,
             bowler_type=bowler_type,
             actor=actor_obj,
         )
@@ -237,8 +251,18 @@ def analyze(
 
     return result
 
+
 # ------------------------------------------------------------
-# 📖 Read-only persistence APIs (Phase-I)
+# Read  & Write APIs
+# ------------------------------------------------------------
+# ------------------------------------------------------------
+# Persistence APIs
 # ------------------------------------------------------------
 from app.persistence.read_api import router as persistence_read_router
+from app.persistence.write_api import router as persistence_write_router
+from app.persistence.account_api import router as account_router
+
 app.include_router(persistence_read_router)
+app.include_router(persistence_write_router)
+app.include_router(account_router)
+
