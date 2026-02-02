@@ -39,6 +39,7 @@ def interpret_risks(risks, kinematics=None):
         "trunk_rotation_snap": "lower_back",
         "hip_shoulder_mismatch": "spine",
         "lateral_trunk_lean": "side_body",
+        "foot_line_deviation": "side_body",  # ✅ NEW RISK MAPPED
     }
 
     region_loads = {}
@@ -63,7 +64,6 @@ def interpret_risks(risks, kinematics=None):
     flow = analyze_linear_flow(risks=risks, kinematics=kinematics or {})
     flow_state = (flow.get("flow_state") or "SMOOTH").lower()
 
-    # Confidence is still numeric here; clinician layer controls wording.
     confidence = round(min(1.0, max_strength + 0.2), 2)
 
     return {

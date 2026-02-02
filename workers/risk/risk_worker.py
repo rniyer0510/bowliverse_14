@@ -9,6 +9,7 @@ from app.workers.risk.knee_brace_failure import compute_knee_brace_failure
 from app.workers.risk.trunk_rotation_snap import compute_trunk_rotation_snap
 from app.workers.risk.hip_shoulder_mismatch import compute_hip_shoulder_mismatch
 from app.workers.risk.lateral_trunk_lean import compute_lateral_trunk_lean
+from app.workers.risk.foot_line_deviation import compute_foot_line_deviation
 
 from app.workers.risk.visual_utils import draw_and_save_visual
 
@@ -23,6 +24,7 @@ RISK_CONFIG = {
     "trunk_rotation_snap": {"floor": 0.15},
     "hip_shoulder_mismatch": {"floor": 0.15},
     "lateral_trunk_lean": {"floor": 0.15},
+    "foot_line_deviation": {"floor": 0.15},
 }
 
 # ---------------------------------------------------------------------
@@ -34,13 +36,19 @@ def _f(x: Any, d: float = 0.0) -> float:
     except Exception:
         return d
 
+
 def _emit(obj: Optional[Dict[str, Any]], risk_id: str) -> Dict[str, Any]:
     """
-    Normalize output and enforce floor. No narrative notes here.
+    Normalize output and enforce floor.
     """
     floor = float(RISK_CONFIG[risk_id]["floor"])
+
     if not isinstance(obj, dict):
-        return {"risk_id": risk_id, "signal_strength": floor, "confidence": 0.0}
+        return {
+            "risk_id": risk_id,
+            "signal_strength": floor,
+            "confidence": 0.0,
+        }
 
     out = dict(obj)
     out["risk_id"] = risk_id
@@ -48,8 +56,9 @@ def _emit(obj: Optional[Dict[str, Any]], risk_id: str) -> Dict[str, Any]:
     out["confidence"] = _f(out.get("confidence"), 0.0)
     return out
 
+
 def _event_frame(events: Dict[str, Any], key: str) -> Optional[int]:
-    v = (events.get(key) or {})
+    v = events.get(key) or {}
     f = v.get("frame")
     if isinstance(f, int):
         return f
@@ -58,15 +67,24 @@ def _event_frame(events: Dict[str, Any], key: str) -> Optional[int]:
     except Exception:
         return None
 
-def _pick_visual_anchor_frame(risk_id: str, events: Dict[str, Any]) -> Optional[int]:
+
+# ---------------------------------------------------------------------
+# Visual anchoring (EVENT-DRIVEN, LOCKED)
+# ---------------------------------------------------------------------
+def _pick_visual_anchor_frame(
+    risk_id: str,
+    events: Dict[str, Any],
+) -> Optional[int]:
     """
-    VISUALS ARE EVENT-DRIVEN (LOCKED):
-    - FFBS -> FFC
-    - Knee brace -> FFC
-    - Trunk snap -> UAH (preferred), else Release
-    - Hip-shoulder mismatch -> UAH (preferred), else Release
-    - Lateral trunk lean -> Release (preferred), else FFC
+    VISUAL ANCHORS:
+    - Front Foot Braking Shock -> FFC
+    - Knee Brace Failure       -> FFC
+    - Trunk Rotation Snap      -> UAH (else Release)
+    - Hip–Shoulder Mismatch    -> UAH (else Release)
+    - Lateral Trunk Lean       -> Release (else FFC)
+    - Foot-Line Deviation      -> FFC + 1
     """
+
     ffc = _event_frame(events, "ffc")
     bfc = _event_frame(events, "bfc")
     uah = _event_frame(events, "uah")
@@ -84,13 +102,28 @@ def _pick_visual_anchor_frame(risk_id: str, events: Dict[str, Any]) -> Optional[
     if risk_id == "lateral_trunk_lean":
         return rel if rel is not None else ffc
 
-    # fallback
+    if risk_id == "foot_line_deviation":
+        if ffc is not None:
+            return ffc + 1
+        return rel
+
+    # fallback (should not normally be used)
     return rel or ffc or bfc or uah
 
-def _visual_window_for_anchor(anchor: int, fps: float, pre_s: float = 0.20, post_s: float = 0.20) -> Dict[str, int]:
+
+def _visual_window_for_anchor(
+    anchor: int,
+    fps: float,
+    pre_s: float = 0.20,
+    post_s: float = 0.20,
+) -> Dict[str, int]:
     pre = max(1, int(round(pre_s * max(1.0, fps))))
     post = max(1, int(round(post_s * max(1.0, fps))))
-    return {"start": max(0, anchor - pre), "end": max(0, anchor + post)}
+    return {
+        "start": max(0, anchor - pre),
+        "end": max(0, anchor + post),
+    }
+
 
 def _attach_visual(
     risk: Dict[str, Any],
@@ -99,17 +132,16 @@ def _attach_visual(
     video: Dict[str, Any],
     events: Dict[str, Any],
     run_id: Optional[str],
-    front_leg: Optional[str],
 ) -> Dict[str, Any]:
     """
-    Attach visual evidence using the EVENT frame (not guessed from risk).
+    Attach visual evidence using EVENT-derived anchor.
     """
     if not isinstance(risk, dict):
         return risk
 
     video_path = video.get("path") or video.get("file_path")
     if not video_path:
-        logger.warning("[risk_worker] Missing video path; skipping visual attach.")
+        logger.warning("[risk_worker] Missing video path; skipping visual.")
         return risk
 
     fps = float(video.get("fps") or 25.0)
@@ -117,33 +149,30 @@ def _attach_visual(
 
     anchor = _pick_visual_anchor_frame(rid, events)
     if anchor is None:
-        # If events missing, still return risk (but this should be rare).
-        logger.warning(f"[risk_worker] Missing event anchor for {rid}; skipping visual attach.")
+        logger.warning(f"[risk_worker] No anchor for {rid}; skipping visual.")
         return risk
 
     anchor = max(0, min(int(anchor), len(pose_frames) - 1))
     window = _visual_window_for_anchor(anchor, fps)
 
-    # Severity label for visuals (LOW/MEDIUM/HIGH)
-    s = float(risk.get("signal_strength", 0.0))
-    visual_band = "LOW"
-    if s >= 0.6:
-        visual_band = "HIGH"
-    elif s >= 0.3:
-        visual_band = "MEDIUM"
+    strength = float(risk.get("signal_strength", 0.0))
+    if strength >= 0.6:
+        band = "HIGH"
+    elif strength >= 0.3:
+        band = "MEDIUM"
+    else:
+        band = "LOW"
 
     visual = draw_and_save_visual(
         video_path=video_path,
         frame_idx=anchor,
         risk_id=rid,
         pose_frames=pose_frames,
-        visual_confidence=visual_band,
-        #front_leg=front_leg,
+        visual_confidence=band,
         run_id=run_id,
     )
 
     if visual:
-        # Keep evidence under raw risk for downstream clinician layer to pass through.
         risk["visual"] = visual
         risk["visual_window"] = window
 
@@ -151,7 +180,7 @@ def _attach_visual(
 
 
 # ---------------------------------------------------------------------
-# Main worker (RISKS + EVENT-DRIVEN VISUALS)
+# Main worker
 # ---------------------------------------------------------------------
 def run_risk_worker(
     pose_frames: List[Dict[str, Any]],
@@ -168,31 +197,42 @@ def run_risk_worker(
     uah = _event_frame(events, "uah")
     rel = _event_frame(events, "release")
 
-    # Front leg for overlays (if action tells us). Optional, safe.
-    # If you have a clearer front_leg in your action classifier, wire it here.
-    # Otherwise leave None; visuals still render with safe fallbacks.
-    front_leg = action.get("front_leg")  # "LEFT" or "RIGHT" optionally
-
     raw = [
         _emit(
-            compute_front_foot_braking_shock(pose_frames, ffc, fps, {}, action=action),
+            compute_front_foot_braking_shock(
+                pose_frames, ffc, fps, {}, action=action
+            ),
             "front_foot_braking_shock",
         ),
         _emit(
-            compute_knee_brace_failure(pose_frames, ffc, fps, {}),
+            compute_knee_brace_failure(
+                pose_frames, ffc, fps, {}
+            ),
             "knee_brace_failure",
         ),
         _emit(
-            compute_trunk_rotation_snap(pose_frames, ffc, uah, fps, {}),
+            compute_trunk_rotation_snap(
+                pose_frames, ffc, uah, fps, {}
+            ),
             "trunk_rotation_snap",
         ),
         _emit(
-            compute_hip_shoulder_mismatch(pose_frames, ffc, rel, fps, {}),
+            compute_hip_shoulder_mismatch(
+                pose_frames, ffc, rel, fps, {}
+            ),
             "hip_shoulder_mismatch",
         ),
         _emit(
-            compute_lateral_trunk_lean(pose_frames, bfc, ffc, rel, fps, {}),
+            compute_lateral_trunk_lean(
+                pose_frames, bfc, ffc, rel, fps, {}
+            ),
             "lateral_trunk_lean",
+        ),
+        _emit(
+            compute_foot_line_deviation(
+                pose_frames, bfc, ffc, fps, {}, action=action
+            ),
+            "foot_line_deviation",
         ),
     ]
 
@@ -205,8 +245,8 @@ def run_risk_worker(
                 video=video,
                 events=events,
                 run_id=run_id,
-                front_leg=front_leg,
             )
         )
 
     return out
+

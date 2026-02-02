@@ -19,13 +19,17 @@ from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
+# =====================================================
+# Base
+# =====================================================
+
 class Base(DeclarativeBase):
     pass
 
 
-# -----------------------------
+# =====================================================
 # Identity
-# -----------------------------
+# =====================================================
 
 class Account(Base):
     __tablename__ = "account"
@@ -77,10 +81,32 @@ class Player(Base):
     handedness: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     date_of_birth: Mapped[Optional[Date]] = mapped_column(Date, nullable=True)
 
+    # -------------------------------------------------
+    # Age grouping (coach-controlled, season-based)
+    # -------------------------------------------------
+    age_group: Mapped[str] = mapped_column(
+        String,
+        nullable=False,
+        default="ADULT",
+    )
+
+    season: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=2025,
+    )
+
     created_at: Mapped[datetime] = mapped_column(
         TIMESTAMP(timezone=True),
         default=datetime.utcnow,
         nullable=False,
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "age_group IN ('U10','U14','U16','U19','ADULT')",
+            name="ck_player_age_group",
+        ),
     )
 
 
@@ -107,7 +133,7 @@ class AccountPlayerLink(Base):
 
     link_type: Mapped[str] = mapped_column(String, nullable=False)
 
-    # ✅ ADDED: relationship-level player label
+    # Relationship-level label
     player_name: Mapped[Optional[str]] = mapped_column(
         String,
         nullable=True,
@@ -127,9 +153,9 @@ class AccountPlayerLink(Base):
     )
 
 
-# -----------------------------
+# =====================================================
 # Analysis Core (facts only)
-# -----------------------------
+# =====================================================
 
 class AnalysisRun(Base):
     __tablename__ = "analysis_run"

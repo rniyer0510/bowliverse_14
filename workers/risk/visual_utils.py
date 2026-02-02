@@ -413,6 +413,44 @@ def _draw_lateral_trunk(frame, conf):
         )
 
 
+
+def _draw_foot_line_deviation(frame, conf):
+    """
+    Foot-Line Deviation
+    Visual: diagonal lateral cue near pelvis/lower trunk indicating sideways correction.
+    (Best viewed at FFC+1)
+    """
+    h, w = frame.shape[:2]
+
+    cx, subject_h = _estimate_subject_geometry(frame)
+    color, base_t = _risk_style(conf, subject_h)
+
+    y = int(h * 0.60)
+    y = max(0, min(h - 1, y))
+
+    arrow_len = int(subject_h * 0.34)
+    dx = int(arrow_len * 0.75)
+    dy = int(arrow_len * 0.22)
+
+    thickness = max(5, int(base_t * 1.8))
+
+    start_pt = (cx, y)
+    end_pt = (max(0, min(w - 1, cx + dx)), max(0, min(h - 1, y + dy)))
+
+    cv2.arrowedLine(
+        frame,
+        start_pt,
+        end_pt,
+        color,
+        thickness,
+        tipLength=0.14,
+        line_type=cv2.LINE_AA,
+    )
+
+    r = max(4, int(subject_h * 0.04))
+    cv2.circle(frame, start_pt, r, color, -1)
+
+
 # ---------------------------------------------------------------------
 # Core visual renderer
 # ---------------------------------------------------------------------
@@ -450,6 +488,8 @@ def draw_and_save_visual(
         _draw_hip_shoulder(frame, visual_confidence)
     elif risk_id == "lateral_trunk_lean":
         _draw_lateral_trunk(frame, visual_confidence)
+    elif risk_id == "foot_line_deviation":
+        _draw_foot_line_deviation(frame, visual_confidence)
 
     out_dir = os.path.join(VISUAL_DIR, run_id)
     os.makedirs(out_dir, exist_ok=True)

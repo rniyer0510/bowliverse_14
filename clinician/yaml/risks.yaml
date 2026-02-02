@@ -1,21 +1,77 @@
-front_foot_braking:
-  low:
-    severity: low
-    message: "Front leg load is within expected range."
+front_foot_braking_shock:
+  title: "Front Foot Braking Shock"
+  explanations:
+    kid:
+      low: "Your front foot landing is controlled and within safe limits."
+      moderate: "Try to let your body move over the front foot more smoothly."
+      high: "Abrupt braking at the front foot increases stress on the knee and back."
+    coach:
+      low: "Front-foot braking within acceptable range."
+      moderate: "Moderate braking impulse observed post-FFC."
+      high: "Excessive braking impulse causing elevated lower-body load."
 
-  medium:
-    severity: medium
-    message: "Front leg absorbs higher impact during landing."
+knee_brace_failure:
+  title: "Knee Brace Failure"
+  explanations:
+    kid:
+      low: "Your front leg supports your body well at landing."
+      moderate: "Your front knee bends a bit more than ideal at landing."
+      high: "Your front knee collapses at landing, increasing joint stress."
+    coach:
+      low: "Knee bracing effective."
+      moderate: "Partial knee brace detected."
+      high: "Failure to brace knee at FFC."
 
-  high:
-    severity: high
-    message: "High landing impact increases stress on knee and back."
+trunk_rotation_snap:
+  title: "Trunk Rotation Snap"
+  explanations:
+    kid:
+      low: "Your body rotation is smooth through delivery."
+      moderate: "Your upper body rotates a bit sharply during delivery."
+      high: "Sudden trunk rotation places high stress on the side and lower back."
+    coach:
+      low: "Trunk rotation smooth."
+      moderate: "Moderate angular acceleration spike."
+      high: "Sharp rotational snap detected."
 
-trunk_lean:
-  medium:
-    severity: medium
-    message: "Moderate side-bending places additional load on the lower back."
+hip_shoulder_mismatch:
+  title: "Hip–Shoulder Mismatch"
+  explanations:
+    kid:
+      low: "Your hips and shoulders work together well."
+      moderate: "Your hips and shoulders separate slightly during delivery."
+      high: "Large hip–shoulder separation increases trunk and groin load."
+    coach:
+      low: "Hip–shoulder sequencing balanced."
+      moderate: "Moderate mismatch observed."
+      high: "Excessive hip–shoulder separation."
 
-  high:
-    severity: high
-    message: "Excessive side-bending significantly increases lower back stress."
+lateral_trunk_lean:
+  title: "Lateral Trunk Lean"
+  explanations:
+    kid:
+      low: "Your body stays well balanced during delivery."
+      moderate: "You lean slightly to the side while bowling."
+      high: "Excessive side-lean increases stress on the spine."
+    coach:
+      low: "Trunk alignment stable."
+      moderate: "Moderate lateral lean detected."
+      high: "Significant lateral trunk lean."
+
+foot_line_deviation:
+  title: "Foot Line Deviation"
+  body_region: "groin_side_chain"
+  explanations:
+    kid:
+      low: "Your front foot lands in a good position."
+      moderate: "Your front foot lands a bit wide, which can add strain."
+      high: "Your front foot lands too wide and puts stress on your body."
+    coach:
+      low: "Front-foot alignment within acceptable limits."
+      moderate: "Moderate outward step detected."
+      high: "Significant outward foot placement increasing groin and side-body load."
+  cues:
+    corrective:
+      - "Land your front foot closer to the target line."
+      - "Think of running straight through the crease."
+      - "Let your hips carry momentum forward, not sideways."

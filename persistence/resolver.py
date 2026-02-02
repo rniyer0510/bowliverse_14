@@ -7,10 +7,6 @@ MAX_PARENT_PLAYERS = 3
 
 
 def resolve_account(db, actor: dict):
-    """
-    mkdir -p semantics for Account
-    Reuse if exists, create if missing.
-    """
     role = actor.get("role", "player").lower()
     name = actor.get("account_name", "Default")
 
@@ -26,36 +22,24 @@ def resolve_account(db, actor: dict):
     db.add(account)
     db.flush()
 
-    logger.info(
-        f"[identity] created account role={role} name={name} id={account.account_id}"
-    )
+    logger.info(f"[identity] created account role={role} name={name}")
     return account
 
 
 def resolve_player(db, account: Account, actor: dict):
     """
-    mkdir -p semantics for Player resolution
-
-    Rules:
-    - PLAYER: exactly one self player
-    - PARENT / COACH:
-        * player_id wins if provided
-        * else reuse by player_name if already linked
-        * else create new (subject to limits)
+    Analysis-time resolver.
+    DOES NOT override age_group / season.
+    These must be set explicitly via frontend APIs.
     """
 
     role = account.role.lower()
 
-    # ======================================================
-    # PLAYER → self
-    # ======================================================
+    # Player self-account
     if role == "player":
         link = (
             db.query(AccountPlayerLink)
-            .filter_by(
-                account_id=account.account_id,
-                link_type="self",
-            )
+            .filter_by(account_id=account.account_id, link_type="self")
             .first()
         )
         if link:
@@ -68,36 +52,25 @@ def resolve_player(db, account: Account, actor: dict):
         db.add(player)
         db.flush()
 
-        db.add(
-            AccountPlayerLink(
-                account_id=account.account_id,
-                player_id=player.player_id,
-                link_type="self",
-                player_name=actor.get("player_name"),
-            )
-        )
+        db.add(AccountPlayerLink(
+            account_id=account.account_id,
+            player_id=player.player_id,
+            link_type="self",
+            player_name=actor.get("player_name"),
+        ))
 
-        logger.info(
-            f"[identity] created self player id={player.player_id} for account={account.account_id}"
-        )
         return player.player_id
 
-    # ======================================================
-    # PARENT / COACH
-    # ======================================================
+    # Coach / Parent
 
-    # 1️⃣ Explicit player_id always wins
     if actor.get("player_id"):
         return actor["player_id"]
 
     player_name = actor.get("player_name")
     if not player_name:
-        raise ValueError(
-            "player_name or player_id required for parent/coach uploads"
-        )
+        raise ValueError("player_name required for coach/parent uploads")
 
-    # 2️⃣ Reuse existing linked player by name (mkdir -p)
-    existing_link = (
+    existing = (
         db.query(AccountPlayerLink)
         .filter_by(
             account_id=account.account_id,
@@ -105,23 +78,18 @@ def resolve_player(db, account: Account, actor: dict):
         )
         .first()
     )
-    if existing_link:
-        return existing_link.player_id
+    if existing:
+        return existing.player_id
 
-    # 3️⃣ Enforce parent limit BEFORE creation
     if role == "parent":
         count = (
             db.query(AccountPlayerLink)
-            .filter_by(
-                account_id=account.account_id,
-                link_type="child",
-            )
+            .filter_by(account_id=account.account_id, link_type="child")
             .count()
         )
         if count >= MAX_PARENT_PLAYERS:
-            raise ValueError("Parent cannot have more than 3 players")
+            raise ValueError("Parent player limit exceeded")
 
-    # 4️⃣ Create new player + link
     link_type = "child" if role == "parent" else "trainee"
 
     player = Player(
@@ -131,19 +99,11 @@ def resolve_player(db, account: Account, actor: dict):
     db.add(player)
     db.flush()
 
-    db.add(
-        AccountPlayerLink(
-            account_id=account.account_id,
-            player_id=player.player_id,
-            link_type=link_type,
-            player_name=player_name,
-        )
-    )
-
-    logger.info(
-        f"[identity] created player name={player_name} id={player.player_id} "
-        f"linked_as={link_type} to account={account.account_id}"
-    )
+    db.add(AccountPlayerLink(
+        account_id=account.account_id,
+        player_id=player.player_id,
+        link_type=link_type,
+        player_name=player_name,
+    ))
 
     return player.player_id
-

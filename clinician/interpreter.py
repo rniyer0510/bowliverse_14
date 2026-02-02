@@ -9,9 +9,6 @@ ELBOW = load_yaml("elbow.yaml") or {}
 RISKS = load_yaml("risks.yaml") or {}
 CHAIN = load_yaml("kinetic_chain.yaml") or {}
 
-SEV_RANK = {"VERY_HIGH": 4, "HIGH": 3, "MODERATE": 2, "LOW": 1}
-CONF_RANK = {"HIGH": 3, "MEDIUM": 2, "LOW": 1}
-
 
 def f(x: Any, d: float = 0.0) -> float:
     try:
@@ -22,12 +19,11 @@ def f(x: Any, d: float = 0.0) -> float:
 
 class ClinicianInterpreter:
     """
-    ActionLab V14 – Clinician Interpreter (ROBUST, ICC-ALIGNED)
+    ActionLab V14 – Clinician Interpreter (FIXED)
 
-    - Never crashes frontend
-    - Never drops risks silently
-    - YAML-driven where appropriate
-    - ICC-correct elbow interpretation
+    - Supports BOTH flat and severity-aware YAML
+    - YAML is source of truth for tone
+    - Generic fallback only if YAML truly missing
     """
 
     # ---------- ELBOW ----------
@@ -35,7 +31,6 @@ class ClinicianInterpreter:
         ext = f(raw.get("extension_deg"))
         verdict = (raw.get("verdict") or "").upper()
 
-        # ICC-aligned logic
         if verdict == "ILLEGAL":
             band = "ILLEGAL"
             text = "Your elbow action exceeds the legal extension limit."
@@ -90,91 +85,79 @@ class ClinicianInterpreter:
             if not rid:
                 continue
 
-            spec = RISKS.get(rid)
+            spec = RISKS.get(rid) or {}
 
             sev = severity_band(f(r.get("signal_strength")))
             conf = confidence_band(f(r.get("confidence")))
 
-            if not spec:
-                out.append({
-                    "risk_id": rid,
-                    "title": rid.replace("_", " ").title(),
-                    "severity": sev,
-                    "confidence": conf,
-                    "kid_explanation": "This movement places some stress on your body.",
-                    "coach_explanation": "Monitor this loading pattern.",
-                    "evidence": r,
-                })
-                continue
+            # Preserve ALL evidence
+            evidence = dict(r)
+            evidence["signal_strength"] = round(f(r.get("signal_strength")), 3)
+            evidence["confidence"] = round(f(r.get("confidence")), 3)
+
+            # --- Proper YAML resolution (Option B) ---
+            kid_text = (
+                spec.get("explanations", {})
+                    .get("kid", {})
+                    .get(sev.lower())
+                or spec.get("kid_explanation")
+                or "This movement places some stress on your body."
+            )
+
+            coach_text = (
+                spec.get("explanations", {})
+                    .get("coach", {})
+                    .get(sev.lower())
+                or spec.get("coach_explanation")
+                or "Monitor this loading pattern."
+            )
 
             out.append({
                 "risk_id": rid,
-                "title": spec.get("title", rid),
+                "title": spec.get("title", rid.replace("_", " ").title()),
                 "body_region": spec.get("body_region"),
                 "severity": sev,
                 "confidence": conf,
-                "kid_explanation": spec.get("explanations", {})
-                    .get("kid", {})
-                    .get(sev.lower(), ""),
-                "coach_explanation": spec.get("explanations", {})
-                    .get("coach", {})
-                    .get(sev.lower(), ""),
+                "kid_explanation": kid_text,
+                "coach_explanation": coach_text,
                 "cues": spec.get("cues", {}),
-                "evidence": {
-                    "signal_strength": round(f(r.get("signal_strength")), 3),
-                    "confidence": round(f(r.get("confidence")), 3),
-                    "window": r.get("window"),
-                    "note": r.get("note"),
-                },
+                "evidence": evidence,
             })
 
         return out
 
     # ---------- SUMMARY ----------
-    def build_summary(
-        self,
-        chain: Dict[str, Any],
-        risks: List[Dict[str, Any]],
-    ) -> Dict[str, Any]:
-
-        # Count high-confidence red risks
-        red_hits = 0
-        for r in risks:
-            if (
-                r.get("severity") in ("HIGH", "VERY_HIGH")
-                and r.get("confidence") == "HIGH"
-            ):
-                red_hits += 1
+    def build_summary(self, chain: Dict[str, Any], risks: List[Dict[str, Any]]) -> Dict[str, Any]:
+        red_hits = sum(
+            1 for r in risks
+            if r.get("severity") in ("HIGH", "VERY_HIGH")
+            and r.get("confidence") == "HIGH"
+        )
 
         if red_hits >= 2:
-            max_sev = "VERY_HIGH"
-            rec = "CORRECT"
-            text = "Some parts of your action are placing high load on your body."
+            return {
+                "overall_assessment": "Some parts of your action are placing high load on your body.",
+                "overall_severity": "VERY_HIGH",
+                "recommendation_level": "CORRECT",
+                "confidence": chain.get("confidence", 1.0),
+            }
         elif red_hits == 1:
-            max_sev = "MODERATE"
-            rec = "MONITOR"
-            text = "Your action is generally sound, but a few areas need attention."
+            return {
+                "overall_assessment": "Your action is generally sound, but a few areas need attention.",
+                "overall_severity": "MODERATE",
+                "recommendation_level": "MONITOR",
+                "confidence": chain.get("confidence", 1.0),
+            }
         else:
-            max_sev = "LOW"
-            rec = "MAINTAIN"
-            text = "Your action is generally sound."
-
-        return {
-            "overall_assessment": text,
-            "overall_severity": max_sev,
-            "recommendation_level": rec,
-            "confidence": chain.get("confidence", 1.0),
-        }
+            return {
+                "overall_assessment": "Your action is generally sound.",
+                "overall_severity": "LOW",
+                "recommendation_level": "MAINTAIN",
+                "confidence": chain.get("confidence", 1.0),
+            }
 
     # ---------- FINAL ----------
-    def build(
-        self,
-        elbow: Dict[str, Any],
-        risks: List[Dict[str, Any]],
-        interpretation: Dict[str, Any],
-        basics: Optional[Dict[str, Any]] = None,
-    ) -> Dict[str, Any]:
-
+    def build(self, elbow, risks, interpretation, basics=None):
         chain = self.build_chain(interpretation)
         built_risks = self.build_risks(risks)
         summary = self.build_summary(chain, built_risks)
@@ -185,4 +168,3 @@ class ClinicianInterpreter:
             "kinetic_chain": chain,
             "risks": built_risks,
         }
-
