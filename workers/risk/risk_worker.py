@@ -12,6 +12,7 @@ from app.workers.risk.lateral_trunk_lean import compute_lateral_trunk_lean
 from app.workers.risk.foot_line_deviation import compute_foot_line_deviation
 
 from app.workers.risk.visual_utils import draw_and_save_visual
+from app.workers.risk.benchmarks import attach_deviation_and_impact
 
 logger = get_logger(__name__)
 
@@ -93,10 +94,7 @@ def _pick_visual_anchor_frame(
     if risk_id in ("front_foot_braking_shock", "knee_brace_failure"):
         return ffc
 
-    if risk_id == "trunk_rotation_snap":
-        return uah if uah is not None else rel
-
-    if risk_id == "hip_shoulder_mismatch":
+    if risk_id in ("trunk_rotation_snap", "hip_shoulder_mismatch"):
         return uah if uah is not None else rel
 
     if risk_id == "lateral_trunk_lean":
@@ -107,7 +105,6 @@ def _pick_visual_anchor_frame(
             return ffc + 1
         return rel
 
-    # fallback (should not normally be used)
     return rel or ffc or bfc or uah
 
 
@@ -180,6 +177,23 @@ def _attach_visual(
 
 
 # ---------------------------------------------------------------------
+# Percentile mapping (TEMPORARY, PHASE-2)
+# ---------------------------------------------------------------------
+def _percentile_from_signal_strength(v: float) -> float:
+    """
+    TEMPORARY mapping until real benchmark distributions are plugged in.
+    This preserves monotonicity and allows frontend to render bands.
+    """
+    if v >= 0.6:
+        return 95.0
+    if v >= 0.4:
+        return 85.0
+    if v >= 0.25:
+        return 70.0
+    return 50.0
+
+
+# ---------------------------------------------------------------------
 # Main worker
 # ---------------------------------------------------------------------
 def run_risk_worker(
@@ -238,6 +252,18 @@ def run_risk_worker(
 
     out: List[Dict[str, Any]] = []
     for r in raw:
+        # --- Phase-2 benchmark + deviation + impact ---
+        percentile = _percentile_from_signal_strength(
+            float(r.get("signal_strength", 0.0))
+        )
+
+        r = attach_deviation_and_impact(
+            r,
+            risk_id=r["risk_id"],
+            percentile=percentile,
+        )
+
+        # --- Visual attachment (unchanged) ---
         out.append(
             _attach_visual(
                 r,

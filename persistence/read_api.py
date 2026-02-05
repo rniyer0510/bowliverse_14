@@ -1,11 +1,15 @@
 """
-ActionLab persistence READ + WRITE APIs (Phase-I)
+ActionLab persistence READ APIs (Phase-I)
 
 Supports:
-- Player creation with age_group + season
-- Player profile updates (age_group / season)
+- Player creation & profile updates (defaults only)
 - Player listing
-- Analysis history
+- Deterministic analysis history (run-based)
+- Run-id based report fetch
+
+IMPORTANT:
+- analysis_run is the authoritative historical unit
+- player.age_group / player.season are DEFAULTS only
 """
 
 from fastapi import APIRouter, HTTPException
@@ -171,8 +175,16 @@ def update_player_profile(player_id: str, payload: PlayerProfileUpdate):
         db.close()
 
 
+# ---------------------------------------------------------------------
+# Analysis (READ)
+# ---------------------------------------------------------------------
+
 @router.get("/players/{player_id}/latest")
 def latest_analysis(player_id: str):
+    """
+    Identity-only helper for Home screen.
+    NEVER returns report JSON.
+    """
     db = SessionLocal()
     try:
         run = (
@@ -184,15 +196,67 @@ def latest_analysis(player_id: str):
         if not run:
             raise HTTPException(status_code=404, detail="No analysis found")
 
-        raw = (
-            db.query(AnalysisResultRaw)
-            .filter_by(run_id=run.run_id)
-            .first()
-        )
-
         return {
             "run_id": str(run.run_id),
             "created_at": run.created_at,
+            "season": run.season,
+            "age_group": run.age_group,
+        }
+    finally:
+        db.close()
+
+
+@router.get("/players/{player_id}/analysis-runs")
+def list_analysis_runs(player_id: str, season: Optional[int] = None):
+    """
+    Deterministic History endpoint.
+    """
+    db = SessionLocal()
+    try:
+        q = db.query(AnalysisRun).filter_by(player_id=player_id)
+        if season is not None:
+            q = q.filter_by(season=season)
+
+        runs = q.order_by(AnalysisRun.created_at.desc()).all()
+
+        return {
+            "items": [
+                {
+                    "run_id": str(r.run_id),
+                    "created_at": r.created_at,
+                    "season": r.season,
+                    "age_group": r.age_group,
+                    "schema_version": r.schema_version,
+                    "fps": r.fps,
+                    "total_frames": r.total_frames,
+                }
+                for r in runs
+            ]
+        }
+    finally:
+        db.close()
+
+
+@router.get("/analysis-runs/{run_id}")
+def get_analysis_run(run_id: str):
+    """
+    Authoritative report fetch.
+    """
+    db = SessionLocal()
+    try:
+        run = db.query(AnalysisRun).filter_by(run_id=run_id).first()
+        if not run:
+            raise HTTPException(status_code=404, detail="Analysis run not found")
+
+        raw = db.query(AnalysisResultRaw).filter_by(run_id=run_id).first()
+
+        return {
+            "run_id": str(run.run_id),
+            "player_id": str(run.player_id),
+            "season": run.season,
+            "age_group": run.age_group,
+            "created_at": run.created_at,
+            "schema_version": run.schema_version,
             "result": raw.result_json if raw else None,
         }
     finally:

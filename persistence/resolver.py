@@ -29,8 +29,11 @@ def resolve_account(db, actor: dict):
 def resolve_player(db, account: Account, actor: dict):
     """
     Analysis-time resolver.
-    DOES NOT override age_group / season.
-    These must be set explicitly via frontend APIs.
+
+    IMPORTANT:
+    - Does NOT override age_group / season for analysis
+    - analysis_run MUST receive season & age_group explicitly
+    - Player values are DEFAULTS only
     """
 
     role = account.role.lower()
@@ -48,6 +51,8 @@ def resolve_player(db, account: Account, actor: dict):
         player = Player(
             primary_owner_account_id=account.account_id,
             created_by_account_id=account.account_id,
+            age_group="ADULT",
+            season=2025,
         )
         db.add(player)
         db.flush()
@@ -95,6 +100,8 @@ def resolve_player(db, account: Account, actor: dict):
     player = Player(
         primary_owner_account_id=account.account_id,
         created_by_account_id=account.account_id,
+        age_group="ADULT",
+        season=2025,
     )
     db.add(player)
     db.flush()
