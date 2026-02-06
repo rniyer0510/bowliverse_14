@@ -29,6 +29,19 @@ RISK_CONFIG = {
 }
 
 # ---------------------------------------------------------------------
+# Semantic override: "what body area should the footer mention?"
+# This is NOT physics, not a correction cue — just a safe, honest label.
+# ---------------------------------------------------------------------
+PRIMARY_LOAD_OVERRIDE: Dict[str, str] = {
+    # Foot-line deviation loads adductors/groin first (knee is downstream/secondary)
+    "foot_line_deviation": "groin",
+    # Sequencing/torso risks: keep these broad and non-prescriptive
+    "hip_shoulder_mismatch": "hip",
+    "trunk_rotation_snap": "lower back",
+    "lateral_trunk_lean": "lower back",
+}
+
+# ---------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------
 def _f(x: Any, d: float = 0.0) -> float:
@@ -69,6 +82,19 @@ def _event_frame(events: Dict[str, Any], key: str) -> Optional[int]:
         return None
 
 
+def _load_level_from_band(band: Optional[int]) -> Optional[str]:
+    """
+    Maps deviation band to footer-friendly load level.
+    """
+    if band is None:
+        return None
+    if band <= 2:
+        return "low"
+    if band == 3:
+        return "moderate"
+    return "high"
+
+
 # ---------------------------------------------------------------------
 # Visual anchoring (EVENT-DRIVEN, LOCKED)
 # ---------------------------------------------------------------------
@@ -85,7 +111,6 @@ def _pick_visual_anchor_frame(
     - Lateral Trunk Lean       -> Release (else FFC)
     - Foot-Line Deviation      -> FFC + 1
     """
-
     ffc = _event_frame(events, "ffc")
     bfc = _event_frame(events, "bfc")
     uah = _event_frame(events, "uah")
@@ -154,19 +179,40 @@ def _attach_visual(
 
     strength = float(risk.get("signal_strength", 0.0))
     if strength >= 0.6:
-        band = "HIGH"
+        visual_band = "HIGH"
     elif strength >= 0.3:
-        band = "MEDIUM"
+        visual_band = "MEDIUM"
     else:
-        band = "LOW"
+        visual_band = "LOW"
+
+    # -----------------------------------------------------------------
+    # Footer load information (SAFE, OPTIONAL)
+    # -----------------------------------------------------------------
+    load_body: Optional[str] = None
+    load_level: Optional[str] = None
+
+    deviation = risk.get("deviation", {})
+    band = deviation.get("band")
+    load_level = _load_level_from_band(band)
+
+    # Prefer semantic override for known "force-leak / sequencing" risks
+    if rid in PRIMARY_LOAD_OVERRIDE:
+        load_body = PRIMARY_LOAD_OVERRIDE[rid]
+    else:
+        impact = risk.get("impact", {})
+        primary = impact.get("primary") or []
+        if primary:
+            load_body = str(primary[0]).lower()
 
     visual = draw_and_save_visual(
         video_path=video_path,
         frame_idx=anchor,
         risk_id=rid,
         pose_frames=pose_frames,
-        visual_confidence=band,
+        visual_confidence=visual_band,
         run_id=run_id,
+        load_body=load_body,
+        load_level=load_level,
     )
 
     if visual:
@@ -252,7 +298,6 @@ def run_risk_worker(
 
     out: List[Dict[str, Any]] = []
     for r in raw:
-        # --- Phase-2 benchmark + deviation + impact ---
         percentile = _percentile_from_signal_strength(
             float(r.get("signal_strength", 0.0))
         )
@@ -263,7 +308,6 @@ def run_risk_worker(
             percentile=percentile,
         )
 
-        # --- Visual attachment (unchanged) ---
         out.append(
             _attach_visual(
                 r,
