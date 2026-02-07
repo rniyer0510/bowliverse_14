@@ -14,29 +14,32 @@ def analyze_linear_flow(
     - ≥3 moderate contributors     -> FRAGMENTED
 
     NOTE:
-    This returns keys + contributors only (no English strings).
-    English explanations come from YAML clinician layer.
+    Flow confidence reflects certainty of rhythm assessment,
+    NOT injury risk magnitude.
     """
     contributors = []
     conf_sum = 0.0
 
     for r in risks or []:
-        if float(r.get("signal_strength", 0.0)) >= 0.4:
+        strength = float(r.get("signal_strength", 0.0))
+        conf = float(r.get("confidence", 0.0))
+
+        if strength >= 0.4:
             contributors.append(r.get("risk_id"))
-            conf_sum += float(r.get("confidence", 0.0))
+            conf_sum += conf * strength
 
     if len(contributors) <= 1:
+        avg_conf = (
+            conf_sum / max(1, len(contributors))
+            if contributors else 0.9
+        )
         return {
             "flow_state": "SMOOTH",
-            "confidence": 0.85,
+            "confidence": round(avg_conf, 2),
             "contributors": contributors,
         }
 
-    if len(contributors) == 2:
-        flow_state = "INTERRUPTED"
-    else:
-        flow_state = "FRAGMENTED"
-
+    flow_state = "INTERRUPTED" if len(contributors) == 2 else "FRAGMENTED"
     base_conf = min(1.0, conf_sum / max(1, len(contributors)))
 
     return {
@@ -44,3 +47,4 @@ def analyze_linear_flow(
         "confidence": round(base_conf, 2),
         "contributors": contributors,
     }
+
