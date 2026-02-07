@@ -123,7 +123,7 @@ def analyze(
         fps_val = 0.0
 
     # ------------------------------------------------------------
-    # Events: Release → UAH
+    # Events: Release → UAH (LOCKED SOURCE OF TRUTH)
     # ------------------------------------------------------------
     events = detect_release_uah(
         pose_frames=pose_frames,
@@ -132,29 +132,30 @@ def analyze(
     )
 
     # ------------------------------------------------------------
-    # FFC/BFC
+    # FFC/BFC (VISUAL / RISK CONTEXT ONLY)
     # ------------------------------------------------------------
     release_frame = (events.get("release") or {}).get("frame")
-    uah_frame = (events.get("uah") or {}).get("frame")
+    delivery_window = events.get("delivery_window")
 
-    if release_frame is not None:
+    if release_frame is not None and delivery_window is not None:
         foot_events = detect_ffc_bfc(
             pose_frames=pose_frames,
             hand=hand,
             release_frame=release_frame,
-            uah_frame=uah_frame,
-            fps=fps_val,
+            delivery_window=tuple(delivery_window),
         )
         if foot_events:
             events.update(foot_events)
     else:
-        logger.error("Release frame missing — cannot run FFC/BFC")
+        logger.error(
+            "Missing release frame or delivery window — cannot run FFC/BFC"
+        )
 
     bfc_frame = (events.get("bfc") or {}).get("frame")
     ffc_frame = (events.get("ffc") or {}).get("frame")
 
     # ------------------------------------------------------------
-    # Action
+    # Action (LOCKED)
     # ------------------------------------------------------------
     action = classify_action(
         pose_frames=pose_frames,
@@ -252,9 +253,6 @@ def analyze(
     return result
 
 
-# ------------------------------------------------------------
-# Read  & Write APIs
-# ------------------------------------------------------------
 # ------------------------------------------------------------
 # Persistence APIs
 # ------------------------------------------------------------

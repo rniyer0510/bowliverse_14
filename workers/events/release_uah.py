@@ -249,8 +249,19 @@ def detect_release_uah(
         _dump(video_path, release_i, "release")
         _dump(video_path, uah_i, "uah")
 
+    # ------------------------------------------------------------
+    # RETURN (contract preserved + non-breaking additions)
+    # ------------------------------------------------------------
     return {
         "release": {"frame": int(frames[release_i])},
         "uah": {"frame": int(frames[uah_i])},
+
+        # Non-breaking additions:
+        # delivery_window is the exact window used for release selection,
+        # exposed so downstream components (FFC/BFC visuals) never invent timing.
+        "delivery_window": [int(frames[start]), int(frames[end])],
+
+        # Useful for debugging / consumers (optional)
+        "peak": {"frame": int(frames[peak_i])},
     }
 
