@@ -87,7 +87,7 @@ class Player(Base):
     age_group: Mapped[str] = mapped_column(
         String,
         nullable=False,
-        default="ADULT",
+        default="SENIOR",
     )
 
     season: Mapped[int] = mapped_column(
@@ -104,7 +104,7 @@ class Player(Base):
 
     __table_args__ = (
         CheckConstraint(
-            "age_group IN ('U10','U14','U16','U19','ADULT')",
+            "age_group IN ('U10','U14','U16','U19','SENIOR')",
             name="ck_player_age_group",
         ),
     )

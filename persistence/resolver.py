@@ -51,7 +51,7 @@ def resolve_player(db, account: Account, actor: dict):
         player = Player(
             primary_owner_account_id=account.account_id,
             created_by_account_id=account.account_id,
-            age_group="ADULT",
+            age_group="SENIOR",
             season=2025,
         )
         db.add(player)
@@ -100,7 +100,7 @@ def resolve_player(db, account: Account, actor: dict):
     player = Player(
         primary_owner_account_id=account.account_id,
         created_by_account_id=account.account_id,
-        age_group="ADULT",
+        age_group="SENIOR",
         season=2025,
     )
     db.add(player)

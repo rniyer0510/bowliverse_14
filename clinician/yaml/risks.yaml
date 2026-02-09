@@ -3,11 +3,11 @@ front_foot_braking_shock:
   explanations:
     kid:
       low: "Your front foot landing is controlled and within safe limits."
-      moderate: "Try to let your body move over the front foot more smoothly."
+      moderate: "Your body slows down a bit suddenly at the front foot. Over time, this can increase stress if it keeps happening."
       high: "Abrupt braking at the front foot increases stress on the knee and back."
     coach:
       low: "Front-foot braking within acceptable range."
-      moderate: "Moderate braking impulse observed post-FFC."
+      moderate: "Moderate braking impulse observed post-FFC. Monitor load accumulation."
       high: "Excessive braking impulse causing elevated lower-body load."
 
 knee_brace_failure:
@@ -15,11 +15,11 @@ knee_brace_failure:
   explanations:
     kid:
       low: "Your front leg supports your body well at landing."
-      moderate: "Your front knee bends a bit more than ideal at landing."
+      moderate: "Your front knee bends more than ideal at landing. Repeated stress may add load over time."
       high: "Your front knee collapses at landing, increasing joint stress."
     coach:
       low: "Knee bracing effective."
-      moderate: "Partial knee brace detected."
+      moderate: "Partial knee brace detected. Monitor repetition and fatigue."
       high: "Failure to brace knee at FFC."
 
 trunk_rotation_snap:
@@ -27,11 +27,11 @@ trunk_rotation_snap:
   explanations:
     kid:
       low: "Your body rotation is smooth through delivery."
-      moderate: "Your upper body rotates a bit sharply during delivery."
+      moderate: "Your upper body rotates a bit sharply. Repeating this can increase side and back strain."
       high: "Sudden trunk rotation places high stress on the side and lower back."
     coach:
       low: "Trunk rotation smooth."
-      moderate: "Moderate angular acceleration spike."
+      moderate: "Moderate angular acceleration spike. Monitor cumulative effect."
       high: "Sharp rotational snap detected."
 
 hip_shoulder_mismatch:
@@ -39,11 +39,11 @@ hip_shoulder_mismatch:
   explanations:
     kid:
       low: "Your hips and shoulders work together well."
-      moderate: "Your hips and shoulders separate slightly during delivery."
+      moderate: "Your hips and shoulders separate more than usual. Over time this can increase trunk load."
       high: "Large hip–shoulder separation increases trunk and groin load."
     coach:
       low: "Hip–shoulder sequencing balanced."
-      moderate: "Moderate mismatch observed."
+      moderate: "Moderate mismatch observed. Watch for load transfer issues."
       high: "Excessive hip–shoulder separation."
 
 lateral_trunk_lean:
@@ -51,11 +51,11 @@ lateral_trunk_lean:
   explanations:
     kid:
       low: "Your body stays well balanced during delivery."
-      moderate: "You lean slightly to the side while bowling."
+      moderate: "You lean slightly to the side while bowling. Repeating this can increase back strain."
       high: "Excessive side-lean increases stress on the spine."
     coach:
       low: "Trunk alignment stable."
-      moderate: "Moderate lateral lean detected."
+      moderate: "Moderate lateral lean detected. Monitor over spells."
       high: "Significant lateral trunk lean."
 
 foot_line_deviation:
@@ -64,14 +64,26 @@ foot_line_deviation:
   explanations:
     kid:
       low: "Your front foot lands in a good position."
-      moderate: "Your front foot lands a bit wide, which can add strain."
-      high: "Your front foot lands too wide and puts stress on your body."
+      moderate: >
+        Your front foot shows a moderate outward step at landing.
+        Right now, the overall load remains low, but if this pattern
+        is repeated over time it can increase strain through the groin,
+        knee, and lower back.
+      high: >
+        Your front foot lands too wide, creating high strain through
+        the groin and side of the body.
     coach:
       low: "Front-foot alignment within acceptable limits."
-      moderate: "Moderate outward step detected."
-      high: "Significant outward foot placement increasing groin and side-body load."
+      moderate: >
+        Moderate outward foot placement at FFC with currently low load
+        impact. Repeated exposure may progressively increase demand on
+        the groin, knee, and lateral trunk chain.
+      high: >
+        Significant outward foot placement causing elevated groin and
+        side-chain loading.
   cues:
     corrective:
       - "Land your front foot closer to the target line."
       - "Think of running straight through the crease."
       - "Let your hips carry momentum forward, not sideways."
+

@@ -55,12 +55,12 @@ def _get_or_create_current_account(db) -> Account:
 class PlayerCreateRequest(BaseModel):
     player_name: str = Field(..., min_length=1, max_length=80)
     handedness: str = Field(..., pattern="^(R|L)$")
-    age_group: str = Field(..., pattern="^(U10|U14|U16|U19|ADULT)$")
+    age_group: str = Field(..., pattern="^(U10|U14|U16|U19|SENIOR)$")
     season: int = Field(..., ge=2000, le=2100)
 
 
 class PlayerProfileUpdate(BaseModel):
-    age_group: Optional[str] = Field(None, pattern="^(U10|U14|U16|U19|ADULT)$")
+    age_group: Optional[str] = Field(None, pattern="^(U10|U14|U16|U19|SENIOR)$")
     season: Optional[int] = Field(None, ge=2000, le=2100)
 
 
