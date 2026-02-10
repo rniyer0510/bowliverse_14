@@ -20,6 +20,20 @@ EVENT_MAP = {
 
 
 def write_analysis(result: dict, **kwargs):
+    """
+    Write analysis results to database.
+    
+    Args:
+        result: Analysis result dictionary
+        **kwargs: Additional parameters including actor info
+    
+    Creates:
+        - AnalysisRun with metadata and coach_notes (initially None)
+        - EventAnchors for bowling events
+        - BiomechSignals for biomechanical measurements
+        - RiskMeasurements for detected risks
+        - AnalysisResultRaw for full JSON result
+    """
     db = SessionLocal()
 
     try:
@@ -28,12 +42,14 @@ def write_analysis(result: dict, **kwargs):
         account = resolve_account(db, actor)
         player_id = resolve_player(db, account, actor)
 
+        # Create analysis run with coach_notes field (initially None)
         run = AnalysisRun(
             player_id=player_id,
             schema_version=result.get("schema"),
             handedness=result.get("input", {}).get("hand"),
             fps=result.get("video", {}).get("fps"),
             total_frames=result.get("video", {}).get("total_frames"),
+            coach_notes=None,  # Will be updated later via API
         )
         db.add(run)
         db.flush()
@@ -98,8 +114,11 @@ def write_analysis(result: dict, **kwargs):
                 window_end=r.get("visual_window", {}).get("end"),
             ))
 
+        # Store full result as JSON
         db.add(AnalysisResultRaw(run_id=run.run_id, result_json=result))
+        
         db.commit()
+        logger.info(f"Analysis persisted: run_id={run.run_id}")
 
     except Exception as e:
         logger.warning(f"Persistence skipped: {e}")

@@ -18,3 +18,21 @@ SessionLocal = sessionmaker(
     autoflush=False,
     autocommit=False,
 )
+
+
+def get_db():
+    """
+    FastAPI dependency for database sessions.
+    
+    Yields a database session and ensures it's closed after use.
+    
+    Usage:
+        @app.get("/items")
+        def get_items(db: Session = Depends(get_db)):
+            return db.query(Item).all()
+    """
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()

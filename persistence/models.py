@@ -185,6 +185,13 @@ class AnalysisRun(Base):
         nullable=False,
     )
 
+    # ← NEW FIELD: Coach's Notes
+    coach_notes: Mapped[Optional[str]] = mapped_column(
+        Text,
+        nullable=True,
+        default=None,
+    )
+
 
 class EventAnchor(Base):
     __tablename__ = "event_anchor"
@@ -301,4 +308,3 @@ class AnalysisResultRaw(Base):
     )
 
     result_json: Mapped[dict] = mapped_column(JSONB, nullable=False)
-
