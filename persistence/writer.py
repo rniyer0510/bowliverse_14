@@ -5,6 +5,7 @@ from app.persistence.models import (
     EventAnchor,
     BiomechSignal,
     RiskMeasurement,
+    Player,
 )
 from app.persistence.resolver import resolve_account, resolve_player
 from app.common.logger import get_logger
@@ -22,17 +23,13 @@ EVENT_MAP = {
 def write_analysis(result: dict, **kwargs):
     """
     Write analysis results to database.
-    
-    Args:
-        result: Analysis result dictionary
-        **kwargs: Additional parameters including actor info
-    
+
     Creates:
-        - AnalysisRun with metadata and coach_notes (initially None)
-        - EventAnchors for bowling events
-        - BiomechSignals for biomechanical measurements
-        - RiskMeasurements for detected risks
-        - AnalysisResultRaw for full JSON result
+        - AnalysisRun (with season + age_group snapshot)
+        - EventAnchors
+        - BiomechSignals
+        - RiskMeasurements
+        - AnalysisResultRaw
     """
     db = SessionLocal()
 
@@ -42,19 +39,36 @@ def write_analysis(result: dict, **kwargs):
         account = resolve_account(db, actor)
         player_id = resolve_player(db, account, actor)
 
-        # Create analysis run with coach_notes field (initially None)
+        # --------------------------------------------------------
+        # SNAPSHOT season + age_group from Player (Option A)
+        # --------------------------------------------------------
+        player = db.get(Player, player_id)
+        if not player:
+            raise ValueError("Player not found for snapshot")
+
+        snapshot_season = player.season
+        snapshot_age_group = player.age_group
+
+        # --------------------------------------------------------
+        # Create AnalysisRun
+        # --------------------------------------------------------
         run = AnalysisRun(
             player_id=player_id,
             schema_version=result.get("schema"),
             handedness=result.get("input", {}).get("hand"),
             fps=result.get("video", {}).get("fps"),
             total_frames=result.get("video", {}).get("total_frames"),
-            coach_notes=None,  # Will be updated later via API
+            season=snapshot_season,
+            age_group=snapshot_age_group,
+            coach_notes=None,
         )
+
         db.add(run)
         db.flush()
 
+        # --------------------------------------------------------
         # Events
+        # --------------------------------------------------------
         for key, event_type in EVENT_MAP.items():
             ev = result.get("events", {}).get(key)
             if not ev or ev.get("frame") is None:
@@ -68,7 +82,9 @@ def write_analysis(result: dict, **kwargs):
                 method=ev.get("method"),
             ))
 
-        # Biomech signals (minimal, expandable)
+        # --------------------------------------------------------
+        # Biomech signals (minimal)
+        # --------------------------------------------------------
         elbow = result.get("elbow", {})
         if elbow:
             db.add(BiomechSignal(
@@ -102,7 +118,9 @@ def write_analysis(result: dict, **kwargs):
                 baseline_eligible=True,
             ))
 
+        # --------------------------------------------------------
         # Risks
+        # --------------------------------------------------------
         for r in result.get("risks", []) or []:
             db.add(RiskMeasurement(
                 run_id=run.run_id,
@@ -114,14 +132,21 @@ def write_analysis(result: dict, **kwargs):
                 window_end=r.get("visual_window", {}).get("end"),
             ))
 
-        # Store full result as JSON
-        db.add(AnalysisResultRaw(run_id=run.run_id, result_json=result))
-        
+        # --------------------------------------------------------
+        # Store full JSON
+        # --------------------------------------------------------
+        db.add(AnalysisResultRaw(
+            run_id=run.run_id,
+            result_json=result
+        ))
+
         db.commit()
         logger.info(f"Analysis persisted: run_id={run.run_id}")
 
     except Exception as e:
         logger.warning(f"Persistence skipped: {e}")
         db.rollback()
+        raise
     finally:
         db.close()
+

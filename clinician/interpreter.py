@@ -1,9 +1,17 @@
+"""
+UPDATED: app/clinician/interpreter.py
+
+Add comprehensive_why to the build() method.
+This shows EXACTLY where to integrate the new functionality.
+"""
+
 from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
 from app.clinician.loader import load_yaml
 from app.clinician.bands import severity_band, confidence_band
+from app.clinician.comprehensive_why import generate_comprehensive_why  # <- ADD THIS IMPORT
 
 ELBOW = load_yaml("elbow.yaml") or {}
 RISKS = load_yaml("risks.yaml") or {}
@@ -24,6 +32,7 @@ class ClinicianInterpreter:
     - Supports BOTH flat and severity-aware YAML
     - YAML is source of truth for tone
     - Generic fallback only if YAML truly missing
+    - NOW INCLUDES: Comprehensive WHY explanation
     """
 
     # ---------- ELBOW ----------
@@ -161,10 +170,14 @@ class ClinicianInterpreter:
         chain = self.build_chain(interpretation)
         built_risks = self.build_risks(risks)
         summary = self.build_summary(chain, built_risks)
+        
+        # ✨ NEW: Generate comprehensive WHY explanation
+        comprehensive_why = generate_comprehensive_why(built_risks)
 
         return {
             "summary": summary,
             "elbow": self.build_elbow(elbow),
             "kinetic_chain": chain,
             "risks": built_risks,
+            "comprehensive_why": comprehensive_why,  # <- ADD THIS LINE
         }

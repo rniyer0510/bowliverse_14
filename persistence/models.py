@@ -185,7 +185,20 @@ class AnalysisRun(Base):
         nullable=False,
     )
 
-    # ← NEW FIELD: Coach's Notes
+    # -------------------------------------------------
+    # Snapshot fields (Option A – frozen per run)
+    # -------------------------------------------------
+    season: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+    )
+
+    age_group: Mapped[str] = mapped_column(
+        String(8),
+        nullable=False,
+    )
+
+    # Coach notes (editable later)
     coach_notes: Mapped[Optional[str]] = mapped_column(
         Text,
         nullable=True,
