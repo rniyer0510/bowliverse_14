@@ -1,16 +1,28 @@
 import logging
 
 
-def get_logger(name: str):
+def get_logger(name: str) -> logging.Logger:
     """
-    Simple, process-safe logger.
+    Production-safe logger for FastAPI + Uvicorn.
+
+    - Prevents duplicate log lines
+    - Does not override uvicorn root config
+    - Attaches handler only once
     """
+
     logger = logging.getLogger(name)
 
     if not logger.handlers:
-        logging.basicConfig(
-            level=logging.INFO,
-            format="%(asctime)s [%(levelname)s] %(message)s"
+        handler = logging.StreamHandler()
+        formatter = logging.Formatter(
+            "%(asctime)s [%(levelname)s] %(message)s"
         )
+        handler.setFormatter(formatter)
+
+        logger.addHandler(handler)
+        logger.setLevel(logging.INFO)
+
+        logger.propagate = False
 
     return logger
+

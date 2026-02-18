@@ -20,27 +20,35 @@ EVENT_MAP = {
 }
 
 
-def write_analysis(result: dict, **kwargs):
+def write_analysis(result: dict, **kwargs) -> str:
     """
-    Write analysis results to database.
+    Persist a completed ActionLab analysis.
 
-    Creates:
-        - AnalysisRun (with season + age_group snapshot)
-        - EventAnchors
-        - BiomechSignals
-        - RiskMeasurements
-        - AnalysisResultRaw
+    REQUIREMENT:
+        run_id MUST be provided by orchestrator.
+        DB must NOT generate its own UUID.
+
+    Returns:
+        str: canonical run_id
     """
+
     db = SessionLocal()
 
     try:
+        # --------------------------------------------------------
+        # Validate canonical run_id from orchestrator
+        # --------------------------------------------------------
+        run_id = kwargs.get("run_id")
+        if not run_id:
+            raise ValueError("run_id must be provided by orchestrator")
+
         actor = kwargs.get("actor", {}) or {}
 
         account = resolve_account(db, actor)
         player_id = resolve_player(db, account, actor)
 
         # --------------------------------------------------------
-        # SNAPSHOT season + age_group from Player (Option A)
+        # Snapshot season + age_group from Player
         # --------------------------------------------------------
         player = db.get(Player, player_id)
         if not player:
@@ -50,9 +58,10 @@ def write_analysis(result: dict, **kwargs):
         snapshot_age_group = player.age_group
 
         # --------------------------------------------------------
-        # Create AnalysisRun
+        # Create AnalysisRun (USE provided run_id)
         # --------------------------------------------------------
         run = AnalysisRun(
+            run_id=run_id,   # 🔥 Canonical ID from orchestrator
             player_id=player_id,
             schema_version=result.get("schema"),
             handedness=result.get("input", {}).get("hand"),
@@ -67,7 +76,7 @@ def write_analysis(result: dict, **kwargs):
         db.flush()
 
         # --------------------------------------------------------
-        # Events
+        # Event Anchors
         # --------------------------------------------------------
         for key, event_type in EVENT_MAP.items():
             ev = result.get("events", {}).get(key)
@@ -75,7 +84,7 @@ def write_analysis(result: dict, **kwargs):
                 continue
 
             db.add(EventAnchor(
-                run_id=run.run_id,
+                run_id=run_id,
                 event_type=event_type,
                 frame=ev["frame"],
                 confidence=ev.get("confidence"),
@@ -83,12 +92,12 @@ def write_analysis(result: dict, **kwargs):
             ))
 
         # --------------------------------------------------------
-        # Biomech signals (minimal)
+        # Biomechanical Signals (minimal baseline signals)
         # --------------------------------------------------------
         elbow = result.get("elbow", {})
         if elbow:
             db.add(BiomechSignal(
-                run_id=run.run_id,
+                run_id=run_id,
                 signal_key="elbow_confidence",
                 value=elbow.get("confidence"),
                 units="ratio",
@@ -98,7 +107,7 @@ def write_analysis(result: dict, **kwargs):
         action = result.get("action", {})
         if action:
             db.add(BiomechSignal(
-                run_id=run.run_id,
+                run_id=run_id,
                 signal_key="action_confidence",
                 value=action.get("confidence"),
                 units="ratio",
@@ -109,7 +118,7 @@ def write_analysis(result: dict, **kwargs):
         dbg = knee.get("debug", {}) or {}
         if dbg.get("pelvis_drop") is not None:
             db.add(BiomechSignal(
-                run_id=run.run_id,
+                run_id=run_id,
                 signal_key="knee_brace_pelvis_drop",
                 value=dbg["pelvis_drop"],
                 units="normalized",
@@ -119,12 +128,16 @@ def write_analysis(result: dict, **kwargs):
             ))
 
         # --------------------------------------------------------
-        # Risks
+        # Risk Measurements
         # --------------------------------------------------------
         for r in result.get("risks", []) or []:
+            risk_id = r.get("risk_id")
+            if not risk_id:
+                continue
+
             db.add(RiskMeasurement(
-                run_id=run.run_id,
-                risk_id=r["risk_id"],
+                run_id=run_id,
+                risk_id=risk_id,
                 signal_strength=r.get("signal_strength"),
                 confidence=r.get("confidence"),
                 anchor_event=r.get("visual", {}).get("anchor"),
@@ -133,20 +146,24 @@ def write_analysis(result: dict, **kwargs):
             ))
 
         # --------------------------------------------------------
-        # Store full JSON
+        # Store full JSON (immutable record)
         # --------------------------------------------------------
         db.add(AnalysisResultRaw(
-            run_id=run.run_id,
-            result_json=result
+            run_id=run_id,
+            result_json=result,  # Already contains run_id
         ))
 
         db.commit()
-        logger.info(f"Analysis persisted: run_id={run.run_id}")
+
+        logger.info(f"Analysis persisted: run_id={run_id}")
+
+        return run_id
 
     except Exception as e:
-        logger.warning(f"Persistence skipped: {e}")
+        logger.warning(f"Persistence failed: {e}")
         db.rollback()
         raise
+
     finally:
         db.close()
 

@@ -1,51 +1,34 @@
 """
-ActionLab persistence READ APIs (Phase-I)
+ActionLab persistence READ APIs (Phase-I – Auth Locked)
 
 Supports:
-- Player creation & profile updates (defaults only)
 - Player listing
+- Player creation
+- Player profile update
 - Deterministic analysis history (run-based)
 - Run-id based report fetch
 
-IMPORTANT:
-- analysis_run is the authoritative historical unit
-- player.age_group / player.season are DEFAULTS only
+SECURITY:
+- All endpoints require authentication
+- All reads are scoped to current_account via AccountPlayerLink
 """
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel, Field
 from typing import Optional
 
-from app.persistence.session import SessionLocal
+from sqlalchemy.orm import Session
+
+from app.persistence.session import get_db
 from app.persistence.models import (
-    Account,
     Player,
     AccountPlayerLink,
     AnalysisRun,
     AnalysisResultRaw,
 )
+from app.common.auth import get_current_account
 
 router = APIRouter()
-
-
-# ---------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------
-
-def _get_or_create_current_account(db) -> Account:
-    account = (
-        db.query(Account)
-        .order_by(Account.created_at.desc())
-        .first()
-    )
-    if account:
-        return account
-
-    account = Account(role="coach", name="Default")
-    db.add(account)
-    db.commit()
-    db.refresh(account)
-    return account
 
 
 # ---------------------------------------------------------------------
@@ -65,199 +48,246 @@ class PlayerProfileUpdate(BaseModel):
 
 
 # ---------------------------------------------------------------------
-# Players
+# Players (Auth Scoped)
 # ---------------------------------------------------------------------
 
 @router.get("/players")
-def list_players():
-    db = SessionLocal()
-    try:
-        account = _get_or_create_current_account(db)
+def list_players(
+    current_account=Depends(get_current_account),
+    db: Session = Depends(get_db),
+):
+    links = (
+        db.query(AccountPlayerLink)
+        .filter_by(account_id=current_account.account_id)
+        .all()
+    )
 
-        links = (
-            db.query(AccountPlayerLink)
-            .filter_by(account_id=account.account_id)
-            .all()
-        )
+    players = []
+    for link in links:
+        player = db.query(Player).filter_by(player_id=link.player_id).first()
 
-        players = []
-        for link in links:
-            player = db.query(Player).filter_by(player_id=link.player_id).first()
-            players.append({
-                "player_id": str(link.player_id),
-                "player_name": link.player_name,
-                "link_type": link.link_type,
-                "age_group": player.age_group if player else None,
-                "season": player.season if player else None,
-            })
+        players.append({
+            "player_id": str(link.player_id),
+            "player_name": link.player_name,
+            "link_type": link.link_type,
+            "age_group": player.age_group if player else None,
+            "season": player.season if player else None,
+        })
 
-        return {"players": players}
-    finally:
-        db.close()
+    return {"players": players}
 
 
 @router.post("/players", status_code=201)
-def create_player(payload: PlayerCreateRequest):
-    db = SessionLocal()
-    try:
-        account = _get_or_create_current_account(db)
-
-        existing = (
-            db.query(AccountPlayerLink)
-            .filter_by(
-                account_id=account.account_id,
-                player_name=payload.player_name.strip(),
-            )
-            .first()
-        )
-        if existing:
-            player = db.query(Player).filter_by(player_id=existing.player_id).first()
-            return {
-                "player_id": str(existing.player_id),
-                "player_name": existing.player_name,
-                "age_group": player.age_group,
-                "season": player.season,
-                "already_exists": True,
-            }
-
-        player = Player(
-            primary_owner_account_id=account.account_id,
-            created_by_account_id=account.account_id,
-            handedness=payload.handedness,
-            age_group=payload.age_group,
-            season=payload.season,
-        )
-        db.add(player)
-        db.flush()
-
-        db.add(AccountPlayerLink(
-            account_id=account.account_id,
-            player_id=player.player_id,
-            link_type="owner",
+def create_player(
+    payload: PlayerCreateRequest,
+    current_account=Depends(get_current_account),
+    db: Session = Depends(get_db),
+):
+    existing = (
+        db.query(AccountPlayerLink)
+        .filter_by(
+            account_id=current_account.account_id,
             player_name=payload.player_name.strip(),
-        ))
+        )
+        .first()
+    )
 
-        db.commit()
-
+    if existing:
+        player = db.query(Player).filter_by(player_id=existing.player_id).first()
         return {
-            "player_id": str(player.player_id),
-            "player_name": payload.player_name,
+            "player_id": str(existing.player_id),
+            "player_name": existing.player_name,
             "age_group": player.age_group,
             "season": player.season,
+            "already_exists": True,
         }
 
-    finally:
-        db.close()
+    player = Player(
+        primary_owner_account_id=current_account.account_id,
+        created_by_account_id=current_account.account_id,
+        handedness=payload.handedness,
+        age_group=payload.age_group,
+        season=payload.season,
+    )
+
+    db.add(player)
+    db.flush()
+
+    db.add(AccountPlayerLink(
+        account_id=current_account.account_id,
+        player_id=player.player_id,
+        link_type="owner",
+        player_name=payload.player_name.strip(),
+    ))
+
+    db.commit()
+
+    return {
+        "player_id": str(player.player_id),
+        "player_name": payload.player_name,
+        "age_group": player.age_group,
+        "season": player.season,
+    }
 
 
 @router.patch("/players/{player_id}/profile")
-def update_player_profile(player_id: str, payload: PlayerProfileUpdate):
-    db = SessionLocal()
-    try:
-        player = db.query(Player).filter_by(player_id=player_id).first()
-        if not player:
-            raise HTTPException(status_code=404, detail="Player not found")
+def update_player_profile(
+    player_id: str,
+    payload: PlayerProfileUpdate,
+    current_account=Depends(get_current_account),
+    db: Session = Depends(get_db),
+):
+    link = (
+        db.query(AccountPlayerLink)
+        .filter_by(
+            account_id=current_account.account_id,
+            player_id=player_id,
+        )
+        .first()
+    )
 
-        if payload.age_group is not None:
-            player.age_group = payload.age_group
-        if payload.season is not None:
-            player.season = payload.season
+    if not link:
+        raise HTTPException(status_code=403, detail="Access denied")
 
-        db.commit()
+    player = db.query(Player).filter_by(player_id=player_id).first()
+    if not player:
+        raise HTTPException(status_code=404, detail="Player not found")
 
-        return {
-            "player_id": str(player.player_id),
-            "age_group": player.age_group,
-            "season": player.season,
-        }
+    if payload.age_group is not None:
+        player.age_group = payload.age_group
 
-    finally:
-        db.close()
+    if payload.season is not None:
+        player.season = payload.season
+
+    db.commit()
+
+    return {
+        "player_id": str(player.player_id),
+        "age_group": player.age_group,
+        "season": player.season,
+    }
 
 
 # ---------------------------------------------------------------------
-# Analysis (READ)
+# Analysis (READ – Auth Scoped)
 # ---------------------------------------------------------------------
 
 @router.get("/players/{player_id}/latest")
-def latest_analysis(player_id: str):
+def latest_analysis(
+    player_id: str,
+    current_account=Depends(get_current_account),
+    db: Session = Depends(get_db),
+):
     """
     Identity-only helper for Home screen.
     NEVER returns report JSON.
     """
-    db = SessionLocal()
-    try:
-        run = (
-            db.query(AnalysisRun)
-            .filter_by(player_id=player_id)
-            .order_by(AnalysisRun.created_at.desc())
-            .first()
-        )
-        if not run:
-            raise HTTPException(status_code=404, detail="No analysis found")
 
-        return {
-            "run_id": str(run.run_id),
-            "created_at": run.created_at,
-            "season": run.season,
-            "age_group": run.age_group,
-        }
-    finally:
-        db.close()
+    link = (
+        db.query(AccountPlayerLink)
+        .filter_by(
+            account_id=current_account.account_id,
+            player_id=player_id,
+        )
+        .first()
+    )
+
+    if not link:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    run = (
+        db.query(AnalysisRun)
+        .filter_by(player_id=player_id)
+        .order_by(AnalysisRun.created_at.desc())
+        .first()
+    )
+
+    if not run:
+        raise HTTPException(status_code=404, detail="No analysis found")
+
+    return {
+        "run_id": str(run.run_id),
+        "created_at": run.created_at,
+        "season": run.season,
+        "age_group": run.age_group,
+    }
 
 
 @router.get("/players/{player_id}/analysis-runs")
-def list_analysis_runs(player_id: str, season: Optional[int] = None):
-    """
-    Deterministic History endpoint.
-    """
-    db = SessionLocal()
-    try:
-        q = db.query(AnalysisRun).filter_by(player_id=player_id)
-        if season is not None:
-            q = q.filter_by(season=season)
+def list_analysis_runs(
+    player_id: str,
+    season: Optional[int] = None,
+    current_account=Depends(get_current_account),
+    db: Session = Depends(get_db),
+):
+    link = (
+        db.query(AccountPlayerLink)
+        .filter_by(
+            account_id=current_account.account_id,
+            player_id=player_id,
+        )
+        .first()
+    )
 
-        runs = q.order_by(AnalysisRun.created_at.desc()).all()
+    if not link:
+        raise HTTPException(status_code=403, detail="Access denied")
 
-        return {
-            "items": [
-                {
-                    "run_id": str(r.run_id),
-                    "created_at": r.created_at,
-                    "season": r.season,
-                    "age_group": r.age_group,
-                    "schema_version": r.schema_version,
-                    "fps": r.fps,
-                    "total_frames": r.total_frames,
-                }
-                for r in runs
-            ]
-        }
-    finally:
-        db.close()
+    q = db.query(AnalysisRun).filter_by(player_id=player_id)
+
+    if season is not None:
+        q = q.filter_by(season=season)
+
+    runs = q.order_by(AnalysisRun.created_at.desc()).all()
+
+    return {
+        "items": [
+            {
+                "run_id": str(r.run_id),
+                "created_at": r.created_at,
+                "season": r.season,
+                "age_group": r.age_group,
+                "schema_version": r.schema_version,
+                "fps": r.fps,
+                "total_frames": r.total_frames,
+            }
+            for r in runs
+        ]
+    }
 
 
 @router.get("/analysis-runs/{run_id}")
-def get_analysis_run(run_id: str):
-    """
-    Authoritative report fetch.
-    """
-    db = SessionLocal()
-    try:
-        run = db.query(AnalysisRun).filter_by(run_id=run_id).first()
-        if not run:
-            raise HTTPException(status_code=404, detail="Analysis run not found")
+def get_analysis_run(
+    run_id: str,
+    current_account=Depends(get_current_account),
+    db: Session = Depends(get_db),
+):
+    run = db.query(AnalysisRun).filter_by(run_id=run_id).first()
 
-        raw = db.query(AnalysisResultRaw).filter_by(run_id=run_id).first()
+    if not run:
+        raise HTTPException(status_code=404, detail="Analysis run not found")
 
-        return {
-            "run_id": str(run.run_id),
-            "player_id": str(run.player_id),
-            "season": run.season,
-            "age_group": run.age_group,
-            "created_at": run.created_at,
-            "schema_version": run.schema_version,
-            "result": raw.result_json if raw else None,
-        }
-    finally:
-        db.close()
+    # 🔐 Ownership check
+    link = (
+        db.query(AccountPlayerLink)
+        .filter_by(
+            account_id=current_account.account_id,
+            player_id=run.player_id,
+        )
+        .first()
+    )
+
+    if not link:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    raw = db.query(AnalysisResultRaw).filter_by(run_id=run_id).first()
+
+    return {
+        "run_id": str(run.run_id),
+        "player_id": str(run.player_id),
+        "season": run.season,
+        "age_group": run.age_group,
+        "created_at": run.created_at,
+        "schema_version": run.schema_version,
+        "result": raw.result_json if raw else None,
+    }
+
