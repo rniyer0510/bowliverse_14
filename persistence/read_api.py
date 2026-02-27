@@ -62,10 +62,15 @@ def list_players(
         .all()
     )
 
+    player_ids = [link.player_id for link in links]
+    players_by_id = {}
+    if player_ids:
+        player_rows = db.query(Player).filter(Player.player_id.in_(player_ids)).all()
+        players_by_id = {p.player_id: p for p in player_rows}
+
     players = []
     for link in links:
-        player = db.query(Player).filter_by(player_id=link.player_id).first()
-
+        player = players_by_id.get(link.player_id)
         players.append({
             "player_id": str(link.player_id),
             "player_name": link.player_name,
@@ -288,6 +293,6 @@ def get_analysis_run(
         "age_group": run.age_group,
         "created_at": run.created_at,
         "schema_version": run.schema_version,
+        "coach_notes": run.coach_notes,
         "result": raw.result_json if raw else None,
     }
-

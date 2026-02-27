@@ -46,7 +46,6 @@ def load_video(upload_file):
         events: dict (empty for now)
     """
 
-    logger.info("Starting video upload stream")
 
     # -----------------------------
     # Save uploaded file (STREAM SAFE)
@@ -55,7 +54,6 @@ def load_video(upload_file):
     with tmp as f:
         shutil.copyfileobj(upload_file.file, f)
 
-    logger.info(f"Video saved to temp path: {tmp.name}")
 
     # -----------------------------
     # Open video
@@ -66,10 +64,6 @@ def load_video(upload_file):
 
     fps = cap.get(cv2.CAP_PROP_FPS)
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-
-    logger.info(
-        f"Video opened | fps={fps:.2f} total_frames={total_frames}"
-    )
 
     pose_frames: List[Dict[str, Any]] = []
     frame_idx = 0
@@ -113,7 +107,6 @@ def load_video(upload_file):
 
     cap.release()
 
-    logger.info("Pose extraction completed")
 
     # -----------------------------
     # Return canonical payload
@@ -127,4 +120,3 @@ def load_video(upload_file):
     events = {}  # UAH / Release to be computed later
 
     return video, pose_frames, events
-

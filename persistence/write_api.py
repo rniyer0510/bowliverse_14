@@ -5,15 +5,16 @@ NOTE:
 Player creation & updates are handled via read_api.py
 """
 
+from datetime import datetime, timezone
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
-from typing import Optional
 import uuid
 
 from app.persistence.session import get_db
-from app.persistence.models import AnalysisRun
+from app.persistence.models import AnalysisRun, AccountPlayerLink
 from app.common.logger import get_logger
+from app.common.auth import get_current_account
 
 logger = get_logger(__name__)
 
@@ -29,6 +30,7 @@ class CoachNotesUpdate(BaseModel):
 async def update_coach_notes(
     run_id: str,
     update: CoachNotesUpdate,
+    current_account=Depends(get_current_account),
     db: Session = Depends(get_db)
 ):
     """
@@ -56,6 +58,18 @@ async def update_coach_notes(
     
     if not analysis_run:
         raise HTTPException(status_code=404, detail="Analysis run not found")
+
+    # Enforce account ownership/link access.
+    link = (
+        db.query(AccountPlayerLink)
+        .filter(
+            AccountPlayerLink.account_id == current_account.account_id,
+            AccountPlayerLink.player_id == analysis_run.player_id,
+        )
+        .first()
+    )
+    if not link:
+        raise HTTPException(status_code=403, detail="Access denied")
     
     # Update coach notes (can be empty string)
     analysis_run.coach_notes = update.coach_notes if update.coach_notes else None
@@ -67,18 +81,19 @@ async def update_coach_notes(
     except Exception as e:
         db.rollback()
         logger.error(f"Failed to update coach notes: {e}")
-        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to update coach notes")
     
     return {
         "run_id": str(analysis_run.run_id),
         "coach_notes": analysis_run.coach_notes or "",
-        "updated_at": analysis_run.created_at.isoformat()
+        "updated_at": datetime.now(timezone.utc).isoformat(),
     }
 
 
 @router.get("/analysis/{run_id}/coach-notes")
 async def get_coach_notes(
     run_id: str,
+    current_account=Depends(get_current_account),
     db: Session = Depends(get_db)
 ):
     """
@@ -104,6 +119,18 @@ async def get_coach_notes(
     
     if not analysis_run:
         raise HTTPException(status_code=404, detail="Analysis run not found")
+
+    # Enforce account ownership/link access.
+    link = (
+        db.query(AccountPlayerLink)
+        .filter(
+            AccountPlayerLink.account_id == current_account.account_id,
+            AccountPlayerLink.player_id == analysis_run.player_id,
+        )
+        .first()
+    )
+    if not link:
+        raise HTTPException(status_code=403, detail="Access denied")
     
     return {
         "run_id": str(analysis_run.run_id),

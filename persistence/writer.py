@@ -10,7 +10,6 @@ from app.persistence.models import (
     RiskMeasurement,
     Player,
 )
-from app.persistence.resolver import resolve_account
 from app.common.logger import get_logger
 
 logger = get_logger(__name__)
@@ -85,13 +84,6 @@ def write_analysis(result: dict, **kwargs) -> str:
 
         run_id = _coerce_uuid(run_id_raw)
 
-        actor = kwargs.get("actor", {}) or {}
-
-        # --------------------------------------------------------
-        # Resolve account only (identity layer)
-        # --------------------------------------------------------
-        account = resolve_account(db, actor)
-
         # --------------------------------------------------------
         # USE explicit player_id from result.input
         # --------------------------------------------------------
@@ -114,6 +106,13 @@ def write_analysis(result: dict, **kwargs) -> str:
 
         snapshot_season = player.season
         snapshot_age_group = player.age_group
+
+        override_season = kwargs.get("season")
+        override_age_group = kwargs.get("age_group")
+        if override_season is not None:
+            snapshot_season = int(override_season)
+        if override_age_group is not None:
+            snapshot_age_group = str(override_age_group).upper()
 
         # --------------------------------------------------------
         # schema_version
@@ -253,4 +252,3 @@ def write_analysis(result: dict, **kwargs) -> str:
 
     finally:
         db.close()
-
