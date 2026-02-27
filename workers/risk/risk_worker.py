@@ -30,7 +30,7 @@ RISK_CONFIG = {
 
 # ---------------------------------------------------------------------
 # Semantic override: "what body area should the footer mention?"
-# This is NOT physics, not a correction cue — just a safe, honest label.
+# This is NOT physics, not a correction cue - just a safe, honest label.
 # ---------------------------------------------------------------------
 PRIMARY_LOAD_OVERRIDE: Dict[str, str] = {
     # Foot-line deviation loads adductors/groin first (knee is downstream/secondary)
@@ -40,6 +40,12 @@ PRIMARY_LOAD_OVERRIDE: Dict[str, str] = {
     "trunk_rotation_snap": "lower back",
     "lateral_trunk_lean": "lower back",
 }
+
+# Pose landmarks
+LS, LE, LW = 11, 13, 15
+RS, RE, RW = 12, 14, 16
+LH, RH = 23, 24
+MIN_VIS = 0.25
 
 # ---------------------------------------------------------------------
 # Helpers
@@ -95,6 +101,66 @@ def _load_level_from_band(band: Optional[int]) -> Optional[str]:
     return "high"
 
 
+def _is_visible(lm: Optional[Dict[str, Any]]) -> bool:
+    if not isinstance(lm, dict):
+        return False
+    return _f(lm.get("visibility"), 0.0) >= MIN_VIS
+
+
+def _get_landmark(landmarks: List[Dict[str, Any]], idx: int) -> Optional[Dict[str, Any]]:
+    if idx < 0 or idx >= len(landmarks):
+        return None
+    val = landmarks[idx]
+    return val if isinstance(val, dict) else None
+
+
+def _is_rear_view_capture(pose_frames: List[Dict[str, Any]]) -> bool:
+    """
+    Heuristic for rear-view only:
+    - Torso (shoulders + hips) is visible in enough frames.
+    - Wrists are mostly not visible while torso remains visible.
+    """
+    torso_tracked = 0
+    wrist_visible = 0
+    elbow_visible = 0
+
+    for frame in pose_frames or []:
+        landmarks = (frame or {}).get("landmarks")
+        if not isinstance(landmarks, list) or not landmarks:
+            continue
+
+        ls = _get_landmark(landmarks, LS)
+        rs = _get_landmark(landmarks, RS)
+        lh = _get_landmark(landmarks, LH)
+        rh = _get_landmark(landmarks, RH)
+
+        shoulders_ok = _is_visible(ls) and _is_visible(rs)
+        hips_ok = _is_visible(lh) and _is_visible(rh)
+        if not (shoulders_ok and hips_ok):
+            continue
+
+        torso_tracked += 1
+
+        lw = _get_landmark(landmarks, LW)
+        rw = _get_landmark(landmarks, RW)
+        if _is_visible(lw) or _is_visible(rw):
+            wrist_visible += 1
+
+        le = _get_landmark(landmarks, LE)
+        re = _get_landmark(landmarks, RE)
+        if _is_visible(le) or _is_visible(re):
+            elbow_visible += 1
+
+    if torso_tracked < 20:
+        return False
+
+    wrist_ratio = wrist_visible / float(torso_tracked)
+    elbow_ratio = elbow_visible / float(torso_tracked)
+
+    # Rear-view signature: torso/elbows visible, wrists mostly occluded.
+    return wrist_ratio < 0.20 and elbow_ratio >= 0.55
+
+
 # ---------------------------------------------------------------------
 # Visual anchoring (EVENT-DRIVEN, LOCKED)
 # ---------------------------------------------------------------------
@@ -107,7 +173,7 @@ def _pick_visual_anchor_frame(
     - Front Foot Braking Shock -> FFC
     - Knee Brace Failure       -> FFC
     - Trunk Rotation Snap      -> UAH (else Release)
-    - Hip–Shoulder Mismatch    -> UAH (else Release)
+    - Hip-Shoulder Mismatch    -> UAH (else Release)
     - Lateral Trunk Lean       -> Release (else FFC)
     - Foot-Line Deviation      -> FFC + 1
     """
@@ -154,11 +220,23 @@ def _attach_visual(
     video: Dict[str, Any],
     events: Dict[str, Any],
     run_id: Optional[str],
+    rear_view_only: bool,
 ) -> Dict[str, Any]:
     """
     Attach visual evidence using EVENT-derived anchor.
     """
     if not isinstance(risk, dict):
+        return risk
+
+    if rear_view_only:
+        risk["capture_feedback"] = {
+            "view": "rear",
+            "message": (
+                "For better assessment, please record from the front-side angle "
+                "with the full body visible."
+            ),
+        }
+        risk["visual_unavailable_reason"] = risk["capture_feedback"]["message"]
         return risk
 
     video_path = video.get("path") or video.get("file_path")
@@ -257,6 +335,8 @@ def run_risk_worker(
     uah = _event_frame(events, "uah")
     rel = _event_frame(events, "release")
 
+    rear_view_only = _is_rear_view_capture(pose_frames)
+
     raw = [
         _emit(
             compute_front_foot_braking_shock(
@@ -315,8 +395,8 @@ def run_risk_worker(
                 video=video,
                 events=events,
                 run_id=run_id,
+                rear_view_only=rear_view_only,
             )
         )
 
     return out
-
