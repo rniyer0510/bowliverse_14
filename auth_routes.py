@@ -3,12 +3,24 @@ from sqlalchemy.orm import Session
 from datetime import datetime
 
 from app.persistence.session import get_db
-from app.persistence.models import User, Account, Player, AccountPlayerLink
+from app.persistence.models import (
+    User,
+    Account,
+    Player,
+    AccountPlayerLink,
+    AnalysisRun,
+    AnalysisResultRaw,
+    EventAnchor,
+    BiomechSignal,
+    RiskMeasurement,
+    VisualEvidence,
+)
 from app.common.auth import (
     hash_password,
     verify_password,
     create_access_token,
     get_current_account,
+    get_current_user,
 )
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -166,3 +178,82 @@ def get_me(current_account=Depends(get_current_account)):
         "name": current_account.name,
     }
 
+
+# ------------------------------------------------------------
+# Delete Authenticated Account
+# ------------------------------------------------------------
+@router.delete("/account")
+def delete_account(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    account_id = current_user.account_id
+
+    try:
+        owned_player_ids = [
+            row.player_id
+            for row in (
+                db.query(Player.player_id)
+                .filter(Player.primary_owner_account_id == account_id)
+                .all()
+            )
+        ]
+
+        if owned_player_ids:
+            run_ids = [
+                row.run_id
+                for row in (
+                    db.query(AnalysisRun.run_id)
+                    .filter(AnalysisRun.player_id.in_(owned_player_ids))
+                    .all()
+                )
+            ]
+
+            if run_ids:
+                db.query(EventAnchor).filter(
+                    EventAnchor.run_id.in_(run_ids)
+                ).delete(synchronize_session=False)
+                db.query(BiomechSignal).filter(
+                    BiomechSignal.run_id.in_(run_ids)
+                ).delete(synchronize_session=False)
+                db.query(RiskMeasurement).filter(
+                    RiskMeasurement.run_id.in_(run_ids)
+                ).delete(synchronize_session=False)
+                db.query(VisualEvidence).filter(
+                    VisualEvidence.run_id.in_(run_ids)
+                ).delete(synchronize_session=False)
+                db.query(AnalysisResultRaw).filter(
+                    AnalysisResultRaw.run_id.in_(run_ids)
+                ).delete(synchronize_session=False)
+                db.query(AnalysisRun).filter(
+                    AnalysisRun.run_id.in_(run_ids)
+                ).delete(synchronize_session=False)
+
+            db.query(AccountPlayerLink).filter(
+                AccountPlayerLink.player_id.in_(owned_player_ids)
+            ).delete(synchronize_session=False)
+            db.query(Player).filter(
+                Player.player_id.in_(owned_player_ids)
+            ).delete(synchronize_session=False)
+
+        # Remove any remaining shared links for this account.
+        db.query(AccountPlayerLink).filter(
+            AccountPlayerLink.account_id == account_id
+        ).delete(synchronize_session=False)
+
+        db.query(User).filter(User.account_id == account_id).delete(
+            synchronize_session=False
+        )
+        db.query(Account).filter(Account.account_id == account_id).delete(
+            synchronize_session=False
+        )
+
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to delete account",
+        )
+
+    return {"status": "deleted"}
