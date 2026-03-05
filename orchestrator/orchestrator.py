@@ -2,6 +2,7 @@ from fastapi import FastAPI, UploadFile, File, Form, Request, HTTPException, Dep
 from fastapi.staticfiles import StaticFiles
 from datetime import datetime
 import os
+import time
 import uuid
 
 from app.common.logger import get_logger
@@ -63,6 +64,40 @@ logger = get_logger(__name__)
 clinician_engine = ClinicianInterpreter()
 
 
+@app.middleware("http")
+async def request_logging_middleware(request: Request, call_next):
+    request_id = request.headers.get("x-request-id") or str(uuid.uuid4())
+    request.state.request_id = request_id
+
+    start = time.perf_counter()
+    client_ip = request.client.host if request.client else "-"
+    path = request.url.path
+
+    try:
+        response = await call_next(request)
+    except Exception:
+        duration_ms = (time.perf_counter() - start) * 1000
+        logger.exception(
+            f"[request] request_id={request_id} method={request.method} "
+            f"path={path} status=500 duration_ms={duration_ms:.1f} "
+            f"client_ip={client_ip}"
+        )
+        raise
+
+    duration_ms = (time.perf_counter() - start) * 1000
+    response.headers["X-Request-ID"] = request_id
+
+    # Avoid log flooding from static visual evidence fetches.
+    if not path.startswith("/visuals/"):
+        logger.info(
+            f"[request] request_id={request_id} method={request.method} "
+            f"path={path} status={response.status_code} "
+            f"duration_ms={duration_ms:.1f} client_ip={client_ip}"
+        )
+
+    return response
+
+
 def _delete_temp_video_safely(path: str):
     try:
         if path and os.path.exists(path):
@@ -105,6 +140,12 @@ def analyze(
     """
 
     run_id = str(uuid.uuid4())
+    request_id = getattr(request.state, "request_id", "-")
+
+    logger.info(
+        f"[analyze:start] request_id={request_id} run_id={run_id} "
+        f"account_id={current_account.account_id} player_id={player_id}"
+    )
 
     content_type = (file.content_type or "").lower()
     # Keep this permissive for low-end/older devices that often send wrong MIME.
@@ -113,6 +154,10 @@ def analyze(
         "application/json",
         "application/xml",
     }:
+        logger.warning(
+            f"[analyze:rejected] request_id={request_id} run_id={run_id} "
+            f"reason=unsupported_media_type content_type={content_type}"
+        )
         raise HTTPException(status_code=415, detail="Unsupported media type")
 
     # ------------------------------------------------------------
@@ -335,8 +380,16 @@ def analyze(
                 season=effective_season,
             )
         except Exception as e:
-            logger.error(f"Persistence failed for run_id={run_id}: {e}")
+            logger.error(
+                f"[analyze:persistence_failed] request_id={request_id} "
+                f"run_id={run_id} error={e}"
+            )
             raise HTTPException(status_code=500, detail="Analysis persistence failed")
+
+        logger.info(
+            f"[analyze:success] request_id={request_id} run_id={run_id} "
+            f"player_id={player_id} risks={len(risks)}"
+        )
 
         if video_temp_path:
             background_tasks.add_task(_delete_temp_video_safely, video_temp_path)
