@@ -341,3 +341,36 @@ class User(Base):
     role = Column(String, nullable=False)
     account_id = Column(UUID(as_uuid=True), ForeignKey("account.account_id"), nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class LoginAudit(Base):
+    __tablename__ = "login_audit"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+
+    user_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("user.user_id"),
+        nullable=True,
+    )
+
+    account_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("account.account_id"),
+        nullable=True,
+    )
+
+    username: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    login_time: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True),
+        default=datetime.utcnow,
+        nullable=False,
+    )
+    ip_address: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    device: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    success: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    failure_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 from datetime import datetime
 
@@ -14,7 +14,9 @@ from app.persistence.models import (
     BiomechSignal,
     RiskMeasurement,
     VisualEvidence,
+    LoginAudit,
 )
+from app.common.logger import get_logger
 from app.common.auth import (
     hash_password,
     verify_password,
@@ -24,6 +26,7 @@ from app.common.auth import (
 )
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+logger = get_logger(__name__)
 
 
 # ------------------------------------------------------------
@@ -51,6 +54,42 @@ def normalize_handedness(value: str):
         return "L"
     raise HTTPException(status_code=400, detail="Invalid handedness")
 
+
+
+
+def _record_login_audit(
+    *,
+    db: Session,
+    username: str,
+    request: Request,
+    success: bool,
+    user=None,
+    failure_reason=None,
+) -> None:
+    client_ip = request.client.host if request.client else None
+    device = request.headers.get("user-agent")
+
+    audit = LoginAudit(
+        user_id=getattr(user, "user_id", None),
+        account_id=getattr(user, "account_id", None),
+        username=username or None,
+        ip_address=client_ip,
+        device=device,
+        success=success,
+        failure_reason=failure_reason,
+    )
+
+    try:
+        db.add(audit)
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        logger.warning(
+            "[login:audit_failed] username=%s success=%s error=%s",
+            username,
+            success,
+            exc,
+        )
 
 # ------------------------------------------------------------
 # Register
@@ -144,18 +183,44 @@ def register(data: dict, db: Session = Depends(get_db)):
 # Login
 # ------------------------------------------------------------
 @router.post("/login")
-def login(data: dict, db: Session = Depends(get_db)):
+def login(
+    data: dict,
+    request: Request,
+    db: Session = Depends(get_db),
+):
 
     username = data.get("username", "").strip().lower()
     password = data.get("password")
 
     if not username or not password:
+        _record_login_audit(
+            db=db,
+            username=username,
+            request=request,
+            success=False,
+            failure_reason="missing_credentials",
+        )
         raise HTTPException(status_code=400, detail="Missing credentials")
 
     user = db.query(User).filter(User.username == username).first()
 
     if not user or not verify_password(password, user.password_hash):
+        _record_login_audit(
+            db=db,
+            username=username,
+            request=request,
+            success=False,
+            failure_reason="invalid_credentials",
+        )
         raise HTTPException(status_code=401, detail="Invalid credentials")
+
+    _record_login_audit(
+        db=db,
+        username=username,
+        request=request,
+        success=True,
+        user=user,
+    )
 
     token = create_access_token(user)
 
