@@ -12,6 +12,7 @@ from app.io.loader import load_video
 # Events
 from app.workers.events.release_uah import detect_release_uah
 from app.workers.events.ffc_bfc import detect_ffc_bfc
+from app.workers.events.delivery_guard import detect_delivery_candidates
 
 # Elbow
 from app.workers.elbow.elbow_signal import compute_elbow_signal
@@ -252,6 +253,22 @@ def analyze(
             fps_val = float(video.get("fps") or 0.0)
         except Exception:
             fps_val = 0.0
+
+        delivery_guard = detect_delivery_candidates(
+            pose_frames=pose_frames,
+            hand=hand,
+            fps=fps_val,
+        )
+        if int(delivery_guard.get("delivery_count") or 0) > 1:
+            logger.warning(
+                f"[analyze:rejected] request_id={request_id} run_id={run_id} "
+                f"reason=multiple_deliveries method={delivery_guard.get('method')} "
+                f"candidate_frames={delivery_guard.get('candidate_frames')}"
+            )
+            raise HTTPException(
+                status_code=400,
+                detail="Please upload a video with only one bowling delivery.",
+            )
 
         # ------------------------------------------------------------
         # Events
