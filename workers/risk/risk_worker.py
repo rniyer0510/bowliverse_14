@@ -241,6 +241,9 @@ def _attach_visual(
 
     video_path = video.get("path") or video.get("file_path")
     if not video_path:
+        risk["visual_unavailable_reason"] = (
+            "Video evidence could not be generated because the uploaded video path was missing."
+        )
         logger.warning("[risk_worker] Missing video path; skipping visual.")
         return risk
 
@@ -249,6 +252,9 @@ def _attach_visual(
 
     anchor = _pick_visual_anchor_frame(rid, events)
     if anchor is None:
+        risk["visual_unavailable_reason"] = (
+            "Video evidence could not be generated because a representative event frame was not found."
+        )
         logger.warning(f"[risk_worker] No anchor for {rid}; skipping visual.")
         return risk
 
@@ -282,20 +288,45 @@ def _attach_visual(
         if primary:
             load_body = str(primary[0]).lower()
 
-    visual = draw_and_save_visual(
-        video_path=video_path,
-        frame_idx=anchor,
-        risk_id=rid,
-        pose_frames=pose_frames,
-        visual_confidence=visual_band,
-        run_id=run_id,
-        load_body=load_body,
-        load_level=load_level,
-    )
+    candidate_frames = []
+    for frame_idx in (anchor, anchor + 1, anchor - 1, anchor + 2, anchor - 2):
+        bounded = max(0, min(int(frame_idx), len(pose_frames) - 1))
+        if bounded not in candidate_frames:
+            candidate_frames.append(bounded)
+
+    visual = None
+    chosen_frame = anchor
+    for frame_idx in candidate_frames:
+        visual = draw_and_save_visual(
+            video_path=video_path,
+            frame_idx=frame_idx,
+            risk_id=rid,
+            pose_frames=pose_frames,
+            visual_confidence=visual_band,
+            run_id=run_id,
+            load_body=load_body,
+            load_level=load_level,
+        )
+        if visual:
+            chosen_frame = frame_idx
+            break
 
     if visual:
         risk["visual"] = visual
+        if chosen_frame != anchor:
+            logger.info(
+                f"[risk_worker] Visual frame adjusted for {rid}: "
+                f"anchor={anchor} chosen={chosen_frame} run_id={run_id}"
+            )
         risk["visual_window"] = window
+    else:
+        risk["visual_unavailable_reason"] = (
+            "Video evidence could not be generated from the representative frame for this risk."
+        )
+        logger.warning(
+            f"[risk_worker] Visual render failed for {rid}; "
+            f"anchor={anchor} candidates={candidate_frames} run_id={run_id}"
+        )
 
     return risk
 

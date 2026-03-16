@@ -3,12 +3,16 @@ import cv2
 import numpy as np
 from typing import Optional, Tuple
 
+from app.common.logger import get_logger
+
 # ---------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------
 
 VISUAL_DIR = "/tmp/actionlab_frames"
 os.makedirs(VISUAL_DIR, exist_ok=True)
+
+logger = get_logger(__name__)
 
 PUBLIC_BASE_URL = os.environ.get(
     "ACTIONLAB_PUBLIC_BASE_URL",
@@ -38,6 +42,44 @@ def _safe_int(x):
         return int(x)
     except Exception:
         return None
+
+
+def _read_frame(video_path: str, frame_idx: int):
+    """
+    Best-effort frame reader.
+
+    Some mobile MP4s are flaky with direct random seek on specific frames.
+    We first try a direct seek, then fall back to sequential decode if needed.
+    """
+    cap = cv2.VideoCapture(video_path)
+    if not cap.isOpened():
+        return None
+
+    try:
+        cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
+        ok, frame = cap.read()
+        if ok and frame is not None:
+            return frame
+    finally:
+        cap.release()
+
+    cap = cv2.VideoCapture(video_path)
+    if not cap.isOpened():
+        return None
+
+    try:
+        idx = 0
+        while idx <= frame_idx:
+            ok, frame = cap.read()
+            if not ok:
+                return None
+            if idx == frame_idx:
+                return frame
+            idx += 1
+    finally:
+        cap.release()
+
+    return None
 
 
 def _risk_style(conf: str, scale: int):
@@ -470,14 +512,21 @@ def draw_and_save_visual(
         raise ValueError("run_id is required for visual generation")
 
     frame_idx = _safe_int(frame_idx)
-    if frame_idx is None or not video_path or not os.path.exists(video_path):
+    if frame_idx is None:
+        logger.warning("[visual_utils] Invalid frame_idx; cannot render visual.")
         return None
 
-    cap = cv2.VideoCapture(video_path)
-    cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
-    ok, frame = cap.read()
-    cap.release()
-    if not ok or frame is None:
+    if not video_path or not os.path.exists(video_path):
+        logger.warning(
+            f"[visual_utils] Video path missing for visual render: {video_path}"
+        )
+        return None
+
+    frame = _read_frame(video_path, frame_idx)
+    if frame is None:
+        logger.warning(
+            f"[visual_utils] Could not read frame {frame_idx} from {video_path}"
+        )
         return None
 
     if risk_id == "front_foot_braking_shock":
@@ -497,7 +546,10 @@ def draw_and_save_visual(
     os.makedirs(out_dir, exist_ok=True)
 
     fname = f"{risk_id}_{frame_idx}.png"
-    cv2.imwrite(os.path.join(out_dir, fname), frame)
+    out_path = os.path.join(out_dir, fname)
+    if not cv2.imwrite(out_path, frame):
+        logger.warning(f"[visual_utils] Failed to write visual to {out_path}")
+        return None
 
     return {
         "frame": frame_idx,
