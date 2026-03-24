@@ -37,16 +37,38 @@ class ClinicianInterpreter:
 
     # ---------- ELBOW ----------
     def build_elbow(self, raw: Dict[str, Any]) -> Dict[str, Any]:
-        ext = f(raw.get("extension_deg"))
+        ext_raw = raw.get("extension_deg")
+        ext = None if ext_raw is None else f(ext_raw)
         verdict = (raw.get("verdict") or "").upper()
+        reason = (raw.get("reason") or "").lower()
+
+        if ext is None:
+            if verdict == "ILLEGAL":
+                band = "ILLEGAL"
+                text = "Your bowling-arm flow appears abrupt through delivery and should be reviewed carefully for legality."
+            elif verdict == "SUSPECT":
+                band = "REVIEW"
+                text = "Your bowling-arm motion could not be cleared confidently and should be reviewed for legality."
+            elif verdict == "LEGAL":
+                band = "OK"
+                text = "Your bowling-arm flow appears smooth through delivery."
+            else:
+                band = "REVIEW"
+                text = "Elbow legality could not be confirmed clearly from this clip."
+            return {
+                "extension_deg": None,
+                "band": band,
+                "player_text": text,
+                "reason": reason or None,
+            }
 
         if verdict == "ILLEGAL":
             band = "ILLEGAL"
             text = "Your elbow action exceeds the legal extension limit."
-        elif ext <= 15.0:
+        elif ext <= 18.0:
             band = "OK"
             text = "Your elbow action is within the legal range."
-        elif ext <= 20.0:
+        elif ext <= 22.0:
             band = "BORDERLINE"
             text = "Your elbow action is close to the legal limit and should be monitored."
         else:
@@ -57,6 +79,7 @@ class ClinicianInterpreter:
             "extension_deg": round(ext, 2),
             "band": band,
             "player_text": text,
+            "reason": reason or None,
         }
 
     # ---------- KINETIC CHAIN ----------
@@ -136,12 +159,18 @@ class ClinicianInterpreter:
         return out
 
     # ---------- SUMMARY ----------
-    def build_summary(self, chain: Dict[str, Any], risks: List[Dict[str, Any]]) -> Dict[str, Any]:
+    def build_summary(
+        self,
+        chain: Dict[str, Any],
+        risks: List[Dict[str, Any]],
+        action: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
         red_hits = sum(
             1 for r in risks
             if r.get("severity") in ("HIGH", "VERY_HIGH")
             and r.get("confidence") == "HIGH"
         )
+        action_name = ((action or {}).get("action") or "UNKNOWN").upper()
 
         if red_hits >= 2:
             return {
@@ -157,22 +186,42 @@ class ClinicianInterpreter:
                 "recommendation_level": "MONITOR",
                 "confidence": chain.get("confidence", 1.0),
             }
+        elif action_name == "MIXED":
+            return {
+                "overall_assessment": (
+                    "This delivery does not show a strong confirmed risk, but your mixed "
+                    "action profile should be monitored for alignment and sequencing."
+                ),
+                "overall_severity": "MODERATE",
+                "recommendation_level": "MONITOR",
+                "confidence": chain.get("confidence", 1.0),
+            }
+        elif action_name == "UNKNOWN":
+            return {
+                "overall_assessment": (
+                    "This delivery could not be profiled clearly enough for a fully "
+                    "reassuring assessment."
+                ),
+                "overall_severity": "MODERATE",
+                "recommendation_level": "MONITOR",
+                "confidence": chain.get("confidence", 1.0),
+            }
         else:
             return {
-                "overall_assessment": "Your action is generally sound.",
+                "overall_assessment": "This delivery looks generally sound.",
                 "overall_severity": "LOW",
                 "recommendation_level": "MAINTAIN",
                 "confidence": chain.get("confidence", 1.0),
             }
 
     # ---------- FINAL ----------
-    def build(self, elbow, risks, interpretation, basics=None):
+    def build(self, elbow, risks, interpretation, basics=None, action=None):
         chain = self.build_chain(interpretation)
         built_risks = self.build_risks(risks)
-        summary = self.build_summary(chain, built_risks)
+        summary = self.build_summary(chain, built_risks, action=action)
         
         # ✨ NEW: Generate comprehensive WHY explanation
-        comprehensive_why = generate_comprehensive_why(built_risks)
+        comprehensive_why = generate_comprehensive_why(built_risks, action=action)
 
         return {
             "summary": summary,

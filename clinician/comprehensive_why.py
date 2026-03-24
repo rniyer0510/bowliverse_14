@@ -8,10 +8,13 @@ Plain-language biomechanical explanations.
 No muscle diagnoses. No gym prescriptions.
 """
 
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 
 
-def generate_comprehensive_why(risks: List[Dict[str, Any]]) -> Dict[str, str]:
+def generate_comprehensive_why(
+    risks: List[Dict[str, Any]],
+    action: Optional[Dict[str, Any]] = None,
+) -> Dict[str, str]:
     """
     Generate comprehensive WHY explanation based on detected risks.
 
@@ -26,29 +29,43 @@ def generate_comprehensive_why(risks: List[Dict[str, Any]]) -> Dict[str, str]:
             - what_to_focus_on
     """
 
+    action_name = ((action or {}).get("action") or "UNKNOWN").upper()
+
     # Filter to HIGH confidence risks
     high_confidence_risks = [
         r for r in risks
         if r.get("confidence") == "HIGH"
     ]
 
+    detected_risks = [
+        r for r in risks
+        if (r.get("severity") or "").upper() in {"MODERATE", "HIGH", "VERY_HIGH"}
+    ]
+
     risk_ids = [r.get("risk_id") for r in high_confidence_risks]
 
     # --------------------------------------------------
-    # NO RISKS
+    # NO HIGH-CONFIDENCE RISKS
     # --------------------------------------------------
     if not risk_ids:
+        if detected_risks:
+            if len(detected_risks) >= 2:
+                return _explain_multiple_detected_risks()
+            return _explain_single_detected_risk(detected_risks[0])
+        if action_name == "MIXED":
+            return _explain_mixed_action_monitor()
+        if action_name == "UNKNOWN":
+            return _explain_uncertain_action_profile()
         return {
-            "primary_cause": "Your action is biomechanically sound",
+            "primary_cause": "No strong concern seen in this delivery",
             "plain_explanation": (
-                "Your bowling action shows good mechanics with no significant concerns.\n\n"
-                "Every bowler has their own style - what matters is that your body moves "
-                "efficiently and safely. Your momentum flows smoothly through the delivery "
-                "without creating unnecessary stress.\n\n"
-                "Keep bowling naturally and stay consistent with your rhythm."
+                "This delivery does not show a strong confirmed biomechanical concern.\n\n"
+                "Every bowler has their own style. What matters most is whether the body "
+                "is moving in a way that looks controlled and repeatable.\n\n"
+                "On this delivery, your action looks generally well organized."
             ),
             "what_to_focus_on": (
-                "Maintain your current technique and stay consistent with your preparation."
+                "Keep building consistency and stay with the rhythm that feels natural to you."
             )
         }
 
@@ -110,35 +127,20 @@ def _explain_rotation_deficiency(rotation_risks: List[str]) -> Dict[str, str]:
         "primary_cause": "Rotation not fully completing through delivery",
 
         "plain_explanation": (
-            "Here's what's happening in your action:\n\n"
-
-            "When you run in to bowl, you build forward momentum. At release, "
-            "that momentum should transition smoothly into rotation through your "
-            "hips, trunk, and shoulders.\n\n"
-
-            "In your action, some of that forward energy is slowing down rather "
-            "than flowing through into rotation.\n\n"
-
-            "Think of it like this: Imagine running and then stopping suddenly "
-            "versus running and spinning in a circle. Stopping directs force into "
-            "one area. Spinning distributes it through the whole body.\n\n"
-
-            "When rotation doesn't complete smoothly:\n"
-            "• More load goes into the front leg\n"
-            "• Hips and shoulders may move together instead of sequentially\n"
-            "• The trunk may compensate to generate speed\n\n"
-
-            "These patterns are closely connected to how rotation is finishing "
-            "in your delivery."
+            "You build speed as you run in. That speed should keep flowing through "
+            "your hips, trunk, and shoulders during delivery.\n\n"
+            "In this delivery, some of that speed looks like it is slowing down too "
+            "early instead of flowing through the full chain.\n\n"
+            "When that happens, the body often tries to finish the action higher up "
+            "the chain. That can show up as more load on the front leg, the hips and "
+            "shoulders moving too much together, or the trunk working harder than it "
+            "should."
         ),
 
         "what_to_focus_on": (
-            "Focus on completing your follow-through.\n\n"
-
-            "After releasing the ball, allow your body to continue rotating "
-            "naturally instead of stopping early.\n\n"
-
-            "Think about letting momentum flow rather than forcing positions."
+            "Focus on letting the action keep flowing after release.\n\n"
+            "Try to let the body rotate through naturally instead of stopping early "
+            "or forcing positions."
         )
     }
 
@@ -146,39 +148,31 @@ def _explain_rotation_deficiency(rotation_risks: List[str]) -> Dict[str, str]:
 def _explain_front_leg_weakness(has_lean: bool) -> Dict[str, str]:
     lean_text = (
         "\n\n"
-        "Your body may shift slightly to the side as a natural way of "
-        "redistributing force during landing. This is a compensation pattern, "
-        "not a conscious mistake."
+        "Your body may also lean to the side because it is not staying balanced "
+        "over the front leg at landing."
     ) if has_lean else ""
 
     lean_focus = (
-        " As landing control improves, that sideways shift usually reduces naturally."
+        " As front-leg control improves, that sideways lean often reduces as well."
     ) if has_lean else ""
 
     return {
         "primary_cause": "Front leg not stabilizing landing smoothly",
 
         "plain_explanation": (
-            "Here's what's happening in your action:\n\n"
-
-            "When your front foot lands, that leg acts as the base around which "
-            "your body rotates. Ideally, it absorbs force and supports smooth rotation.\n\n"
-
-            "In your action, the landing phase is holding more force than ideal. "
-            "Instead of transferring energy upward into rotation, some of that "
-            "force remains in the leg."
-
+            "When your front foot lands, that leg becomes the base for the rest of "
+            "the action.\n\n"
+            "In this delivery, the front side does not look as stable as it could be. "
+            "Instead of passing force cleanly up the chain, more of it seems to stay "
+            "in the landing phase."
             f"{lean_text}\n\n"
-
-            "Think of it like rotating around a firm pole versus one that bends "
-            "slightly. The more stable the base, the cleaner the movement."
+            "That can make the rest of the action work harder to finish the delivery."
         ),
 
         "what_to_focus_on": (
-            "Focus on improving landing balance and control.\n\n"
-
-            "Work on smooth front-foot contact and controlled rotation rather "
-            "than trying to force the leg to stay rigid."
+            "Focus on landing balance and control.\n\n"
+            "Think about a smooth front-foot landing and letting the body rotate from "
+            "a strong base, rather than forcing the leg to be stiff."
 
             f"{lean_focus}"
         )
@@ -190,29 +184,18 @@ def _explain_mixed_issues() -> Dict[str, str]:
         "primary_cause": "Rotation timing and landing control both affecting force flow",
 
         "plain_explanation": (
-            "Here's what's happening in your action:\n\n"
-
-            "Two related patterns are influencing your delivery:\n\n"
-
-            "1. Rotation is not fully completing, so forward momentum slows "
-            "instead of flowing through.\n\n"
-
-            "2. Your landing phase is absorbing more force than ideal, affecting "
-            "how efficiently rotation happens.\n\n"
-
-            "When both occur together, more stress remains in the lower body "
-            "instead of being distributed through the full kinetic chain.\n\n"
-
-            "These patterns are adjustable with awareness and focused work."
+            "Two linked things may be happening in this delivery.\n\n"
+            "First, force is not flowing through rotation as cleanly as it could.\n\n"
+            "Second, the landing phase is taking more load than ideal.\n\n"
+            "When both happen together, the body can lose flow at the base and then "
+            "try to recover it later in the chain."
         ),
 
         "what_to_focus_on": (
-            "Two focus areas:\n\n"
-
-            "1. Allow rotation to continue naturally after release.\n\n"
-            "2. Improve landing balance and stability during front-foot contact.\n\n"
-
-            "Prioritize rhythm and smooth transitions over forcing positions."
+            "Focus on two things:\n\n"
+            "1. Better balance and control at landing.\n\n"
+            "2. Letting rotation continue smoothly through release.\n\n"
+            "Prioritize rhythm and smooth flow over forcing positions."
         )
     }
 
@@ -222,24 +205,85 @@ def _explain_alignment_issues() -> Dict[str, str]:
         "primary_cause": "Delivery alignment and consistency",
 
         "plain_explanation": (
-            "Here's what's happening in your action:\n\n"
-
-            "Your overall mechanics are solid, but small variations in landing "
-            "position or trunk alignment are occurring from delivery to delivery.\n\n"
-
-            "This is not a major biomechanical concern. It reflects consistency "
-            "patterns that develop with repetition.\n\n"
-
-            "Like a basketball free throw, repeating the same motion builds "
-            "automatic alignment over time."
+            "Your overall action looks functional, but there are small changes in "
+            "how you land or line up from delivery to delivery.\n\n"
+            "This does not automatically mean there is a major problem. It usually "
+            "means the action is not repeating in exactly the same way each time."
         ),
 
         "what_to_focus_on": (
-            "Focus on repetition and rhythm.\n\n"
-
-            "Using consistent video feedback can help increase awareness of "
-            "small variations in landing and trunk position."
+            "Focus on repetition, rhythm, and a repeatable setup into landing.\n\n"
+            "Video feedback can help you notice small changes in alignment over time."
         )
+    }
+
+
+def _explain_single_detected_risk(risk: Dict[str, Any]) -> Dict[str, str]:
+    title = risk.get("title") or "a movement pattern"
+    return {
+        "primary_cause": f"{title} needs monitoring",
+        "plain_explanation": (
+            f"This delivery showed a risk pattern related to {title.lower()}.\n\n"
+            "That does not automatically mean there is a major problem, but it does "
+            "mean this delivery should be monitored rather than cleared."
+        ),
+        "what_to_focus_on": (
+            "Keep an eye on this pattern over repeated deliveries and use video "
+            "feedback to see if it keeps showing up."
+        ),
+    }
+
+
+def _explain_multiple_detected_risks() -> Dict[str, str]:
+    return {
+        "primary_cause": "More than one risk pattern needs monitoring",
+        "plain_explanation": (
+            "This delivery showed more than one risk pattern.\n\n"
+            "That does not mean there is a crisis, but it does mean this delivery "
+            "should not be cleared too quickly from one clip."
+        ),
+        "what_to_focus_on": (
+            "Monitor these patterns across repeated deliveries. If they keep showing "
+            "up, work with a coach to review your action in more detail."
+        ),
+    }
+
+
+def _explain_mixed_action_monitor() -> Dict[str, str]:
+    return {
+        "primary_cause": "Mixed action profile worth monitoring",
+        "plain_explanation": (
+            "This delivery does not show a strong confirmed high-risk pattern, "
+            "but your action profile is classified as mixed.\n\n"
+            "A mixed action can still work well, but it is worth watching more "
+            "carefully because alignment and sequencing can vary from one ball to "
+            "the next.\n\n"
+            "In simple terms, this is not a strong concern from one delivery, but "
+            "it is not something we should fully clear from one delivery either."
+        ),
+        "what_to_focus_on": (
+            "Monitor this action across repeated deliveries, especially trunk "
+            "alignment and hip-shoulder sequencing.\n\n"
+            "Use a clear bowling-arm-side video angle so the action profile and "
+            "risk visuals can be judged more confidently."
+        ),
+    }
+
+
+def _explain_uncertain_action_profile() -> Dict[str, str]:
+    return {
+        "primary_cause": "Action profile could not be confirmed clearly",
+        "plain_explanation": (
+            "This delivery did not provide enough clear information to give a "
+            "fully reassuring action-profile interpretation.\n\n"
+            "That does not mean the action is unsafe. It means this clip should be "
+            "treated with caution rather than confidently cleared."
+        ),
+        "what_to_focus_on": (
+            "Record another clip with the full body visible from the bowling-arm "
+            "side and continue monitoring repeated deliveries rather than "
+            "drawing conclusions from one unclear clip."
+        ),
     }
 
 
@@ -248,27 +292,19 @@ def _explain_hip_shoulder_only() -> Dict[str, str]:
         "primary_cause": "Hips and shoulders rotating together",
 
         "plain_explanation": (
-            "Here's what's happening in your action:\n\n"
-
-            "In many bowling actions, hips rotate first and shoulders follow, "
-            "creating a slight separation that builds elastic energy.\n\n"
-
-            "In your delivery, hips and shoulders are rotating more together. "
-            "This reduces the 'coiling' effect but does not automatically make "
-            "the action unsafe.\n\n"
-
-            "Many successful bowlers use this style effectively. It reflects "
-            "a movement preference rather than a flaw."
+            "In many bowling actions, the hips start the turn and the shoulders "
+            "follow.\n\n"
+            "In this delivery, the hips and shoulders look like they are turning "
+            "more together.\n\n"
+            "That can reduce the build-up of elastic separation, but it does not "
+            "automatically make the action unsafe. Many bowlers use this style."
         ),
 
         "what_to_focus_on": (
-            "This pattern is optional to change.\n\n"
-
-            "If you want more elastic separation, experiment with allowing "
-            "hips to initiate rotation slightly before the shoulders.\n\n"
-
-            "If your action feels natural and effective, you do not need "
-            "to force a change."
+            "This is optional to change.\n\n"
+            "If you want more separation, try letting the hips start the turn a "
+            "little before the shoulders.\n\n"
+            "If the action feels natural and effective, you do not need to force it."
         )
     }
 
@@ -278,22 +314,16 @@ def _explain_general_pattern() -> Dict[str, str]:
         "primary_cause": "Delivery timing and force sequencing",
 
         "plain_explanation": (
-            "Bowling is a chain of movements that must flow smoothly:\n"
-            "run-up → back foot contact → hip rotation → front foot contact → "
-            "release → follow-through.\n\n"
-
-            "In your action, some elements of this sequence are slightly out of "
-            "sync. When timing shifts, force may concentrate in certain areas "
-            "instead of flowing evenly.\n\n"
-
-            "These are timing patterns rather than fundamental flaws."
+            "Bowling works best when force flows smoothly from the run-up, through "
+            "landing, into release, and then through the follow-through.\n\n"
+            "In this delivery, some parts of that sequence look slightly out of sync. "
+            "When that happens, force can build up in one area instead of flowing "
+            "cleanly through the whole action.\n\n"
+            "This is more about timing and flow than a major flaw."
         ),
 
         "what_to_focus_on": (
-            "Work on smooth transitions between each phase of your delivery.\n\n"
-
-            "Video feedback can help you identify where rhythm or timing "
-            "can be improved."
+            "Focus on smooth transitions through the action.\n\n"
+            "Video feedback can help you spot where rhythm or timing can improve."
         )
     }
-

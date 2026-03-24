@@ -396,6 +396,8 @@ def detect_release_uah(
     # Search backward from release for best horizontal arm
     uah_i = max(0, release_i - 1)
     best_score = 1e9
+    uah_method = "release_minus_one_fallback"
+    uah_confidence = 0.20
 
     for i in range(release_i - 1, max(0, release_i - int(0.30 * fps)), -1):
         if not is_pre_followthrough(i):
@@ -408,6 +410,9 @@ def detect_release_uah(
 
     if uah_i >= release_i:
         uah_i = max(0, release_i - 1)
+    elif best_score < 1e9:
+        uah_method = "upper_arm_horizontal"
+        uah_confidence = max(0.35, 0.90 - min(best_score, 25.0) / 40.0)
 
     # ------------------------------------------------------------
     # DEBUG
@@ -454,8 +459,16 @@ def detect_release_uah(
     # RETURN (contract preserved + non-breaking additions)
     # ------------------------------------------------------------
     return {
-        "release": {"frame": int(frames[release_i])},
-        "uah": {"frame": int(frames[uah_i])},
+        "release": {
+            "frame": int(frames[release_i]),
+            "method": selection_method,
+            "confidence": round(float(selection_confidence), 2),
+        },
+        "uah": {
+            "frame": int(frames[uah_i]),
+            "method": uah_method,
+            "confidence": round(float(uah_confidence), 2),
+        },
 
         # Non-breaking additions:
         # delivery_window is the exact window used for release selection,

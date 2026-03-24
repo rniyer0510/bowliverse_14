@@ -16,6 +16,16 @@ from app.workers.risk.benchmarks import attach_deviation_and_impact
 
 logger = get_logger(__name__)
 
+FULL_BODY_GUIDANCE_MESSAGE = (
+    "For better assessment, please record from the front-side angle "
+    "with the full body visible."
+)
+EVENT_CHAIN_GUIDANCE_MESSAGE = (
+    "Visual not rendered because this clip did not provide a reliable "
+    "release-to-landing sequence. Please retake from the front-side angle "
+    "with the full body visible throughout the action."
+)
+
 # ---------------------------------------------------------------------
 # Risk configuration (LOCKED floors)
 # ---------------------------------------------------------------------
@@ -86,6 +96,13 @@ def _event_frame(events: Dict[str, Any], key: str) -> Optional[int]:
         return int(f)
     except Exception:
         return None
+
+
+def _event_value(events: Dict[str, Any], key: str, field: str, default: Any = None) -> Any:
+    obj = events.get(key) or {}
+    if not isinstance(obj, dict):
+        return default
+    return obj.get(field, default)
 
 
 def _load_level_from_band(band: Optional[int]) -> Optional[str]:
@@ -199,6 +216,44 @@ def _pick_visual_anchor_frame(
     return rel or ffc or bfc or uah
 
 
+def _should_suppress_visual_for_event_chain(
+    risk_id: str,
+    events: Dict[str, Any],
+) -> bool:
+    release_method = str(_event_value(events, "release", "method", "") or "")
+    uah_method = str(_event_value(events, "uah", "method", "") or "")
+    ffc_method = str(_event_value(events, "ffc", "method", "") or "")
+
+    release_frame = _event_frame(events, "release")
+    uah_frame = _event_frame(events, "uah")
+
+    weak_release = release_method in {"peak_plus_offset", "window_start"}
+    weak_uah = (
+        uah_method == "release_minus_one_fallback"
+        or (
+            release_frame is not None
+            and uah_frame is not None
+            and uah_frame >= release_frame - 1
+        )
+    )
+    weak_ffc = ffc_method in {"ultimate_fallback", "no_foot_data_fallback"}
+    weak_foot_line_ffc = weak_ffc or ffc_method == "single_foot_fallback"
+
+    if risk_id in ("trunk_rotation_snap", "hip_shoulder_mismatch"):
+        return weak_release and weak_uah
+
+    if risk_id == "lateral_trunk_lean":
+        return weak_release and (weak_uah or weak_ffc)
+
+    if risk_id in ("front_foot_braking_shock", "knee_brace_failure"):
+        return weak_release and weak_ffc
+
+    if risk_id == "foot_line_deviation":
+        return weak_release and weak_foot_line_ffc
+
+    return False
+
+
 def _visual_window_for_anchor(
     anchor: int,
     fps: float,
@@ -231,10 +286,7 @@ def _attach_visual(
     if rear_view_only:
         risk["capture_feedback"] = {
             "view": "rear",
-            "message": (
-                "For better assessment, please record from the front-side angle "
-                "with the full body visible."
-            ),
+            "message": FULL_BODY_GUIDANCE_MESSAGE,
         }
         risk["visual_unavailable_reason"] = risk["capture_feedback"]["message"]
         return risk
@@ -249,6 +301,16 @@ def _attach_visual(
 
     fps = float(video.get("fps") or 25.0)
     rid = str(risk.get("risk_id") or "")
+
+    if _should_suppress_visual_for_event_chain(rid, events):
+        risk["capture_feedback"] = {
+            "view": "front_or_unknown",
+            "issue": "weak_event_chain",
+            "message": EVENT_CHAIN_GUIDANCE_MESSAGE,
+        }
+        risk["visual_unavailable_reason"] = EVENT_CHAIN_GUIDANCE_MESSAGE
+        logger.info(f"[risk_worker] Weak event chain for {rid}; skipping visual.")
+        return risk
 
     anchor = _pick_visual_anchor_frame(rid, events)
     if anchor is None:
