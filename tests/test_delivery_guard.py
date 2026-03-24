@@ -102,11 +102,15 @@ class DeliveryGuardTests(unittest.TestCase):
             "app.orchestrator.orchestrator.load_video",
             return_value=({"path": "/tmp/fake.mp4", "fps": 30.0, "total_frames": 150}, [], {}),
         ), patch(
-            "app.orchestrator.orchestrator.detect_delivery_candidates",
+            "app.orchestrator.orchestrator.run_preanalysis_screen",
             return_value={
-                "delivery_count": 2,
-                "method": "wrist_velocity",
-                "candidate_frames": [40, 100],
+                "passed": False,
+                "blocking_issues": [
+                    {
+                        "code": "multiple_deliveries",
+                        "detail": "Please upload a video with only one bowling delivery.",
+                    }
+                ],
             },
         ):
             with self.assertRaises(HTTPException) as context:
@@ -125,7 +129,10 @@ class DeliveryGuardTests(unittest.TestCase):
         self.assertEqual(context.exception.status_code, 400)
         self.assertEqual(
             context.exception.detail,
-            "Please upload a video with only one bowling delivery.",
+            {
+                "code": "multiple_deliveries",
+                "message": "Please upload a video with only one bowling delivery.",
+            },
         )
 
 

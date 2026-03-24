@@ -1,0 +1,99 @@
+import unittest
+
+from app.workers.speed.release_speed import estimate_release_speed
+
+
+def _blank_landmarks():
+    return [
+        {"x": 0.5, "y": 0.5, "z": 0.0, "visibility": 0.0}
+        for _ in range(33)
+    ]
+
+
+def _set_pt(landmarks, index, x, y, vis=0.95):
+    landmarks[index] = {
+        "x": float(x),
+        "y": float(y),
+        "z": 0.0,
+        "visibility": float(vis),
+    }
+
+
+def _frame(frame_idx, wrist_x, wrist_y, shoulder_x=0.48, shoulder_y=0.30):
+    lm = _blank_landmarks()
+    _set_pt(lm, 12, shoulder_x, shoulder_y)
+    _set_pt(lm, 14, shoulder_x + 0.05, shoulder_y + 0.09)
+    _set_pt(lm, 16, wrist_x, wrist_y)
+    _set_pt(lm, 11, 0.42, 0.30)
+    _set_pt(lm, 23, 0.46, 0.58)
+    _set_pt(lm, 24, 0.54, 0.58)
+    _set_pt(lm, 25, 0.47, 0.73)
+    _set_pt(lm, 26, 0.55, 0.73)
+    _set_pt(lm, 27, 0.48, 0.93)
+    _set_pt(lm, 28, 0.56, 0.93)
+    return {"frame": frame_idx, "landmarks": lm}
+
+
+class ReleaseSpeedTests(unittest.TestCase):
+    def test_returns_estimated_speed_with_tilde_display(self):
+        pose_frames = [
+            _frame(0, 0.40, 0.58),
+            _frame(1, 0.50, 0.50),
+            _frame(2, 0.63, 0.39),
+            _frame(3, 0.78, 0.28),
+            _frame(4, 0.88, 0.23),
+            _frame(5, 0.94, 0.20),
+            _frame(6, 0.98, 0.18),
+        ]
+
+        result = estimate_release_speed(
+            pose_frames=pose_frames,
+            events={"release": {"frame": 3}},
+            video={"fps": 60.0, "width": 360, "height": 640},
+            hand="R",
+        )
+
+        self.assertTrue(result["available"])
+        self.assertTrue(result["display"].startswith("~"))
+        self.assertGreaterEqual(result["value_kph"], 90)
+        self.assertLessEqual(result["value_kph"], 145)
+        self.assertGreater(result["confidence"], 0.25)
+        self.assertEqual(result["method"], "release_kinematics_research_v2")
+
+    def test_missing_release_window_returns_unavailable(self):
+        pose_frames = [_frame(0, 0.40, 0.58), _frame(1, 0.50, 0.50)]
+
+        result = estimate_release_speed(
+            pose_frames=pose_frames,
+            events={"release": {"frame": 0}},
+            video={"fps": 25.0, "width": 360, "height": 640},
+            hand="R",
+        )
+
+        self.assertFalse(result["available"])
+        self.assertEqual(result["reason"], "missing_release_window")
+
+    def test_unstable_arm_scale_returns_unavailable(self):
+        pose_frames = [
+            _frame(0, 0.40, 0.58),
+            _frame(1, 0.52, 0.48),
+            _frame(2, 0.68, 0.35),
+            _frame(3, 0.91, 0.20),
+            _frame(4, 0.56, 0.50),
+            _frame(5, 0.92, 0.18),
+            _frame(6, 0.58, 0.46),
+        ]
+
+        result = estimate_release_speed(
+            pose_frames=pose_frames,
+            events={"release": {"frame": 3}},
+            video={"fps": 60.0, "width": 360, "height": 640},
+            hand="R",
+        )
+
+        self.assertFalse(result["available"])
+        self.assertEqual(result["reason"], "unstable_release_window")
+
+
+if __name__ == "__main__":
+    unittest.main()

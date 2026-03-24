@@ -64,6 +64,8 @@ def load_video(upload_file):
 
     fps = cap.get(cv2.CAP_PROP_FPS)
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH) or 0)
+    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT) or 0)
 
     pose_frames: List[Dict[str, Any]] = []
     frame_idx = 0
@@ -115,6 +117,8 @@ def load_video(upload_file):
         "path": tmp.name,
         "fps": fps,
         "total_frames": total_frames,
+        "width": width,
+        "height": height,
     }
 
     events = {}  # UAH / Release to be computed later

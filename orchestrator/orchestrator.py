@@ -8,14 +8,15 @@ import uuid
 from app.common.logger import get_logger
 from app.common.auth import get_current_account
 from app.io.loader import load_video
+from app.workers.screening.video_screen import run_preanalysis_screen
+from app.workers.speed.release_speed import estimate_release_speed
 
 # Events
 from app.workers.events.release_uah import detect_release_uah
 from app.workers.events.ffc_bfc import detect_ffc_bfc
-from app.workers.events.delivery_guard import detect_delivery_candidates
 
 # Elbow
-from app.workers.elbow.elbow_signal import compute_elbow_signal
+from app.workers.elbow.compute_elbow_signal import compute_elbow_signal
 from app.workers.elbow.elbow_legality import evaluate_elbow_legality
 
 # Action
@@ -106,6 +107,46 @@ def _delete_temp_video_safely(path: str):
     except Exception:
         # Best effort cleanup only.
         pass
+
+
+def _reject_with_code(
+    *,
+    request_id: str,
+    run_id: str,
+    code: str,
+    detail: str,
+    extra: str = "",
+) -> None:
+    extra_suffix = f" {extra}" if extra else ""
+    logger.warning(
+        f"[analyze:rejected] request_id={request_id} run_id={run_id} "
+        f"reason={code}{extra_suffix}"
+    )
+    raise HTTPException(
+        status_code=400,
+        detail={
+            "code": code,
+            "message": detail,
+        },
+    )
+
+
+def _reject_for_screening_failure(
+    *,
+    request_id: str,
+    run_id: str,
+    screening: dict,
+) -> None:
+    issues = screening.get("blocking_issues") or []
+    issue = issues[0] if issues else {}
+    code = str(issue.get("code") or "screening_failed")
+    detail = str(issue.get("detail") or "Video failed pre-analysis screening.")
+    _reject_with_code(
+        request_id=request_id,
+        run_id=run_id,
+        code=code,
+        detail=detail,
+    )
 
 
 # ------------------------------------------------------------
@@ -217,7 +258,13 @@ def analyze(
             normalized_age_group = age_group.strip().upper()
             allowed_age_groups = {"U10", "U14", "U16", "U19", "SENIOR"}
             if normalized_age_group not in allowed_age_groups:
-                raise HTTPException(status_code=400, detail="Invalid age_group")
+                raise HTTPException(
+                    status_code=400,
+                    detail={
+                        "code": "invalid_age_group",
+                        "message": "Invalid age_group",
+                    },
+                )
             effective_age_group = normalized_age_group
 
         if season is not None:
@@ -225,7 +272,10 @@ def analyze(
             if season < current_year - 1 or season > current_year + 1:
                 raise HTTPException(
                     status_code=400,
-                    detail="Season must be within ±1 of current year",
+                    detail={
+                        "code": "invalid_season",
+                        "message": "Season must be within ±1 of current year",
+                    },
                 )
             effective_season = season
 
@@ -244,7 +294,13 @@ def analyze(
         except RuntimeError:
             raise HTTPException(
                 status_code=400,
-                detail="Could not read uploaded video. Please upload a playable video file.",
+                detail={
+                    "code": "invalid_video",
+                    "message": (
+                        "Could not read uploaded video. Please upload a playable "
+                        "video file."
+                    ),
+                },
             )
 
         video_temp_path = video.get("path")
@@ -254,20 +310,16 @@ def analyze(
         except Exception:
             fps_val = 0.0
 
-        delivery_guard = detect_delivery_candidates(
+        screening = run_preanalysis_screen(
+            video=video,
             pose_frames=pose_frames,
             hand=hand,
-            fps=fps_val,
         )
-        if int(delivery_guard.get("delivery_count") or 0) > 1:
-            logger.warning(
-                f"[analyze:rejected] request_id={request_id} run_id={run_id} "
-                f"reason=multiple_deliveries method={delivery_guard.get('method')} "
-                f"candidate_frames={delivery_guard.get('candidate_frames')}"
-            )
-            raise HTTPException(
-                status_code=400,
-                detail="Please upload a video with only one bowling delivery.",
+        if not screening.get("passed"):
+            _reject_for_screening_failure(
+                request_id=request_id,
+                run_id=run_id,
+                screening=screening,
             )
 
         # ------------------------------------------------------------
@@ -347,6 +399,17 @@ def analyze(
             events=events,
             fps=fps_val,
             pose_frames=pose_frames,
+            hand=hand,
+        )
+
+        # ------------------------------------------------------------
+        # Estimated Release Speed (Research)
+        # ------------------------------------------------------------
+        estimated_release_speed = estimate_release_speed(
+            pose_frames=pose_frames,
+            events=events,
+            video=video,
+            hand=hand,
         )
 
         # ------------------------------------------------------------
@@ -356,6 +419,7 @@ def analyze(
             elbow=elbow,
             risks=risks,
             interpretation=interpretation,
+            action=action,
         )
 
         # ------------------------------------------------------------
@@ -376,6 +440,7 @@ def analyze(
             },
             "events": events,
             "elbow": elbow,
+            "estimated_release_speed": estimated_release_speed,
             "action": action,
             "risks": risks,
             "basics": basics,
