@@ -14,6 +14,7 @@ from app.workers.speed.release_speed import estimate_release_speed
 # Events
 from app.workers.events.release_uah import detect_release_uah
 from app.workers.events.ffc_bfc import detect_ffc_bfc
+from app.workers.events.event_confidence import chain_quality
 
 # Elbow
 from app.workers.elbow.compute_elbow_signal import compute_elbow_signal
@@ -64,6 +65,25 @@ if AUTO_CREATE_SCHEMA:
 
 logger = get_logger(__name__)
 clinician_engine = ClinicianInterpreter()
+
+
+def _compact_header(value: str, limit: int = 120) -> str:
+    text = (value or "").strip()
+    if len(text) <= limit:
+        return text
+    return f"{text[: limit - 3]}..."
+
+
+def _platform_hint(request: Request) -> str:
+    explicit = (request.headers.get("x-client-platform") or "").strip().lower()
+    if explicit:
+        return explicit
+    user_agent = (request.headers.get("user-agent") or "").lower()
+    if "iphone" in user_agent or "ios" in user_agent:
+        return "ios"
+    if "android" in user_agent:
+        return "android"
+    return "unknown"
 
 
 @app.middleware("http")
@@ -149,6 +169,88 @@ def _reject_for_screening_failure(
     )
 
 
+def _gate_speed_estimate(
+    *,
+    estimated_release_speed: dict,
+    event_chain: dict,
+    events: dict,
+) -> dict:
+    if not estimated_release_speed.get("available"):
+        return estimated_release_speed
+
+    ordered = bool((event_chain or {}).get("ordered"))
+    chain_quality = float((event_chain or {}).get("quality") or 0.0)
+    release_confidence = float(((events or {}).get("release") or {}).get("confidence") or 0.0)
+    speed_confidence = float(estimated_release_speed.get("confidence") or 0.0)
+
+    weak_anchor_names = []
+    weak_fallback_methods = {"ultimate_fallback", "single_foot_fallback", "no_foot_data_fallback"}
+    for name in ("ffc", "bfc"):
+        event = (events or {}).get(name) or {}
+        method = str(event.get("method") or "")
+        confidence = float(event.get("confidence") or 0.0)
+        if method in weak_fallback_methods and confidence <= 0.20:
+            weak_anchor_names.append(name)
+
+    if not ordered:
+        return {
+            **estimated_release_speed,
+            "available": False,
+            "display_policy": "suppress",
+            "display": None,
+            "value_kph": None,
+            "confidence": 0.0,
+            "reason": "event_chain_unordered",
+        }
+
+    can_show_low_confidence = (
+        ordered
+        and release_confidence >= 0.50
+        and speed_confidence >= 0.50
+        and chain_quality >= 0.20
+    )
+
+    if chain_quality < 0.35 and can_show_low_confidence:
+        return {
+            **estimated_release_speed,
+            "available": True,
+            "display_policy": "show_low_confidence",
+            "reason": "low_event_chain_quality",
+        }
+
+    if chain_quality < 0.35:
+        return {
+            **estimated_release_speed,
+            "available": False,
+            "display_policy": "suppress",
+            "display": None,
+            "value_kph": None,
+            "confidence": 0.0,
+            "reason": "low_event_chain_quality",
+        }
+
+    if weak_anchor_names and can_show_low_confidence:
+        return {
+            **estimated_release_speed,
+            "available": True,
+            "display_policy": "show_low_confidence",
+            "reason": f"weak_{'_'.join(weak_anchor_names)}_anchor",
+        }
+
+    if weak_anchor_names:
+            return {
+                **estimated_release_speed,
+                "available": False,
+                "display_policy": "suppress",
+                "display": None,
+                "value_kph": None,
+                "confidence": 0.0,
+                "reason": f"weak_{'_'.join(weak_anchor_names)}_anchor",
+            }
+
+    return estimated_release_speed
+
+
 # ------------------------------------------------------------
 # Serve Visual Evidence
 # ------------------------------------------------------------
@@ -186,7 +288,11 @@ def analyze(
 
     logger.info(
         f"[analyze:start] request_id={request_id} run_id={run_id} "
-        f"account_id={current_account.account_id} player_id={player_id}"
+        f"account_id={current_account.account_id} player_id={player_id} "
+        f"platform={_platform_hint(request)} "
+        f"content_type={file.content_type or '-'} "
+        f"filename={file.filename or '-'} "
+        f"user_agent={_compact_header(request.headers.get('user-agent') or '-')}"
     )
 
     content_type = (file.content_type or "").lower()
@@ -304,11 +410,25 @@ def analyze(
             )
 
         video_temp_path = video.get("path")
+        temp_file_size = None
+        if video_temp_path and os.path.exists(video_temp_path):
+            try:
+                temp_file_size = os.path.getsize(video_temp_path)
+            except Exception:
+                temp_file_size = None
 
         try:
             fps_val = float(video.get("fps") or 0.0)
         except Exception:
             fps_val = 0.0
+
+        logger.info(
+            f"[analyze:video] request_id={request_id} run_id={run_id} "
+            f"platform={_platform_hint(request)} "
+            f"fps={fps_val:.3f} width={video.get('width')} height={video.get('height')} "
+            f"frames={video.get('total_frames')} "
+            f"file_size_bytes={temp_file_size if temp_file_size is not None else '-'}"
+        )
 
         screening = run_preanalysis_screen(
             video=video,
@@ -343,12 +463,28 @@ def analyze(
                 hand=hand,
                 release_frame=release_frame,
                 delivery_window=tuple(delivery_window),
+                fps=fps_val,
             )
             if foot_events:
                 events.update(foot_events)
 
         bfc_frame = (events.get("bfc") or {}).get("frame")
         ffc_frame = (events.get("ffc") or {}).get("frame")
+        uah_frame = (events.get("uah") or {}).get("frame")
+        release_confidence = float((events.get("release") or {}).get("confidence") or 0.0)
+        uah_confidence = float((events.get("uah") or {}).get("confidence") or 0.0)
+        ffc_confidence = float((events.get("ffc") or {}).get("confidence") or 0.0)
+        bfc_confidence = float((events.get("bfc") or {}).get("confidence") or 0.0)
+        events["event_chain"] = chain_quality(
+            bfc_frame=bfc_frame,
+            ffc_frame=ffc_frame,
+            uah_frame=uah_frame,
+            release_frame=release_frame,
+            bfc_confidence=bfc_confidence,
+            ffc_confidence=ffc_confidence,
+            uah_confidence=uah_confidence,
+            release_confidence=release_confidence,
+        )
 
         # ------------------------------------------------------------
         # Action Classification
@@ -410,6 +546,30 @@ def analyze(
             events=events,
             video=video,
             hand=hand,
+        )
+        estimated_release_speed = _gate_speed_estimate(
+            estimated_release_speed=estimated_release_speed,
+            event_chain=events.get("event_chain") or {},
+            events=events,
+        )
+        speed_debug = estimated_release_speed.get("debug") or {}
+        logger.info(
+            f"[analyze:speed] request_id={request_id} run_id={run_id} "
+            f"platform={_platform_hint(request)} "
+            f"release_frame={(events.get('release') or {}).get('frame')} "
+            f"peak_frame={(events.get('peak') or {}).get('frame')} "
+            f"uah_frame={(events.get('uah') or {}).get('frame')} "
+            f"display={estimated_release_speed.get('display') or '-'} "
+            f"value_kph={estimated_release_speed.get('value_kph') if estimated_release_speed.get('available') else '-'} "
+            f"confidence={estimated_release_speed.get('confidence')} "
+            f"method={estimated_release_speed.get('method')} "
+            f"reason={estimated_release_speed.get('reason') or '-'} "
+            f"wrist_arm_ratio={speed_debug.get('wrist_arm_ratio', '-')} "
+            f"shoulder_body_ratio={speed_debug.get('shoulder_body_ratio', '-')} "
+            f"pelvis_body_ratio={speed_debug.get('pelvis_body_ratio', '-')} "
+            f"elbow_extension_velocity={speed_debug.get('elbow_extension_velocity_deg_per_sec', '-')} "
+            f"arm_length_cv={speed_debug.get('arm_length_cv', '-')} "
+            f"wrist_window_cv={speed_debug.get('wrist_window_cv', '-')}"
         )
 
         # ------------------------------------------------------------
