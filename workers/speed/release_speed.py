@@ -80,12 +80,13 @@ def _smoothed_track(
     points: List[Optional[Tuple[float, float]]],
     *,
     fps: float,
+    sigma_scale: float = 0.03,
 ) -> Optional[Tuple[np.ndarray, np.ndarray]]:
     xs = _interpolate_series([point[0] if point else None for point in points])
     ys = _interpolate_series([point[1] if point else None for point in points])
     if xs is None or ys is None:
         return None
-    sigma = max(1.0, 0.03 * fps)
+    sigma = max(1.0, sigma_scale * fps)
     return (
         gaussian_filter1d(xs, sigma=sigma),
         gaussian_filter1d(ys, sigma=sigma),
@@ -180,31 +181,58 @@ def _median_or_none(values: List[Optional[float]]) -> Optional[float]:
     return float(median(valid))
 
 
-def estimate_release_speed(
-    *,
-    pose_frames: List[Dict[str, Any]],
-    events: Dict[str, Any],
-    video: Dict[str, Any],
-    hand: str,
-    ball_weight_oz: float = BALL_WEIGHT_OZ,
-) -> Dict[str, Any]:
-    fps = float(video.get("fps") or 0.0)
-    width = float(video.get("width") or 0.0)
-    height = float(video.get("height") or 0.0)
-    release_frame = int(((events.get("release") or {}).get("frame")) or -1)
+def _percentile_or_none(values: List[Optional[float]], percentile: float) -> Optional[float]:
+    valid = [float(value) for value in values if value is not None]
+    if not valid:
+        return None
+    return float(np.percentile(np.asarray(valid, dtype=float), percentile))
 
-    unavailable = {
+
+def _cv(values: List[Optional[float]]) -> float:
+    valid = np.asarray([float(value) for value in values if value is not None], dtype=float)
+    if valid.size == 0:
+        return float("inf")
+    return float(np.std(valid) / max(float(np.mean(valid)), 1.0))
+
+
+def _unavailable_result(ball_weight_oz: float) -> Dict[str, Any]:
+    return {
         "available": False,
+        "display_policy": "suppress",
         "method": METHOD,
         "confidence": 0.0,
         "ball_weight_oz": float(ball_weight_oz),
     }
 
+
+def _estimate_release_speed_pass(
+    *,
+    pose_frames: List[Dict[str, Any]],
+    video: Dict[str, Any],
+    hand: str,
+    release_frame: int,
+    ball_weight_oz: float,
+    window_before: int,
+    window_after: int,
+    scale_before: int,
+    scale_after: int,
+    sigma_scale: float,
+    max_arm_cv: float,
+    max_wrist_cv: float,
+    salvage_mode: bool,
+) -> Dict[str, Any]:
+    fps = float(video.get("fps") or 0.0)
+    width = float(video.get("width") or 0.0)
+    height = float(video.get("height") or 0.0)
+    unavailable = _unavailable_result(ball_weight_oz)
+
     if fps <= 0.0 or width <= 0.0 or height <= 0.0:
         return {**unavailable, "reason": "missing_video_geometry"}
 
-    if release_frame < 3 or release_frame + 3 >= len(pose_frames):
-        return {**unavailable, "reason": "missing_release_window"}
+    if release_frame < window_before:
+        return {**unavailable, "reason": "release_too_close_to_clip_start"}
+    if release_frame + window_after >= len(pose_frames):
+        return {**unavailable, "reason": "release_too_close_to_clip_end"}
 
     h = (hand or "R").upper()
     shoulder_idx, elbow_idx, wrist_idx = (
@@ -265,9 +293,9 @@ def estimate_release_speed(
             )
         )
 
-    wrist_track = _smoothed_track(wrist_points, fps=fps)
-    shoulder_track = _smoothed_track(shoulder_points, fps=fps)
-    pelvis_track = _smoothed_track(pelvis_points, fps=fps)
+    wrist_track = _smoothed_track(wrist_points, fps=fps, sigma_scale=sigma_scale)
+    shoulder_track = _smoothed_track(shoulder_points, fps=fps, sigma_scale=sigma_scale)
+    pelvis_track = _smoothed_track(pelvis_points, fps=fps, sigma_scale=sigma_scale)
     arm_series = _interpolate_series(arm_lengths)
     body_series = _interpolate_series(body_heights)
     elbow_series = _interpolate_series(elbow_angles)
@@ -282,7 +310,7 @@ def estimate_release_speed(
     ):
         return {**unavailable, "reason": "insufficient_release_landmarks"}
 
-    sigma = max(1.0, 0.03 * fps)
+    sigma = max(1.0, sigma_scale * fps)
     arm_series = gaussian_filter1d(arm_series, sigma=sigma)
     body_series = gaussian_filter1d(body_series, sigma=sigma)
     elbow_series = gaussian_filter1d(elbow_series, sigma=sigma)
@@ -299,45 +327,81 @@ def estimate_release_speed(
     )
     elbow_extension_speed = np.abs(np.gradient(elbow_series, dt))
 
-    window = _window_indices(release_frame, len(pose_frames), before=3, after=3)
-    arm_window = [float(arm_series[idx]) for idx in window]
-    body_window = [float(body_series[idx]) for idx in window]
-    wrist_window = [float(wrist_speed[idx]) for idx in window]
-    shoulder_window = [float(shoulder_speed[idx]) for idx in window]
-    pelvis_window = [float(pelvis_speed[idx]) for idx in window]
-    elbow_window = [float(elbow_extension_speed[idx]) for idx in window]
+    metric_window = _window_indices(
+        release_frame,
+        len(pose_frames),
+        before=window_before,
+        after=window_after,
+    )
+    scale_window = _window_indices(
+        release_frame,
+        len(pose_frames),
+        before=scale_before,
+        after=scale_after,
+    )
 
-    arm_length_px = _median_or_none(arm_window)
-    body_height_px = _median_or_none(body_window)
+    arm_metric = [float(arm_series[idx]) for idx in metric_window]
+    body_metric = [float(body_series[idx]) for idx in metric_window]
+    wrist_metric = [float(wrist_speed[idx]) for idx in metric_window]
+    shoulder_metric = [float(shoulder_speed[idx]) for idx in metric_window]
+    pelvis_metric = [float(pelvis_speed[idx]) for idx in metric_window]
+    elbow_metric = [float(elbow_extension_speed[idx]) for idx in metric_window]
+    arm_scale_metric = [float(arm_series[idx]) for idx in scale_window]
+    body_scale_metric = [float(body_series[idx]) for idx in scale_window]
+
+    arm_length_px = _median_or_none(arm_scale_metric if salvage_mode else arm_metric)
+    body_height_px = _median_or_none(body_scale_metric if salvage_mode else body_metric)
     if arm_length_px is None or body_height_px is None or body_height_px <= 1.0:
         return {**unavailable, "reason": "missing_body_scale"}
 
-    wrist_arm_ratio = float(median([value / max(arm_length_px, 1.0) for value in wrist_window]))
-    shoulder_body_ratio = float(median([value / max(body_height_px, 1.0) for value in shoulder_window]))
-    pelvis_body_ratio = float(median([value / max(body_height_px, 1.0) for value in pelvis_window]))
-    elbow_velocity = float(median(elbow_window))
+    if salvage_mode:
+        wrist_reference = _percentile_or_none(wrist_metric, 75.0)
+        elbow_velocity = _percentile_or_none(elbow_metric, 70.0)
+        shoulder_reference = _median_or_none(shoulder_metric)
+        pelvis_reference = _median_or_none(pelvis_metric)
+    else:
+        wrist_reference = _median_or_none(wrist_metric)
+        elbow_velocity = _median_or_none(elbow_metric)
+        shoulder_reference = _median_or_none(shoulder_metric)
+        pelvis_reference = _median_or_none(pelvis_metric)
 
-    arm_length_cv = float(np.std(arm_window) / max(np.mean(arm_window), 1.0))
-    wrist_window_cv = float(np.std(wrist_window) / max(np.mean(wrist_window), 1.0))
+    if (
+        wrist_reference is None
+        or elbow_velocity is None
+        or shoulder_reference is None
+        or pelvis_reference is None
+    ):
+        return {**unavailable, "reason": "insufficient_release_landmarks"}
 
-    if arm_length_cv > 0.22:
+    wrist_arm_ratio = float(wrist_reference / max(arm_length_px, 1.0))
+    shoulder_body_ratio = float(shoulder_reference / max(body_height_px, 1.0))
+    pelvis_body_ratio = float(pelvis_reference / max(body_height_px, 1.0))
+    elbow_velocity = float(elbow_velocity)
+
+    arm_length_cv_local = _cv(arm_metric)
+    arm_length_cv_broad = _cv(arm_scale_metric)
+    arm_length_cv = min(arm_length_cv_local, arm_length_cv_broad) if salvage_mode else arm_length_cv_local
+    wrist_window_cv = _cv(wrist_metric)
+
+    if arm_length_cv > max_arm_cv:
         return {
             **unavailable,
             "reason": "unstable_arm_scale",
             "debug": {
                 "arm_length_cv": round(arm_length_cv, 3),
+                "arm_length_cv_local": round(arm_length_cv_local, 3),
+                "arm_length_cv_broad": round(arm_length_cv_broad, 3),
+                "salvage_mode": salvage_mode,
             },
         }
 
-    # Research mapping inspired by baseball pitch-velocity literature:
-    # - distal segment speed near release
-    # - elbow-extension velocity
-    # - pelvis drive into release
-    # - penalty for excessive full-body / camera-relative shoulder motion
+    scoring_wrist_arm_ratio = min(wrist_arm_ratio, 10.0) if salvage_mode else wrist_arm_ratio
+    scoring_elbow_velocity = min(elbow_velocity, 220.0) if salvage_mode else elbow_velocity
+
     release_score = (
         68.0
-        + (0.22 * elbow_velocity)
-        + (1.25 * wrist_arm_ratio)
+        + (0.22 * scoring_elbow_velocity)
+        + (1.25 * scoring_wrist_arm_ratio)
         + (4.0 * pelvis_body_ratio)
         - (14.0 * shoulder_body_ratio)
     )
@@ -353,20 +417,23 @@ def estimate_release_speed(
         value_kph = 145.0
         saturated = True
 
+    visibility_window = _window_indices(
+        release_frame,
+        len(pose_frames),
+        before=min(1, window_before),
+        after=min(1, window_after),
+    )
     visibility_parts = [
-        1.0 if point is not None else 0.0
-        for point in (
-            wrist_points[release_frame - 1],
-            wrist_points[release_frame],
-            wrist_points[release_frame + 1],
-            shoulder_points[release_frame - 1],
-            shoulder_points[release_frame],
-            shoulder_points[release_frame + 1],
-        )
+        1.0 if wrist_points[idx] is not None else 0.0
+        for idx in visibility_window
+    ] + [
+        1.0 if shoulder_points[idx] is not None else 0.0
+        for idx in visibility_window
     ]
     visibility_score = sum(visibility_parts) / float(len(visibility_parts))
+    overall_wrist_visibility = sum(1.0 for point in wrist_points if point is not None) / float(len(wrist_points))
     scale_stability_score = max(0.0, 1.0 - min(1.0, arm_length_cv / 0.16))
-    motion_stability_score = max(0.0, 1.0 - min(1.0, wrist_window_cv / 0.50))
+    motion_stability_score = max(0.0, 1.0 - min(1.0, wrist_window_cv / (0.70 if salvage_mode else 0.50)))
     shoulder_penalty = max(0.0, min(1.0, (shoulder_body_ratio - 0.35) / 0.75))
     confidence = (
         (0.30 * visibility_score)
@@ -377,9 +444,25 @@ def estimate_release_speed(
     )
     if saturated:
         confidence *= 0.75
+    if salvage_mode:
+        confidence *= 0.88
     confidence = max(0.20, min(0.90, confidence))
 
-    if wrist_window_cv > 0.60:
+    if salvage_mode:
+        low_visibility_penalty = max(0.0, min(0.14, (0.40 - overall_wrist_visibility) * 0.80))
+        small_subject_penalty = max(0.0, min(0.05, (160.0 - body_height_px) / 1000.0))
+        body_height_ratio = body_height_px / max(height, 1.0)
+        close_camera_penalty = max(0.0, min(0.12, (body_height_ratio - 0.22) * 1.50))
+        perspective_penalty = max(0.0, min(0.12, (shoulder_body_ratio - 0.60) * 0.90))
+        salvage_penalty = (
+            low_visibility_penalty
+            + small_subject_penalty
+            + close_camera_penalty
+            + perspective_penalty
+        )
+        value_kph *= max(0.80, 1.0 - salvage_penalty)
+
+    if wrist_window_cv > max_wrist_cv:
         return {
             **unavailable,
             "reason": "unstable_release_window",
@@ -387,10 +470,11 @@ def estimate_release_speed(
                 "release_frame": int(release_frame),
                 "wrist_window_cv": round(wrist_window_cv, 3),
                 "arm_length_cv": round(arm_length_cv, 3),
+                "salvage_mode": salvage_mode,
             },
         }
 
-    if confidence < 0.35:
+    if confidence < (0.30 if salvage_mode else 0.35):
         return {
             **unavailable,
             "reason": "low_confidence_estimate",
@@ -402,27 +486,94 @@ def estimate_release_speed(
                 "elbow_extension_velocity_deg_per_sec": round(elbow_velocity, 1),
                 "arm_length_cv": round(arm_length_cv, 3),
                 "wrist_window_cv": round(wrist_window_cv, 3),
+                "salvage_mode": salvage_mode,
             },
         }
 
     rounded_kph = int(round(value_kph))
     return {
         "available": True,
+        "display_policy": "show_low_confidence" if salvage_mode else "show",
         "value_kph": rounded_kph,
         "display": f"~{rounded_kph} km/h",
         "confidence": round(confidence, 2),
-        "method": METHOD,
+        "method": f"{METHOD}_salvage" if salvage_mode else METHOD,
         "ball_weight_oz": float(ball_weight_oz),
+        "reason": None if not salvage_mode else "salvaged_recovery_pass",
         "debug": {
             "release_frame": int(release_frame),
             "wrist_arm_ratio": round(wrist_arm_ratio, 3),
+            "scoring_wrist_arm_ratio": round(scoring_wrist_arm_ratio, 3),
             "shoulder_body_ratio": round(shoulder_body_ratio, 3),
             "pelvis_body_ratio": round(pelvis_body_ratio, 3),
             "elbow_extension_velocity_deg_per_sec": round(elbow_velocity, 1),
+            "scoring_elbow_velocity_deg_per_sec": round(scoring_elbow_velocity, 1),
             "arm_length_px": round(float(arm_length_px), 1),
             "body_height_px": round(float(body_height_px), 1),
             "arm_length_cv": round(arm_length_cv, 3),
+            "arm_length_cv_local": round(arm_length_cv_local, 3),
+            "arm_length_cv_broad": round(arm_length_cv_broad, 3),
             "wrist_window_cv": round(wrist_window_cv, 3),
             "saturated": saturated,
+            "salvage_mode": salvage_mode,
+            "overall_wrist_visibility": round(overall_wrist_visibility, 3),
+            "body_height_ratio": round(body_height_px / max(height, 1.0), 3),
+            "perspective_penalty_trigger_ratio": round(shoulder_body_ratio, 3),
+            "window_before": window_before,
+            "window_after": window_after,
         },
     }
+
+
+def estimate_release_speed(
+    *,
+    pose_frames: List[Dict[str, Any]],
+    events: Dict[str, Any],
+    video: Dict[str, Any],
+    hand: str,
+    ball_weight_oz: float = BALL_WEIGHT_OZ,
+) -> Dict[str, Any]:
+    release_frame = int(((events.get("release") or {}).get("frame")) or -1)
+    primary = _estimate_release_speed_pass(
+        pose_frames=pose_frames,
+        video=video,
+        hand=hand,
+        release_frame=release_frame,
+        ball_weight_oz=ball_weight_oz,
+        window_before=3,
+        window_after=3,
+        scale_before=3,
+        scale_after=3,
+        sigma_scale=0.03,
+        max_arm_cv=0.22,
+        max_wrist_cv=0.60,
+        salvage_mode=False,
+    )
+    if primary.get("available"):
+        return primary
+
+    if primary.get("reason") not in {"unstable_arm_scale", "unstable_release_window"}:
+        return primary
+
+    salvage = _estimate_release_speed_pass(
+        pose_frames=pose_frames,
+        video=video,
+        hand=hand,
+        release_frame=release_frame,
+        ball_weight_oz=ball_weight_oz,
+        window_before=5,
+        window_after=5,
+        scale_before=10,
+        scale_after=10,
+        sigma_scale=0.05,
+        max_arm_cv=0.30,
+        max_wrist_cv=1.10,
+        salvage_mode=True,
+    )
+    if salvage.get("available"):
+        salvage["reason"] = f"recovered_{primary.get('reason')}"
+        salvage_debug = salvage.setdefault("debug", {})
+        salvage_debug["primary_failure_reason"] = primary.get("reason")
+        return salvage
+
+    return salvage if salvage.get("reason") != primary.get("reason") else primary

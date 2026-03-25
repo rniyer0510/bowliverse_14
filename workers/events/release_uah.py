@@ -22,6 +22,7 @@ import numpy as np
 from scipy.ndimage import gaussian_filter1d
 
 from app.common.logger import get_logger
+from app.workers.events.event_confidence import build_candidate, compact_candidates
 
 logger = get_logger(__name__)
 
@@ -76,6 +77,28 @@ def _upper_arm_angle(s, e, forward):
     u = (v[0]/m, v[1]/m, v[2]/m)
     d = max(-1.0, min(1.0, _dot(u, forward)))
     return math.degrees(math.acos(d))
+
+
+def _nb_elbow_peak_is_plausible(
+    *,
+    nb_elbow_peak_i: Optional[int],
+    wrist_peak_i: int,
+    total_frames: int,
+    fps: float,
+) -> bool:
+    if nb_elbow_peak_i is None or total_frames <= 0:
+        return False
+
+    # Reject spurious front-loaded peaks from long run-ups or clipped starts.
+    min_delivery_frame = max(5, int(0.20 * total_frames))
+    max_edge_frame = max(0, total_frames - max(3, int(0.02 * total_frames)))
+    close_to_wrist_peak = abs(int(nb_elbow_peak_i) - int(wrist_peak_i)) <= int(max(2, round(0.25 * fps)))
+
+    if nb_elbow_peak_i < min_delivery_frame and not close_to_wrist_peak:
+        return False
+    if nb_elbow_peak_i >= max_edge_frame and not close_to_wrist_peak:
+        return False
+    return True
 
 # ---------------------------------------------------------------------
 # MAIN
@@ -252,6 +275,21 @@ def detect_release_uah(
     # If non-bowling elbow peak is available and reliable, use it as anchor
     # Otherwise use wrist velocity peak
     if nb_elbow_available and nb_elbow_peak_i is not None and low_wrist_visibility:
+        nb_peak_plausible = _nb_elbow_peak_is_plausible(
+            nb_elbow_peak_i=nb_elbow_peak_i,
+            wrist_peak_i=peak_i,
+            total_frames=n,
+            fps=fps,
+        )
+        if not nb_peak_plausible:
+            logger.info(
+                f"[Release/UAH] Ignoring early/edge non-bowling elbow peak at frame {nb_elbow_peak_i} "
+                f"(wrist_peak={peak_i}, n={n})"
+            )
+    else:
+        nb_peak_plausible = False
+
+    if nb_elbow_available and nb_elbow_peak_i is not None and low_wrist_visibility and nb_peak_plausible:
         # Camera from behind - use non-bowling elbow peak as primary anchor!
         anchor_i = nb_elbow_peak_i
         anchor_type = "nb_elbow_peak"
@@ -277,18 +315,29 @@ def detect_release_uah(
     release_i = None
     selection_method = None
     selection_confidence = 0.0
+    release_candidates: List[Dict[str, Any]] = []
 
     # ============================================================
     # TIER 1: Use most reliable signal available
     # ============================================================
 
     # TIER 1A: Non-bowling elbow peak (best for behind-camera)
-    if nb_elbow_available and nb_elbow_peak_i is not None:
+    if nb_elbow_available and nb_elbow_peak_i is not None and (
+        not low_wrist_visibility or nb_peak_plausible
+    ):
         if start <= nb_elbow_peak_i <= end:
-            release_i = nb_elbow_peak_i
-            selection_method = "nb_elbow_peak"
-            selection_confidence = 0.90
-            logger.info(f"[Release/UAH] Tier 1A: nb_elbow peak at frame {release_i}")
+            candidate = build_candidate(
+                frame=nb_elbow_peak_i,
+                method="nb_elbow_peak",
+                confidence=0.90,
+                score=1.0,
+            )
+            if candidate is not None:
+                release_candidates.append(candidate)
+                release_i = nb_elbow_peak_i
+                selection_method = "nb_elbow_peak"
+                selection_confidence = 0.90
+                logger.info(f"[Release/UAH] Tier 1A: nb_elbow peak at frame {release_i}")
 
     # TIER 1B: Wrist geometry (best for side-camera with good visibility)
     if release_i is None:
@@ -302,11 +351,19 @@ def detect_release_uah(
                     dy = w[1] - s[1]
                     # Wrist within ±2cm of shoulder AND velocity still high
                     if -0.02 <= dy <= 0.02 and wrist_fwd_s[i] >= 0.70 * vmax:
-                        release_i = i
-                        selection_method = "wrist_at_shoulder"
-                        selection_confidence = 0.85
-                        logger.info(f"[Release/UAH] Tier 1B.1: wrist at shoulder, frame {release_i}")
-                        break
+                        candidate = build_candidate(
+                            frame=i,
+                            method="wrist_at_shoulder",
+                            confidence=0.85,
+                            score=float(wrist_fwd_s[i] / max(vmax, 1e-6)),
+                        )
+                        if candidate is not None:
+                            release_candidates.append(candidate)
+                            release_i = i
+                            selection_method = "wrist_at_shoulder"
+                            selection_confidence = 0.85
+                            logger.info(f"[Release/UAH] Tier 1B.1: wrist at shoulder, frame {release_i}")
+                            break
             
             # Sub-strategy 1B.2: Significant velocity drop (not just noise)
             if release_i is None:
@@ -318,11 +375,19 @@ def detect_release_uah(
                             w, s = wrist_xyz[i], shoulder_xyz[i]
                             if w and s:
                                 if w[1] <= s[1] + 0.10:  # Wrist not far below shoulder
-                                    release_i = i
-                                    selection_method = "velocity_drop_20pct"
-                                    selection_confidence = 0.75
-                                    logger.info(f"[Release/UAH] Tier 1B.2: velocity drop at frame {release_i}")
-                                    break
+                                    candidate = build_candidate(
+                                        frame=i,
+                                        method="velocity_drop_20pct",
+                                        confidence=0.75,
+                                        score=float(wrist_fwd_s[i] / max(vmax, 1e-6)),
+                                    )
+                                    if candidate is not None:
+                                        release_candidates.append(candidate)
+                                        release_i = i
+                                        selection_method = "velocity_drop_20pct"
+                                        selection_confidence = 0.75
+                                        logger.info(f"[Release/UAH] Tier 1B.2: velocity drop at frame {release_i}")
+                                        break
 
     # ============================================================
     # TIER 2: Wrist occluded - use alternative signals
@@ -330,32 +395,59 @@ def detect_release_uah(
 
     if release_i is None:
         # Check if nb_elbow peak is nearby (even if not exactly in window)
-        if nb_elbow_available and nb_elbow_peak_i is not None:
+        if nb_elbow_available and nb_elbow_peak_i is not None and (
+            not low_wrist_visibility or nb_peak_plausible
+        ):
             dist = abs(nb_elbow_peak_i - anchor_i)
             if dist <= int(0.10 * fps):  # Within 100ms of anchor
-                release_i = nb_elbow_peak_i
-                selection_method = "nb_elbow_nearby"
-                selection_confidence = 0.80
-                logger.info(f"[Release/UAH] Tier 2A: nb_elbow nearby at frame {release_i}")
+                candidate = build_candidate(
+                    frame=nb_elbow_peak_i,
+                    method="nb_elbow_nearby",
+                    confidence=0.80,
+                    score=max(0.0, 1.0 - (dist / max(1.0, 0.10 * fps))),
+                )
+                if candidate is not None:
+                    release_candidates.append(candidate)
+                    release_i = nb_elbow_peak_i
+                    selection_method = "nb_elbow_nearby"
+                    selection_confidence = 0.80
+                    logger.info(f"[Release/UAH] Tier 2A: nb_elbow nearby at frame {release_i}")
         
         # Use velocity peak + empirical offset
         if release_i is None:
             # Empirical: release is typically 1-3 frames after velocity peak
             offset_frames = max(1, int(round(2.0 * fps / 30.0)))
-            release_i = min(end, peak_i + offset_frames)
-            selection_method = "peak_plus_offset"
-            selection_confidence = 0.60
-            logger.info(f"[Release/UAH] Tier 2B: velocity peak + {offset_frames} = frame {release_i}")
+            fallback_frame = min(end, peak_i + offset_frames)
+            candidate = build_candidate(
+                frame=fallback_frame,
+                method="peak_plus_offset",
+                confidence=0.60,
+                score=float(wrist_fwd_s[min(fallback_frame, n - 1)] / max(vmax, 1e-6)),
+            )
+            if candidate is not None:
+                release_candidates.append(candidate)
+                release_i = fallback_frame
+                selection_method = "peak_plus_offset"
+                selection_confidence = 0.60
+                logger.info(f"[Release/UAH] Tier 2B: velocity peak + {offset_frames} = frame {release_i}")
 
     # ============================================================
     # TIER 3: Absolute fallback
     # ============================================================
 
     if release_i is None:
-        release_i = start
-        selection_method = "window_start"
-        selection_confidence = 0.40
-        logger.warning(f"[Release/UAH] Tier 3: fallback to window start {release_i}")
+        candidate = build_candidate(
+            frame=start,
+            method="window_start",
+            confidence=0.40,
+            score=0.0,
+        )
+        if candidate is not None:
+            release_candidates.append(candidate)
+            release_i = start
+            selection_method = "window_start"
+            selection_confidence = 0.40
+            logger.warning(f"[Release/UAH] Tier 3: fallback to window start {release_i}")
 
     # ============================================================
     # VALIDATION: Sanity check the selection
@@ -376,6 +468,15 @@ def detect_release_uah(
                         release_i = i
                         selection_method = f"{selection_method}_corrected"
                         selection_confidence *= 0.9
+                        candidate = build_candidate(
+                            frame=i,
+                            method=selection_method,
+                            confidence=selection_confidence,
+                            score=0.5,
+                            reason="followthrough_correction",
+                        )
+                        if candidate is not None:
+                            release_candidates.append(candidate)
                         logger.info(f"[Release/UAH] Corrected to earlier frame {release_i}")
                         break
 
@@ -398,6 +499,7 @@ def detect_release_uah(
     best_score = 1e9
     uah_method = "release_minus_one_fallback"
     uah_confidence = 0.20
+    uah_candidates: List[Dict[str, Any]] = []
 
     for i in range(release_i - 1, max(0, release_i - int(0.30 * fps)), -1):
         if not is_pre_followthrough(i):
@@ -407,12 +509,29 @@ def detect_release_uah(
             if score < best_score:
                 best_score = score
                 uah_i = i
+                candidate = build_candidate(
+                    frame=i,
+                    method="upper_arm_horizontal",
+                    confidence=max(0.35, 0.90 - min(score, 25.0) / 40.0),
+                    score=max(0.0, 1.0 - (score / 25.0)),
+                )
+                if candidate is not None:
+                    uah_candidates.append(candidate)
 
     if uah_i >= release_i:
         uah_i = max(0, release_i - 1)
     elif best_score < 1e9:
         uah_method = "upper_arm_horizontal"
         uah_confidence = max(0.35, 0.90 - min(best_score, 25.0) / 40.0)
+
+    fallback_uah = build_candidate(
+        frame=uah_i,
+        method=uah_method,
+        confidence=uah_confidence,
+        score=0.0 if uah_method == "release_minus_one_fallback" else None,
+    )
+    if fallback_uah is not None:
+        uah_candidates.append(fallback_uah)
 
     # ------------------------------------------------------------
     # DEBUG
@@ -463,11 +582,15 @@ def detect_release_uah(
             "frame": int(frames[release_i]),
             "method": selection_method,
             "confidence": round(float(selection_confidence), 2),
+            "candidates": compact_candidates(release_candidates),
+            "window": [int(frames[start]), int(frames[end])],
         },
         "uah": {
             "frame": int(frames[uah_i]),
             "method": uah_method,
             "confidence": round(float(uah_confidence), 2),
+            "candidates": compact_candidates(uah_candidates),
+            "window": [int(frames[max(0, release_i - int(0.30 * fps))]), int(frames[max(0, release_i - 1)])],
         },
 
         # Non-breaking additions:

@@ -15,6 +15,7 @@ import math
 import numpy as np
 
 from app.common.logger import get_logger
+from app.workers.events.event_confidence import build_candidate, chain_quality, compact_candidates
 
 logger = get_logger(__name__)
 
@@ -362,10 +363,13 @@ def detect_ffc_bfc(
     #   (L is front and R is back) OR (R is front and L is back)
     back_recent = max(2, int(round(0.03 * fps_f)))  # ~30ms lookback
     ffc = None
+    ffc_candidates: List[Dict] = []
 
     for i in range(pelvis_on, win_end - hold):
-        Lg = _is_grounded(y_LA, y_LFI, i, hold, win_start, win_end, dt)
-        Rg = _is_grounded(y_RA, y_RFI, i, hold, win_start, win_end, dt)
+        left_score = _foot_ground_score(y_LA, y_LFI, i, hold, win_start, win_end, dt)
+        right_score = _foot_ground_score(y_RA, y_RFI, i, hold, win_start, win_end, dt)
+        Lg = left_score >= 2
+        Rg = right_score >= 2
 
         # Case A: Left is front, Right is back (allow recent grounding for back)
         okA = Lg and (Rg or _recently_grounded(y_RA, y_RFI, i, hold, win_start, win_end, dt, back_recent))
@@ -374,6 +378,15 @@ def detect_ffc_bfc(
         okB = Rg and (Lg or _recently_grounded(y_LA, y_LFI, i, hold, win_start, win_end, dt, back_recent))
 
         if okA or okB:
+            candidate = build_candidate(
+                frame=i,
+                method="pelvis_then_geometry_relaxed",
+                confidence=min(0.9, 0.45 + 0.08 * max(left_score, right_score)),
+                score=float(max(left_score, right_score)),
+                reason="left_front" if okA else "right_front",
+            )
+            if candidate is not None:
+                ffc_candidates.append(candidate)
             ffc = i
             break
 
@@ -385,24 +398,74 @@ def detect_ffc_bfc(
         for i in range(pelvis_on, win_end - hold):
             if _is_grounded(y_LA, y_LFI, i, hold, win_start, win_end, dt) or _is_grounded(y_RA, y_RFI, i, hold, win_start, win_end, dt):
                 ffc = i
+                candidate = build_candidate(
+                    frame=i,
+                    method="single_foot_fallback",
+                    confidence=0.22,
+                    score=1.0,
+                )
+                if candidate is not None:
+                    ffc_candidates.append(candidate)
                 logger.warning(f"[FFC/BFC][FALLBACK] single_foot frame={ffc}")
                 bfc = _clamp(ffc - max(3, hold), win_start, ffc)
+                chain = chain_quality(
+                    bfc_frame=bfc,
+                    ffc_frame=ffc,
+                    uah_frame=None,
+                    release_frame=rel,
+                    bfc_confidence=0.22,
+                    ffc_confidence=0.22,
+                )
                 logger.info(f"[FFC/BFC][RESULT] CHOSEN_FFC_FRAME={ffc}")
                 return {
-                    "ffc": {"frame": int(ffc), "confidence": 0.22, "method": "single_foot_fallback"},
-                    "bfc": {"frame": int(bfc), "confidence": 0.22, "method": "single_foot_fallback"},
+                    "ffc": {
+                        "frame": int(ffc),
+                        "confidence": 0.22,
+                        "method": "single_foot_fallback",
+                        "candidates": compact_candidates(ffc_candidates),
+                        "window": [int(win_start), int(win_end)],
+                    },
+                    "bfc": {
+                        "frame": int(bfc),
+                        "confidence": 0.22,
+                        "method": "single_foot_fallback",
+                    },
+                    "event_chain": chain,
                 }
 
         # 2) Ultimate fallback: 3/4 into pelvis->release window (must obey win_end fence)
         ffc = pelvis_on + int(0.75 * (win_end - pelvis_on))
         ffc = _clamp(ffc, pelvis_on, win_end)
+        candidate = build_candidate(
+            frame=ffc,
+            method="ultimate_fallback",
+            confidence=0.15,
+            score=0.0,
+        )
+        if candidate is not None:
+            ffc_candidates.append(candidate)
         logger.warning(f"[FFC/BFC][FALLBACK] ultimate_3quarter frame={ffc}")
 
         bfc = _clamp(ffc - max(3, hold), win_start, ffc)
+        chain = chain_quality(
+            bfc_frame=bfc,
+            ffc_frame=ffc,
+            uah_frame=None,
+            release_frame=rel,
+            bfc_confidence=0.15,
+            ffc_confidence=0.15,
+        )
         logger.info(f"[FFC/BFC][RESULT] CHOSEN_FFC_FRAME={ffc}")
         return {
-            "ffc": {"frame": int(ffc), "confidence": 0.15, "method": "ultimate_fallback"},
+            "ffc": {
+                "frame": int(ffc),
+                "confidence": 0.15,
+                "method": "ultimate_fallback",
+                "candidates": compact_candidates(ffc_candidates),
+                "window": [int(win_start), int(win_end)],
+            },
             "bfc": {"frame": int(bfc), "confidence": 0.15, "method": "ultimate_fallback"},
+            "event_chain": chain,
         }
 
     # ------------------------------------------------------------
@@ -411,9 +474,25 @@ def detect_ffc_bfc(
     logger.info(f"[FFC/BFC][RESULT] CHOSEN_FFC_FRAME={ffc}")
 
     bfc = _clamp(ffc - max(3, hold), win_start, ffc)
+    ffc_confidence = 0.62
+    bfc_confidence = 0.35
+    chain = chain_quality(
+        bfc_frame=bfc,
+        ffc_frame=ffc,
+        uah_frame=None,
+        release_frame=rel,
+        bfc_confidence=bfc_confidence,
+        ffc_confidence=ffc_confidence,
+    )
 
     return {
-        "ffc": {"frame": int(ffc), "confidence": 0.62, "method": "pelvis_then_geometry_relaxed"},
-        "bfc": {"frame": int(bfc), "confidence": 0.35, "method": "context_pre_ffc"},
+        "ffc": {
+            "frame": int(ffc),
+            "confidence": ffc_confidence,
+            "method": "pelvis_then_geometry_relaxed",
+            "candidates": compact_candidates(ffc_candidates),
+            "window": [int(win_start), int(win_end)],
+        },
+        "bfc": {"frame": int(bfc), "confidence": bfc_confidence, "method": "context_pre_ffc"},
+        "event_chain": chain,
     }
-
