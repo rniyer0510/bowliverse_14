@@ -82,12 +82,20 @@ def _read_frame(video_path: str, frame_idx: int):
     return None
 
 
-def _risk_style(conf: str, scale: int):
-    if conf == "HIGH":
+def _risk_style(style_band: str, scale: int):
+    """
+    Visual hue should reflect concern level, not confidence level.
+
+    HIGH      -> red
+    MEDIUM    -> orange
+    WATCH/LOW -> amber
+    """
+    band = (style_band or "").upper()
+    if band == "HIGH":
         return (0, 0, 255), max(2, int(scale * 0.015))
-    elif conf == "MEDIUM":
+    elif band in {"MEDIUM", "MODERATE"}:
         return (0, 165, 255), max(2, int(scale * 0.012))
-    return (255, 200, 0), max(2, int(scale * 0.010))
+    return (0, 200, 255), max(2, int(scale * 0.010))
 
 
 # ---------------------------------------------------------------------
@@ -529,18 +537,20 @@ def draw_and_save_visual(
         )
         return None
 
+    style_band = (load_level or visual_confidence or "LOW").upper()
+
     if risk_id == "front_foot_braking_shock":
-        _draw_ffbs(frame, visual_confidence)
+        _draw_ffbs(frame, style_band)
     elif risk_id == "knee_brace_failure":
-        _draw_knee_brace(frame, visual_confidence)
+        _draw_knee_brace(frame, style_band)
     elif risk_id == "trunk_rotation_snap":
-        _draw_trunk_rotation(frame, visual_confidence)
+        _draw_trunk_rotation(frame, style_band)
     elif risk_id == "hip_shoulder_mismatch":
-        _draw_hip_shoulder(frame, visual_confidence)
+        _draw_hip_shoulder(frame, style_band)
     elif risk_id == "lateral_trunk_lean":
-        _draw_lateral_trunk(frame, visual_confidence)
+        _draw_lateral_trunk(frame, style_band)
     elif risk_id == "foot_line_deviation":
-        _draw_foot_line_deviation(frame, visual_confidence)
+        _draw_foot_line_deviation(frame, style_band)
 
     out_dir = os.path.join(VISUAL_DIR, run_id)
     os.makedirs(out_dir, exist_ok=True)

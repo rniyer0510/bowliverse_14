@@ -1,89 +1,85 @@
 front_foot_braking_shock:
-  title: "Front Foot Braking Shock"
+  title: "Landing Load"
   explanations:
     kid:
-      low: "Your front foot landing is controlled and within safe limits."
-      moderate: "Your body slows down a bit suddenly at the front foot. Over time, this can increase stress if it keeps happening."
-      high: "Abrupt braking at the front foot increases stress on the knee and back."
+      low: "Your landing step looks under control in this clip."
+      moderate: "Your body slows down sharply when the front foot lands. If that keeps happening, the action can lose some flow there."
+      high: "Your landing step takes too much of the hit, so the action does not move through smoothly."
     coach:
-      low: "Front-foot braking within acceptable range."
-      moderate: "Moderate braking impulse observed post-FFC. Monitor load accumulation."
-      high: "Excessive braking impulse causing elevated lower-body load."
+      low: "Landing load looks under control in this clip."
+      moderate: "The body slows sharply at landing. Monitor whether this keeps interrupting flow into the ball."
+      high: "The landing phase is taking too much of the hit instead of letting the action carry through."
 
 knee_brace_failure:
-  title: "Knee Brace Failure"
+  title: "Front Leg"
   explanations:
     kid:
       low: "Your front leg supports your body well at landing."
-      moderate: "Your front knee bends more than ideal at landing. Repeated stress may add load over time."
-      high: "Your front knee collapses at landing, increasing joint stress."
+      moderate: "Your front leg softens a little at landing, so the action has less support."
+      high: "Your front leg softens too much at landing, so the rest of the action has less support."
     coach:
-      low: "Knee bracing effective."
-      moderate: "Partial knee brace detected. Monitor repetition and fatigue."
-      high: "Failure to brace knee at FFC."
+      low: "The front leg holds shape well at landing."
+      moderate: "The front leg softens at landing. Monitor repetition and fatigue."
+      high: "The front leg is not holding shape well enough at landing."
 
 trunk_rotation_snap:
-  title: "Trunk Rotation Snap"
+  title: "Body Turn"
   explanations:
     kid:
-      low: "Your body rotation is smooth through delivery."
-      moderate: "Your upper body rotates a bit sharply. Repeating this can increase side and back strain."
-      high: "Sudden trunk rotation places high stress on the side and lower back."
+      low: "Your body turn is smooth in this clip."
+      moderate: "Your upper body turns a bit sharply. If that keeps repeating, the trunk can take extra load."
+      high: "Your upper body turns too sharply, so the trunk is taking extra load."
     coach:
-      low: "Trunk rotation smooth."
-      moderate: "Moderate angular acceleration spike. Monitor cumulative effect."
-      high: "Sharp rotational snap detected."
+      low: "Body turn looks smooth in this clip."
+      moderate: "The upper body turns a bit sharply. Monitor cumulative exposure."
+      high: "The trunk is rotating too abruptly through delivery."
 
 hip_shoulder_mismatch:
-  title: "Hip–Shoulder Mismatch"
+  title: "Hips And Shoulders"
   explanations:
     kid:
       low: "Your hips and shoulders work together well."
-      moderate: "Your hips and shoulders separate more than usual. Over time this can increase trunk load."
-      high: "Large hip–shoulder separation increases trunk and groin load."
+      moderate: "Your hips and shoulders are not working together cleanly in this clip."
+      high: "Your hips and shoulders are too far out of sync, which can load the trunk harder."
     coach:
-      low: "Hip–shoulder sequencing balanced."
-      moderate: "Moderate mismatch observed. Watch for load transfer issues."
-      high: "Excessive hip–shoulder separation."
+      low: "Hips and shoulders look connected in this clip."
+      moderate: "Hips and shoulders are not working together cleanly. Watch for loss of flow."
+      high: "Hips and shoulders are far enough out of sync to raise both flow and load concerns."
 
 lateral_trunk_lean:
-  title: "Lateral Trunk Lean"
+  title: "Leaning Sideways"
   explanations:
     kid:
-      low: "Your body stays well balanced during delivery."
-      moderate: "You lean slightly to the side while bowling. Repeating this can increase back strain."
-      high: "Excessive side-lean increases stress on the spine."
+      low: "Your body stays fairly upright in this clip."
+      moderate: "You lean to the side while bowling, so the action is less balanced than it could be."
+      high: "You lean too far to the side, so the side of the body is taking extra load."
     coach:
-      low: "Trunk alignment stable."
-      moderate: "Moderate lateral lean detected. Monitor over spells."
-      high: "Significant lateral trunk lean."
+      low: "The bowler stays fairly upright in this clip."
+      moderate: "Side lean is elevated enough to monitor both balance and side-body load."
+      high: "Side lean is strong enough to become a main balance and load concern."
 
 foot_line_deviation:
-  title: "Foot Line Deviation"
+  title: "Front Foot Line"
   body_region: "groin_side_chain"
   explanations:
     kid:
-      low: "Your front foot lands in a good position."
+      low: "Your front foot lands in a good line."
       moderate: >
-        Your front foot shows a moderate outward step at landing.
-        Right now, the overall load remains low, but if this pattern
-        is repeated over time it can increase strain through the groin,
-        knee, and lower back.
+        Your front foot lands a bit wide.
+        That can make balance harder to hold if it keeps showing up.
       high: >
-        Your front foot lands too wide, creating high strain through
-        the groin and side of the body.
+        Your front foot lands too wide, so the action gets pushed off line
+        and the side of the body can work harder than it should.
     coach:
-      low: "Front-foot alignment within acceptable limits."
+      low: "Front foot line looks acceptable in this clip."
       moderate: >
-        Moderate outward foot placement at FFC with currently low load
-        impact. Repeated exposure may progressively increase demand on
-        the groin, knee, and lateral trunk chain.
+        Front foot line is drifting wider than ideal at landing.
+        Monitor whether it starts affecting balance.
       high: >
-        Significant outward foot placement causing elevated groin and
-        side-chain loading.
+        Front foot line is wide enough to affect both balance and
+        side-body loading.
   cues:
     corrective:
       - "Land your front foot closer to the target line."
       - "Think of running straight through the crease."
       - "Let your hips carry momentum forward, not sideways."
-
