@@ -124,6 +124,170 @@ class ClinicianReconciliationTests(unittest.TestCase):
         self.assertIn("side of the body", lean_risk["why_it_matters"].lower())
         self.assertIn("side of the body", result["comprehensive_why"]["why_it_matters"].lower())
 
+    def test_scorecard_explains_overall_benchmark_in_plain_english(self):
+        result = self.ci.build(
+            elbow={"extension_deg": 12.0, "verdict": "LEGAL"},
+            risks=[],
+            interpretation={
+                "linear_flow": {
+                    "flow_state": "SMOOTH",
+                    "confidence": 0.90,
+                    "contributors": [],
+                }
+            },
+            action={"action": "SEMI_OPEN", "confidence": 0.78},
+        )
+
+        scorecard = result["scorecard"]
+        self.assertIsInstance(scorecard["overall"]["score"], int)
+        self.assertGreaterEqual(scorecard["overall"]["score"], 0)
+        self.assertLessEqual(scorecard["overall"]["score"], 100)
+        self.assertLess(scorecard["overall"]["score"], 100)
+        self.assertGreaterEqual(scorecard["overall"]["score"], 88)
+        self.assertIn("balanced", scorecard["overall"]["what_100_means"].lower())
+        self.assertIn("release", scorecard["overall"]["what_100_means"].lower())
+        self.assertIn("balance", scorecard["benchmark"]["headline"].lower())
+        self.assertIn("overall_score", result["summary"])
+        self.assertIn("confidence_score", result["summary"])
+        rating_system = result["rating_system_v2"]
+        self.assertIn("player_view", rating_system)
+        self.assertIn("coach_view", rating_system)
+        self.assertIn("expert_view", rating_system)
+        self.assertIn("upper_body_alignment", rating_system["player_view"]["metrics"])
+        self.assertIn("momentum_forward", rating_system["player_view"]["metrics"])
+        self.assertIn("high score", rating_system["overall"]["what_high_score_means"].lower())
+        self.assertNotIn("ideal action standard", rating_system["overall"]["what_it_measures"].lower())
+        self.assertTrue(rating_system["coach_guidance_line"].startswith("Talk to a coach"))
+
+    def test_scorecard_surfaces_pillar_reasons_and_confidence_separately(self):
+        result = self.ci.build(
+            elbow={"extension_deg": 12.0, "verdict": "LEGAL"},
+            risks=[
+                {
+                    "risk_id": "lateral_trunk_lean",
+                    "signal_strength": 0.82,
+                    "confidence": 0.91,
+                },
+                {
+                    "risk_id": "foot_line_deviation",
+                    "signal_strength": 0.68,
+                    "confidence": 0.87,
+                },
+            ],
+            interpretation={
+                "linear_flow": {
+                    "flow_state": "SMOOTH",
+                    "confidence": 0.88,
+                    "contributors": [],
+                }
+            },
+            action={"action": "SEMI_OPEN", "confidence": 0.76},
+        )
+
+        scorecard = result["scorecard"]
+        self.assertIn("read the clip", scorecard["confidence"]["what_it_measures"].lower())
+        self.assertIn("upright", scorecard["pillars"]["balance"]["what_it_measures"].lower())
+        self.assertTrue(scorecard["pillars"]["balance"]["main_reasons_points_were_lost"])
+        joined_reasons = " ".join(scorecard["pillars"]["balance"]["main_reasons_points_were_lost"]).lower()
+        self.assertTrue(
+            "lateral" in joined_reasons
+            or "lean" in joined_reasons
+            or "foot" in joined_reasons
+        )
+        rating_system = result["rating_system_v2"]
+        coach_view = rating_system["coach_view"]
+        self.assertIn("safety", coach_view["metrics"])
+        self.assertTrue(coach_view["top_deductions"])
+        self.assertTrue(coach_view["needs_to_improve"])
+        expert_view = rating_system["expert_view"]
+        self.assertTrue(expert_view["features"])
+        self.assertIn("legacy_scorecard", expert_view)
+
+    def test_unknown_action_caps_overall_score_and_explains_limit(self):
+        result = self.ci.build(
+            elbow={"extension_deg": 12.0, "verdict": "LEGAL"},
+            risks=[],
+            interpretation={
+                "linear_flow": {
+                    "flow_state": "SMOOTH",
+                    "confidence": 0.85,
+                    "contributors": [],
+                }
+            },
+            action={"action": "UNKNOWN", "confidence": 0.0},
+        )
+
+        scorecard = result["scorecard"]
+        self.assertLessEqual(scorecard["overall"]["score"], 80)
+        self.assertIn("capped", scorecard["overall"]["benchmark_limit_reason"].lower())
+        self.assertIn("action view", scorecard["overall"]["benchmark_limit_reason"].lower())
+
+    def test_primary_pillar_follows_main_score_loss_not_tuple_order(self):
+        result = self.ci.build(
+            elbow={"extension_deg": 12.0, "verdict": "LEGAL"},
+            risks=[],
+            interpretation={
+                "linear_flow": {
+                    "flow_state": "unknown",
+                    "confidence": 0.48,
+                    "contributors": [],
+                }
+            },
+            action={"action": "SEMI_OPEN", "confidence": 0.82},
+        )
+
+        self.assertEqual(result["summary"]["primary_pillar"], "POWER")
+        self.assertIn(
+            "carry score capped",
+            result["scorecard"]["pillars"]["carry"]["benchmark_limit_reason"].lower(),
+        )
+        self.assertGreater(
+            result["scorecard"]["pillars"]["balance"]["score"],
+            result["scorecard"]["pillars"]["carry"]["score"],
+        )
+
+    def test_multiple_visible_deductions_pull_score_down_honestly(self):
+        result = self.ci.build(
+            elbow={"extension_deg": 12.0, "verdict": "LEGAL"},
+            risks=[
+                {
+                    "risk_id": "lateral_trunk_lean",
+                    "signal_strength": 0.79,
+                    "confidence": 0.88,
+                },
+                {
+                    "risk_id": "hip_shoulder_mismatch",
+                    "signal_strength": 0.73,
+                    "confidence": 0.86,
+                },
+                {
+                    "risk_id": "foot_line_deviation",
+                    "signal_strength": 0.38,
+                    "confidence": 0.35,
+                },
+                {
+                    "risk_id": "trunk_rotation_snap",
+                    "signal_strength": 0.67,
+                    "confidence": 0.82,
+                },
+            ],
+            interpretation={
+                "linear_flow": {
+                    "flow_state": "SMOOTH",
+                    "confidence": 0.84,
+                    "contributors": [],
+                }
+            },
+            action={"action": "SEMI_OPEN", "confidence": 0.78},
+        )
+
+        scorecard = result["scorecard"]
+        self.assertLessEqual(scorecard["overall"]["score"], 80)
+        self.assertLess(scorecard["pillars"]["balance"]["score"], 80)
+        self.assertLess(scorecard["pillars"]["body_load"]["score"], 82)
+        joined = " ".join(scorecard["overall"]["main_reasons_points_were_lost"]).lower()
+        self.assertTrue("foot" in joined or "lean" in joined or "trunk" in joined)
+
 
 if __name__ == "__main__":
     unittest.main()

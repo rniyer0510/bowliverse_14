@@ -237,15 +237,17 @@ def compute_foot_line_deviation(
     t_med = float(cfg.get("med", 0.15))
 
     # Convert to signal strength with biomechanical gating:
-    # OUTWARD_STEP should never be "high load" from geometry alone.
+    # OUTWARD_STEP should not look "clear/green" when the line is visibly wide,
+    # but it should also not jump straight to a red/high-load story from geometry
+    # alone. So a clearly wide outward step lands in amber/moderate.
     if mode == "OUTWARD_STEP":
-        # keep it low unless it's extreme and confirmed (rare)
+        # keep it low unless the landing line is visibly wide
         if offset_norm <= t_low:
             signal = 0.10
         elif offset_norm <= t_med:
-            signal = 0.18
+            signal = 0.22
         else:
-            signal = 0.25
+            signal = 0.38
     else:
         # INWARD_CROSS (confirmed/collapse)
         if offset_norm <= t_low:
@@ -280,4 +282,3 @@ def compute_foot_line_deviation(
         "collapse_norm": round(float(collapse_norm), 3),
     }
     return out
-

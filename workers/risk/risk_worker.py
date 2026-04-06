@@ -192,7 +192,7 @@ def _pick_visual_anchor_frame(
     - Trunk Rotation Snap      -> UAH (else Release)
     - Hip-Shoulder Mismatch    -> UAH (else Release)
     - Lateral Trunk Lean       -> Release (else FFC)
-    - Foot-Line Deviation      -> FFC + 1
+    - Foot-Line Deviation      -> UAH when reliable, else FFC + 1
     """
     ffc = _event_frame(events, "ffc")
     bfc = _event_frame(events, "bfc")
@@ -209,6 +209,8 @@ def _pick_visual_anchor_frame(
         return rel if rel is not None else ffc
 
     if risk_id == "foot_line_deviation":
+        if _has_reliable_uah(events) and uah is not None:
+            return uah
         if ffc is not None:
             return ffc + 1
         return rel
@@ -216,26 +218,37 @@ def _pick_visual_anchor_frame(
     return rel or ffc or bfc or uah
 
 
+def _has_weak_uah(events: Dict[str, Any]) -> bool:
+    uah_method = str(_event_value(events, "uah", "method", "") or "")
+    release_frame = _event_frame(events, "release")
+    uah_frame = _event_frame(events, "uah")
+    return uah_method == "release_minus_one_fallback" or (
+        release_frame is not None
+        and uah_frame is not None
+        and uah_frame >= release_frame - 1
+    )
+
+
+def _has_reliable_uah(events: Dict[str, Any]) -> bool:
+    uah = events.get("uah") or {}
+    if _has_weak_uah(events):
+        return False
+    try:
+        conf = float(uah.get("confidence") or 0.0)
+    except Exception:
+        conf = 0.0
+    return conf >= 0.45
+
+
 def _should_suppress_visual_for_event_chain(
     risk_id: str,
     events: Dict[str, Any],
 ) -> bool:
     release_method = str(_event_value(events, "release", "method", "") or "")
-    uah_method = str(_event_value(events, "uah", "method", "") or "")
     ffc_method = str(_event_value(events, "ffc", "method", "") or "")
 
-    release_frame = _event_frame(events, "release")
-    uah_frame = _event_frame(events, "uah")
-
     weak_release = release_method in {"peak_plus_offset", "window_start"}
-    weak_uah = (
-        uah_method == "release_minus_one_fallback"
-        or (
-            release_frame is not None
-            and uah_frame is not None
-            and uah_frame >= release_frame - 1
-        )
-    )
+    weak_uah = _has_weak_uah(events)
     weak_ffc = ffc_method in {"ultimate_fallback", "no_foot_data_fallback"}
     weak_foot_line_ffc = weak_ffc or ffc_method == "single_foot_fallback"
 

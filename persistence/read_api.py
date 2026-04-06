@@ -15,7 +15,7 @@ SECURITY:
 
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel, Field
-from typing import Optional
+from typing import Any, Dict, List, Optional
 
 from sqlalchemy.orm import Session
 
@@ -29,6 +29,195 @@ from app.persistence.models import (
 from app.common.auth import get_current_account
 
 router = APIRouter()
+
+
+def _extract_scorecard(result_json: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    if not isinstance(result_json, dict):
+        return None
+    clinician = result_json.get("clinician")
+    if not isinstance(clinician, dict):
+        return None
+    scorecard = clinician.get("scorecard")
+    return scorecard if isinstance(scorecard, dict) else None
+
+
+def _extract_rating_system_v2(result_json: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    if not isinstance(result_json, dict):
+        return None
+    clinician = result_json.get("clinician")
+    if not isinstance(clinician, dict):
+        return None
+    rating_system = clinician.get("rating_system_v2")
+    return rating_system if isinstance(rating_system, dict) else None
+
+
+def _score_band(score: Optional[int]) -> str:
+    if score is None:
+        return "unknown"
+    if score >= 90:
+        return "elite"
+    if score >= 75:
+        return "strong"
+    if score >= 60:
+        return "watch"
+    if score >= 45:
+        return "concern"
+    return "review"
+
+
+def _extract_score_summary(result_json: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    scorecard = _extract_scorecard(result_json)
+    if not scorecard:
+        return None
+
+    overall = scorecard.get("overall") or {}
+    pillars = scorecard.get("pillars") or {}
+    confidence = scorecard.get("confidence") or {}
+
+    def pillar_score(key: str) -> Optional[int]:
+        pillar = pillars.get(key) or {}
+        value = pillar.get("score")
+        return int(value) if isinstance(value, (int, float)) else None
+
+    overall_score = overall.get("score")
+    if not isinstance(overall_score, (int, float)):
+        return None
+
+    confidence_score = confidence.get("score")
+    return {
+        "overall": {
+            "score": int(overall_score),
+            "band": _score_band(int(overall_score)),
+            "label": overall.get("label"),
+        },
+        "balance": {
+            "score": pillar_score("balance"),
+            "band": _score_band(pillar_score("balance")),
+        },
+        "carry": {
+            "score": pillar_score("carry"),
+            "band": _score_band(pillar_score("carry")),
+        },
+        "body_load": {
+            "score": pillar_score("body_load"),
+            "band": _score_band(pillar_score("body_load")),
+        },
+        "confidence": {
+            "score": int(confidence_score) if isinstance(confidence_score, (int, float)) else None,
+            "band": _score_band(int(confidence_score)) if isinstance(confidence_score, (int, float)) else "unknown",
+        },
+    }
+
+
+def _extract_rating_summary_v2(result_json: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    rating_system = _extract_rating_system_v2(result_json)
+    if not rating_system:
+        return None
+
+    overall = rating_system.get("overall") or {}
+    player_view = rating_system.get("player_view") or {}
+    coach_view = rating_system.get("coach_view") or {}
+    confidence = rating_system.get("confidence") or {}
+    metrics = player_view.get("metrics") or {}
+    coach_metrics = coach_view.get("metrics") or {}
+
+    def metric(raw: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+        raw = raw or {}
+        value = raw.get("score")
+        score = int(value) if isinstance(value, (int, float)) else None
+        return {
+            "score": score,
+            "band": _score_band(score),
+            "label": raw.get("label"),
+        }
+
+    overall_score = overall.get("score")
+    if not isinstance(overall_score, (int, float)):
+        return None
+
+    return {
+        "overall": metric(overall),
+        "upper_body_alignment": metric(metrics.get("upper_body_alignment")),
+        "lower_body_alignment": metric(metrics.get("lower_body_alignment")),
+        "whole_body_alignment": metric(metrics.get("whole_body_alignment")),
+        "momentum_forward": metric(metrics.get("momentum_forward")),
+        "safety": metric(coach_metrics.get("safety")),
+        "confidence": metric(confidence),
+    }
+
+
+def _build_score_heatmap(run_entries: List[Dict[str, Any]]) -> Dict[str, Any]:
+    metrics = [
+        ("overall", "Overall"),
+        ("balance", "Balance"),
+        ("carry", "Carry"),
+        ("body_load", "Body Load"),
+        ("confidence", "Confidence"),
+    ]
+
+    rows = []
+    for metric_key, label in metrics:
+        cells = []
+        for entry in run_entries:
+            summary = entry.get("score_summary") or {}
+            metric = summary.get(metric_key) or {}
+            cells.append(
+                {
+                    "run_id": entry["run_id"],
+                    "created_at": entry["created_at"],
+                    "score": metric.get("score"),
+                    "band": metric.get("band") or "unknown",
+                }
+            )
+        rows.append(
+            {
+                "metric": metric_key,
+                "label": label,
+                "cells": cells,
+            }
+        )
+
+    return {
+        "version": "score_heatmap_v1",
+        "headline": "Score trend over recent runs",
+        "latest_first": True,
+        "rows": rows,
+    }
+
+
+def _build_rating_heatmap_v2(run_entries: List[Dict[str, Any]]) -> Dict[str, Any]:
+    metrics = [
+        ("overall", "Overall"),
+        ("upper_body_alignment", "Upper Body"),
+        ("lower_body_alignment", "Lower Body"),
+        ("whole_body_alignment", "Whole Body"),
+        ("momentum_forward", "Momentum"),
+        ("safety", "Safety"),
+        ("confidence", "Confidence"),
+    ]
+
+    rows = []
+    for metric_key, label in metrics:
+        cells = []
+        for entry in run_entries:
+            summary = entry.get("rating_summary_v2") or {}
+            metric = summary.get(metric_key) or {}
+            cells.append(
+                {
+                    "run_id": entry["run_id"],
+                    "created_at": entry["created_at"],
+                    "score": metric.get("score"),
+                    "band": metric.get("band") or "unknown",
+                }
+            )
+        rows.append({"metric": metric_key, "label": label, "cells": cells})
+
+    return {
+        "version": "rating_heatmap_v2",
+        "headline": "How the action is moving over recent runs",
+        "latest_first": True,
+        "rows": rows,
+    }
 
 
 # ---------------------------------------------------------------------
@@ -243,20 +432,43 @@ def list_analysis_runs(
         q = q.filter_by(season=season)
 
     runs = q.order_by(AnalysisRun.created_at.desc()).all()
+    run_ids = [r.run_id for r in runs]
+    raw_by_run_id: Dict[Any, AnalysisResultRaw] = {}
+    if run_ids:
+        raw_rows = db.query(AnalysisResultRaw).filter(AnalysisResultRaw.run_id.in_(run_ids)).all()
+        raw_by_run_id = {row.run_id: row for row in raw_rows}
 
-    return {
-        "items": [
+    items = []
+    heatmap_entries = []
+    for r in runs:
+        raw = raw_by_run_id.get(r.run_id)
+        score_summary = _extract_score_summary(raw.result_json if raw else None)
+        rating_summary_v2 = _extract_rating_summary_v2(raw.result_json if raw else None)
+        item = {
+            "run_id": str(r.run_id),
+            "created_at": r.created_at,
+            "season": r.season,
+            "age_group": r.age_group,
+            "schema_version": r.schema_version,
+            "fps": r.fps,
+            "total_frames": r.total_frames,
+            "score_summary": score_summary,
+            "rating_summary_v2": rating_summary_v2,
+        }
+        items.append(item)
+        heatmap_entries.append(
             {
                 "run_id": str(r.run_id),
                 "created_at": r.created_at,
-                "season": r.season,
-                "age_group": r.age_group,
-                "schema_version": r.schema_version,
-                "fps": r.fps,
-                "total_frames": r.total_frames,
+                "score_summary": score_summary,
+                "rating_summary_v2": rating_summary_v2,
             }
-            for r in runs
-        ]
+        )
+
+    return {
+        "items": items,
+        "heatmap": _build_score_heatmap(heatmap_entries),
+        "heatmap_v2": _build_rating_heatmap_v2(heatmap_entries),
     }
 
 
