@@ -10,7 +10,6 @@ from fastapi import HTTPException
 from app.workers.events.delivery_guard import detect_delivery_candidates
 
 os.environ.setdefault("ACTIONLAB_AUTO_CREATE_SCHEMA", "false")
-from app.orchestrator.orchestrator import analyze
 
 
 def _blank_landmarks():
@@ -20,14 +19,24 @@ def _blank_landmarks():
     ]
 
 
-def _make_pose_frames(peaks, *, frames=150):
+def _make_pose_frames(peaks, *, frames=150, hand="R"):
     wrist_velocity = np.zeros(frames, dtype=float)
     idx = np.arange(frames)
     for peak in peaks:
-        wrist_velocity += np.exp(-0.5 * ((idx - peak) / 4.0) ** 2)
+        if isinstance(peak, tuple):
+            center, scale = peak
+        else:
+            center, scale = peak, 1.0
+        wrist_velocity += float(scale) * np.exp(
+            -0.5 * ((idx - float(center)) / 4.0) ** 2
+        )
 
     wrist_x = 0.30 + np.cumsum(wrist_velocity) * 0.01
     pelvis_x = np.linspace(0.35, 0.60, frames)
+    hand = (hand or "R").upper()
+    shoulder_idx = 12 if hand == "R" else 11
+    wrist_idx = 16 if hand == "R" else 15
+    nb_elbow_idx = 13 if hand == "R" else 14
 
     out = []
     for i in range(frames):
@@ -41,11 +50,11 @@ def _make_pose_frames(peaks, *, frames=150):
                 "visibility": float(vis),
             }
 
-        set_pt(12, 0.48, 0.34)  # right shoulder
-        set_pt(16, wrist_x[i], 0.26)  # right wrist
+        set_pt(shoulder_idx, 0.48, 0.34)
+        set_pt(wrist_idx, wrist_x[i], 0.26)
         set_pt(23, pelvis_x[i] - 0.04, 0.62)  # left hip
         set_pt(24, pelvis_x[i] + 0.04, 0.62)  # right hip
-        set_pt(13, 0.42, 0.35)  # left elbow (non-bowling elbow for R hand)
+        set_pt(nb_elbow_idx, 0.42, 0.35)
 
         out.append({"frame": i, "landmarks": lm})
 
@@ -84,7 +93,53 @@ class DeliveryGuardTests(unittest.TestCase):
         self.assertEqual(result["method"], "wrist_velocity")
         self.assertGreaterEqual(len(result["candidate_frames"]), 2)
 
+    def test_early_weaker_peak_is_not_counted_as_second_delivery(self):
+        pose_frames = _make_pose_frames([(32, 0.65), (90, 1.0)], frames=150)
+
+        result = detect_delivery_candidates(
+            pose_frames=pose_frames,
+            hand="R",
+            fps=30.0,
+        )
+
+        self.assertLessEqual(result["delivery_count"], 1)
+        self.assertEqual(result["method"], "wrist_velocity")
+
+    def test_close_late_peak_is_not_counted_as_second_delivery(self):
+        pose_frames = _make_pose_frames(
+            [(223, 0.76), (264, 1.0)],
+            frames=407,
+            hand="L",
+        )
+
+        result = detect_delivery_candidates(
+            pose_frames=pose_frames,
+            hand="L",
+            fps=30.0,
+        )
+
+        self.assertLessEqual(result["delivery_count"], 1)
+        self.assertEqual(result["method"], "wrist_velocity")
+
+    def test_early_and_close_late_peaks_collapse_to_single_delivery(self):
+        pose_frames = _make_pose_frames(
+            [(135, 0.42), (219, 0.78), (279, 1.0)],
+            frames=407,
+            hand="L",
+        )
+
+        result = detect_delivery_candidates(
+            pose_frames=pose_frames,
+            hand="L",
+            fps=30.0,
+        )
+
+        self.assertLessEqual(result["delivery_count"], 1)
+        self.assertEqual(result["method"], "wrist_velocity")
+
     def test_analyze_rejects_multi_delivery_video(self):
+        from app.orchestrator.orchestrator import analyze
+
         request = SimpleNamespace(state=SimpleNamespace(request_id="req-1"))
         background_tasks = MagicMock()
         upload = SimpleNamespace(

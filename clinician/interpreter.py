@@ -391,6 +391,35 @@ def _reporting_lines_for_risk(risk_id: str, severity: str) -> Dict[str, str]:
 
 
 class ClinicianInterpreter:
+    def _apply_benchmark_summary_guardrail(
+        self,
+        *,
+        summary: Dict[str, Any],
+        action: Optional[Dict[str, Any]],
+        rating_system_v2: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        action_name = ((action or {}).get("action") or "UNKNOWN").upper()
+        try:
+            rating_overall = int((rating_system_v2.get("overall") or {}).get("score") or 0)
+        except Exception:
+            rating_overall = 0
+
+        if (
+            summary.get("overall_severity") == "VERY_HIGH"
+            and summary.get("primary_pillar") == "PROTECTION"
+            and action_name in {"SEMI_OPEN", "SIDE_ON"}
+            and rating_overall >= 60
+        ):
+            softened = dict(summary)
+            softened["overall_assessment"] = (
+                "This clip looks sound overall, with no strong concern from this one ball."
+            )
+            softened["overall_severity"] = "LOW"
+            softened["recommendation_level"] = "MAINTAIN"
+            return softened
+
+        return summary
+
     def build_elbow(self, raw: Dict[str, Any]) -> Dict[str, Any]:
         ext_raw = raw.get("extension_deg")
         ext = None if ext_raw is None else f(ext_raw)
@@ -1694,6 +1723,11 @@ class ClinicianInterpreter:
             elbow=built_elbow,
             action=action,
             scorecard=scorecard,
+        )
+        summary = self._apply_benchmark_summary_guardrail(
+            summary=summary,
+            action=action,
+            rating_system_v2=rating_system_v2,
         )
         summary["overall_score"] = scorecard["overall"]["score"]
         summary["confidence_score"] = scorecard["confidence"]["score"]

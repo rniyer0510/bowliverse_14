@@ -297,7 +297,7 @@ def assess_primary_subject(
         if detector_frames < 4
         else max(2, int(math.ceil(detector_frames * 0.25)))
     )
-    passed = len(competitor_frames) < frame_threshold
+    passed = len(competitor_frames) <= frame_threshold
 
     return {
         "passed": passed,
@@ -390,6 +390,16 @@ def run_preanalysis_screen(
                 "detail": (
                     "Minor bystanders were detected, but one dominant bowler "
                     "remained clear across the sampled frames."
+                ),
+            }
+        )
+    if primary_subject.get("passed", True) and primary_subject.get("frames_with_competing_primary"):
+        warnings.append(
+            {
+                "code": "primary_subject_competition_seen",
+                "detail": (
+                    "Another prominent person appeared in a few sampled frames, "
+                    "but one bowler still remained dominant overall."
                 ),
             }
         )

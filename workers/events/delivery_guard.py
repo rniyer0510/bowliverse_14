@@ -68,6 +68,44 @@ def _strong_peak_frames(
     return strong
 
 
+def _filter_delivery_candidates(
+    peaks: List[int],
+    signal: np.ndarray,
+    *,
+    total_frames: int,
+) -> List[int]:
+    if len(peaks) < 2 or total_frames <= 0:
+        return peaks
+
+    strongest_peak = max(peaks, key=lambda peak: float(signal[peak]))
+    strongest_value = float(signal[strongest_peak])
+    latest_peak = max(peaks)
+    early_cutoff = int(round(total_frames * 0.35))
+    close_window = max(24, int(round(total_frames * 0.18)))
+    late_phase_start = int(round(total_frames * 0.45))
+
+    filtered: List[int] = []
+    for peak in peaks:
+        peak_value = float(signal[peak])
+        remove_early_peak = (
+            peak != strongest_peak
+            and strongest_peak > peak
+            and strongest_value > 1e-6
+            and peak < early_cutoff
+            and peak_value < strongest_value * 0.8
+        )
+        remove_late_cluster_peak = (
+            peak != latest_peak
+            and peak >= late_phase_start
+            and latest_peak > peak
+            and (latest_peak - peak) <= close_window
+        )
+        if remove_early_peak or remove_late_cluster_peak:
+            continue
+        filtered.append(peak)
+    return filtered or peaks
+
+
 def detect_delivery_candidates(
     pose_frames: List[Dict[str, Any]],
     hand: str,
@@ -167,6 +205,11 @@ def detect_delivery_candidates(
         min_height_ratio=0.55,
         min_prominence_ratio=0.18,
     )
+    wrist_peaks = _filter_delivery_candidates(
+        wrist_peaks,
+        wrist_signal,
+        total_frames=n,
+    )
 
     wrist_visibility_ratio = wrist_visible / float(max(1, n))
     if len(wrist_peaks) >= 2 and wrist_visibility_ratio >= 0.30:
@@ -188,6 +231,11 @@ def detect_delivery_candidates(
             fps=fps,
             min_height_ratio=0.65,
             min_prominence_ratio=0.16,
+        )
+        nb_peaks = _filter_delivery_candidates(
+            nb_peaks,
+            nb_signal,
+            total_frames=n,
         )
         if len(nb_peaks) >= 2:
             return {

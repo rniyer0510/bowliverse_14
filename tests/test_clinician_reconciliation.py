@@ -1,4 +1,5 @@
 import unittest
+from unittest.mock import patch
 
 from app.clinician.interpreter import ClinicianInterpreter
 
@@ -287,6 +288,123 @@ class ClinicianReconciliationTests(unittest.TestCase):
         self.assertLess(scorecard["pillars"]["body_load"]["score"], 82)
         joined = " ".join(scorecard["overall"]["main_reasons_points_were_lost"]).lower()
         self.assertTrue("foot" in joined or "lean" in joined or "trunk" in joined)
+
+    def test_benchmark_style_protection_summary_softens_to_low(self):
+        with patch.object(
+            self.ci,
+            "build_summary",
+            return_value={
+                "overall_assessment": "This clip needs a closer look because some parts of the body may be taking extra load.",
+                "overall_severity": "VERY_HIGH",
+                "recommendation_level": "CORRECT",
+                "confidence": 0.7,
+                "primary_pillar": "PROTECTION",
+            },
+        ), patch.object(
+            self.ci,
+            "build_scorecard",
+            return_value={
+                "overall": {"score": 33},
+                "confidence": {"score": 68},
+            },
+        ), patch.object(
+            self.ci,
+            "build_rating_system_v2",
+            return_value={
+                "overall": {"score": 66},
+            },
+        ), patch.object(
+            self.ci,
+            "build_pillars",
+            return_value={
+                "posture": {"status": "REVIEW"},
+                "power": {"status": "REVIEW"},
+                "protection": {"status": "REVIEW"},
+            },
+        ), patch.object(
+            self.ci,
+            "build_risks",
+            return_value=[],
+        ), patch.object(
+            self.ci,
+            "build_chain",
+            return_value={"confidence": 0.7},
+        ), patch.object(
+            self.ci,
+            "build_elbow",
+            return_value={"band": "OK"},
+        ), patch(
+            "app.clinician.interpreter.generate_comprehensive_why",
+            return_value={},
+        ):
+            result = self.ci.build(
+                elbow={"verdict": "LEGAL"},
+                risks=[],
+                interpretation={},
+                action={"action": "SEMI_OPEN", "confidence": 0.43},
+            )
+
+        self.assertEqual(result["summary"]["overall_severity"], "LOW")
+        self.assertEqual(result["summary"]["recommendation_level"], "MAINTAIN")
+        self.assertEqual(result["summary"]["rating_overall_score"], 66)
+
+    def test_mixed_action_does_not_get_benchmark_softening(self):
+        with patch.object(
+            self.ci,
+            "build_summary",
+            return_value={
+                "overall_assessment": "This clip needs a closer look because some parts of the body may be taking extra load.",
+                "overall_severity": "VERY_HIGH",
+                "recommendation_level": "CORRECT",
+                "confidence": 0.7,
+                "primary_pillar": "PROTECTION",
+            },
+        ), patch.object(
+            self.ci,
+            "build_scorecard",
+            return_value={
+                "overall": {"score": 17},
+                "confidence": {"score": 81},
+            },
+        ), patch.object(
+            self.ci,
+            "build_rating_system_v2",
+            return_value={
+                "overall": {"score": 70},
+            },
+        ), patch.object(
+            self.ci,
+            "build_pillars",
+            return_value={
+                "posture": {"status": "REVIEW"},
+                "power": {"status": "REVIEW"},
+                "protection": {"status": "REVIEW"},
+            },
+        ), patch.object(
+            self.ci,
+            "build_risks",
+            return_value=[],
+        ), patch.object(
+            self.ci,
+            "build_chain",
+            return_value={"confidence": 0.7},
+        ), patch.object(
+            self.ci,
+            "build_elbow",
+            return_value={"band": "OK"},
+        ), patch(
+            "app.clinician.interpreter.generate_comprehensive_why",
+            return_value={},
+        ):
+            result = self.ci.build(
+                elbow={"verdict": "LEGAL"},
+                risks=[],
+                interpretation={},
+                action={"action": "MIXED", "confidence": 1.0},
+            )
+
+        self.assertEqual(result["summary"]["overall_severity"], "VERY_HIGH")
+        self.assertEqual(result["summary"]["recommendation_level"], "CORRECT")
 
 
 if __name__ == "__main__":

@@ -99,6 +99,34 @@ class VideoScreenTests(unittest.TestCase):
         self.assertTrue(result["passed"])
         self.assertEqual(result["warnings"][0]["code"], "minor_bystanders_present")
 
+    def test_screening_allows_threshold_competing_frames_with_warning(self):
+        with patch(
+            "app.workers.screening.video_screen.detect_delivery_candidates",
+            return_value={
+                "delivery_count": 1,
+                "method": "wrist_velocity",
+                "candidate_frames": [70],
+            },
+        ), patch(
+            "app.workers.screening.video_screen.assess_primary_subject",
+            return_value={
+                "passed": True,
+                "status": "pass",
+                "frames_with_competing_primary": [30, 60],
+                "frames_with_minor_people": [],
+                "detector_frames": 6,
+                "frame_threshold": 2,
+            },
+        ):
+            result = run_preanalysis_screen(
+                video={"fps": 30.0, "total_frames": 150, "path": "/tmp/fake.mp4"},
+                pose_frames=[],
+                hand="R",
+            )
+
+        self.assertTrue(result["passed"])
+        self.assertEqual(result["warnings"][0]["code"], "primary_subject_competition_seen")
+
 
 if __name__ == "__main__":
     unittest.main()
