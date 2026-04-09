@@ -93,6 +93,19 @@ def _smoothed_track(
     )
 
 
+def _smoothed_series(
+    values: List[Optional[float]],
+    *,
+    fps: float,
+    sigma_scale: float = 0.03,
+) -> Optional[np.ndarray]:
+    series = _interpolate_series(values)
+    if series is None:
+        return None
+    sigma = max(1.0, sigma_scale * fps)
+    return gaussian_filter1d(series, sigma=sigma)
+
+
 def _body_height_px(
     pose_frames: List[Dict[str, Any]],
     frame_idx: int,
@@ -220,6 +233,7 @@ def _estimate_release_speed_pass(
     max_arm_cv: float,
     max_wrist_cv: float,
     salvage_mode: bool,
+    release_confidence: float,
 ) -> Dict[str, Any]:
     fps = float(video.get("fps") or 0.0)
     width = float(video.get("width") or 0.0)
@@ -242,6 +256,7 @@ def _estimate_release_speed_pass(
     wrist_points: List[Optional[Tuple[float, float]]] = []
     shoulder_points: List[Optional[Tuple[float, float]]] = []
     pelvis_points: List[Optional[Tuple[float, float]]] = []
+    wrist_depths: List[Optional[float]] = []
     arm_lengths: List[Optional[float]] = []
     body_heights: List[Optional[float]] = []
     elbow_angles: List[Optional[float]] = []
@@ -250,6 +265,11 @@ def _estimate_release_speed_pass(
         landmarks = (frame or {}).get("landmarks")
         wrist_points.append(
             _pixel_xy(_get_landmark(landmarks, wrist_idx), width=width, height=height)
+        )
+        wrist_depths.append(
+            float(_get_landmark(landmarks, wrist_idx)["z"])
+            if _get_landmark(landmarks, wrist_idx) is not None
+            else None
         )
         shoulder_points.append(
             _pixel_xy(_get_landmark(landmarks, shoulder_idx), width=width, height=height)
@@ -296,6 +316,7 @@ def _estimate_release_speed_pass(
     wrist_track = _smoothed_track(wrist_points, fps=fps, sigma_scale=sigma_scale)
     shoulder_track = _smoothed_track(shoulder_points, fps=fps, sigma_scale=sigma_scale)
     pelvis_track = _smoothed_track(pelvis_points, fps=fps, sigma_scale=sigma_scale)
+    wrist_depth_series = _smoothed_series(wrist_depths, fps=fps, sigma_scale=sigma_scale)
     arm_series = _interpolate_series(arm_lengths)
     body_series = _interpolate_series(body_heights)
     elbow_series = _interpolate_series(elbow_angles)
@@ -304,6 +325,7 @@ def _estimate_release_speed_pass(
         wrist_track is None
         or shoulder_track is None
         or pelvis_track is None
+        or wrist_depth_series is None
         or arm_series is None
         or body_series is None
         or elbow_series is None
@@ -325,6 +347,7 @@ def _estimate_release_speed_pass(
         np.gradient(pelvis_track[0], dt),
         np.gradient(pelvis_track[1], dt),
     )
+    wrist_depth_speed_norm = np.abs(np.gradient(wrist_depth_series, dt))
     elbow_extension_speed = np.abs(np.gradient(elbow_series, dt))
 
     metric_window = _window_indices(
@@ -345,6 +368,7 @@ def _estimate_release_speed_pass(
     wrist_metric = [float(wrist_speed[idx]) for idx in metric_window]
     shoulder_metric = [float(shoulder_speed[idx]) for idx in metric_window]
     pelvis_metric = [float(pelvis_speed[idx]) for idx in metric_window]
+    wrist_depth_metric_norm = [float(wrist_depth_speed_norm[idx]) for idx in metric_window]
     elbow_metric = [float(elbow_extension_speed[idx]) for idx in metric_window]
     arm_scale_metric = [float(arm_series[idx]) for idx in scale_window]
     body_scale_metric = [float(body_series[idx]) for idx in scale_window]
@@ -354,11 +378,27 @@ def _estimate_release_speed_pass(
     if arm_length_px is None or body_height_px is None or body_height_px <= 1.0:
         return {**unavailable, "reason": "missing_body_scale"}
 
+    soft_release_recovery_mode = (not salvage_mode) and release_confidence < 0.60
+
     if salvage_mode:
         wrist_reference = _percentile_or_none(wrist_metric, 75.0)
         elbow_velocity = _percentile_or_none(elbow_metric, 70.0)
         shoulder_reference = _median_or_none(shoulder_metric)
         pelvis_reference = _median_or_none(pelvis_metric)
+    elif soft_release_recovery_mode:
+        wrist_reference = max(
+            _median_or_none(wrist_metric) or 0.0,
+            _percentile_or_none(wrist_metric, 65.0) or 0.0,
+        )
+        elbow_velocity = max(
+            _median_or_none(elbow_metric) or 0.0,
+            _percentile_or_none(elbow_metric, 70.0) or 0.0,
+        )
+        shoulder_reference = _median_or_none(shoulder_metric)
+        pelvis_reference = max(
+            _median_or_none(pelvis_metric) or 0.0,
+            _percentile_or_none(pelvis_metric, 60.0) or 0.0,
+        )
     else:
         wrist_reference = _median_or_none(wrist_metric)
         elbow_velocity = _median_or_none(elbow_metric)
@@ -382,6 +422,7 @@ def _estimate_release_speed_pass(
     arm_length_cv_broad = _cv(arm_scale_metric)
     arm_length_cv = min(arm_length_cv_local, arm_length_cv_broad) if salvage_mode else arm_length_cv_local
     wrist_window_cv = _cv(wrist_metric)
+    overall_wrist_visibility = sum(1.0 for point in wrist_points if point is not None) / float(len(wrist_points))
 
     if arm_length_cv > max_arm_cv:
         return {
@@ -397,13 +438,41 @@ def _estimate_release_speed_pass(
 
     scoring_wrist_arm_ratio = min(wrist_arm_ratio, 10.0) if salvage_mode else wrist_arm_ratio
     scoring_elbow_velocity = min(elbow_velocity, 220.0) if salvage_mode else elbow_velocity
+    scoring_shoulder_body_ratio = shoulder_body_ratio
+
+    depth_scale_px = max(float(body_height_px) * 1.6, float(width) * 2.4)
+    wrist_depth_reference = max(
+        _median_or_none([value * depth_scale_px for value in wrist_depth_metric_norm]) or 0.0,
+        _percentile_or_none([value * depth_scale_px for value in wrist_depth_metric_norm], 85.0) or 0.0,
+    )
+    depth_wrist_arm_ratio = (
+        float(wrist_depth_reference / max(arm_length_px, 1.0))
+        if wrist_depth_reference is not None
+        else None
+    )
+    depth_dominant_mode = (
+        not salvage_mode
+        and release_confidence >= 0.60
+        and overall_wrist_visibility >= 0.75
+        and shoulder_body_ratio >= 0.50
+        and pelvis_body_ratio <= 0.35
+        and depth_wrist_arm_ratio is not None
+        and depth_wrist_arm_ratio >= max(5.0, wrist_arm_ratio * 2.2)
+    )
+    if depth_dominant_mode:
+        scoring_wrist_arm_ratio = max(scoring_wrist_arm_ratio, min(depth_wrist_arm_ratio, 24.0))
+        scoring_elbow_velocity = max(
+            scoring_elbow_velocity,
+            _percentile_or_none(elbow_metric, 85.0) or scoring_elbow_velocity,
+        )
+        scoring_shoulder_body_ratio = min(scoring_shoulder_body_ratio, 0.28)
 
     release_score = (
         68.0
         + (0.22 * scoring_elbow_velocity)
         + (1.25 * scoring_wrist_arm_ratio)
         + (4.0 * pelvis_body_ratio)
-        - (14.0 * shoulder_body_ratio)
+        - (14.0 * scoring_shoulder_body_ratio)
     )
 
     weight_factor = math.pow(max(0.1, BALL_WEIGHT_OZ / max(ball_weight_oz, 0.1)), 0.05)
@@ -431,7 +500,6 @@ def _estimate_release_speed_pass(
         for idx in visibility_window
     ]
     visibility_score = sum(visibility_parts) / float(len(visibility_parts))
-    overall_wrist_visibility = sum(1.0 for point in wrist_points if point is not None) / float(len(wrist_points))
     scale_stability_score = max(0.0, 1.0 - min(1.0, arm_length_cv / 0.16))
     motion_stability_score = max(0.0, 1.0 - min(1.0, wrist_window_cv / (0.70 if salvage_mode else 0.50)))
     shoulder_penalty = max(0.0, min(1.0, (shoulder_body_ratio - 0.35) / 0.75))
@@ -505,9 +573,17 @@ def _estimate_release_speed_pass(
             "wrist_arm_ratio": round(wrist_arm_ratio, 3),
             "scoring_wrist_arm_ratio": round(scoring_wrist_arm_ratio, 3),
             "shoulder_body_ratio": round(shoulder_body_ratio, 3),
+            "scoring_shoulder_body_ratio": round(scoring_shoulder_body_ratio, 3),
             "pelvis_body_ratio": round(pelvis_body_ratio, 3),
             "elbow_extension_velocity_deg_per_sec": round(elbow_velocity, 1),
             "scoring_elbow_velocity_deg_per_sec": round(scoring_elbow_velocity, 1),
+            "wrist_depth_reference": round(float(wrist_depth_reference), 1)
+            if wrist_depth_reference is not None
+            else None,
+            "depth_wrist_arm_ratio": round(depth_wrist_arm_ratio, 3)
+            if depth_wrist_arm_ratio is not None
+            else None,
+            "depth_scale_px": round(depth_scale_px, 1),
             "arm_length_px": round(float(arm_length_px), 1),
             "body_height_px": round(float(body_height_px), 1),
             "arm_length_cv": round(arm_length_cv, 3),
@@ -516,6 +592,9 @@ def _estimate_release_speed_pass(
             "wrist_window_cv": round(wrist_window_cv, 3),
             "saturated": saturated,
             "salvage_mode": salvage_mode,
+            "soft_release_recovery_mode": soft_release_recovery_mode,
+            "depth_dominant_mode": depth_dominant_mode,
+            "release_confidence": round(float(release_confidence), 3),
             "overall_wrist_visibility": round(overall_wrist_visibility, 3),
             "body_height_ratio": round(body_height_px / max(height, 1.0), 3),
             "perspective_penalty_trigger_ratio": round(shoulder_body_ratio, 3),
@@ -523,6 +602,54 @@ def _estimate_release_speed_pass(
             "window_after": window_after,
         },
     }
+
+
+def _apply_low_confidence_neighbor_recovery(
+    primary: Dict[str, Any],
+    neighbor_results: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    if not primary.get("available") or primary.get("display_policy") != "show":
+        return primary
+
+    primary_value = int(primary.get("value_kph") or 0)
+    primary_confidence = float(primary.get("confidence") or 0.0)
+    stable_confidence_floor = max(0.55, primary_confidence - 0.03)
+
+    stable_values: List[int] = []
+    stable_frames: List[int] = []
+    for result in neighbor_results:
+        if not result.get("available") or result.get("display_policy") != "show":
+            continue
+        debug = result.get("debug") or {}
+        if bool(debug.get("saturated")):
+            continue
+        confidence = float(result.get("confidence") or 0.0)
+        value_kph = result.get("value_kph")
+        if value_kph is None or confidence < stable_confidence_floor:
+            continue
+        stable_values.append(int(value_kph))
+        if debug.get("release_frame") is not None:
+            stable_frames.append(int(debug["release_frame"]))
+
+    if len(stable_values) < 3:
+        return primary
+
+    recovered_value = int(round(float(np.percentile(np.asarray(stable_values, dtype=float), 75.0))))
+    if recovered_value <= primary_value + 4:
+        return primary
+
+    recovered = dict(primary)
+    recovered["value_kph"] = recovered_value
+    recovered["display"] = f"~{recovered_value} km/h"
+    recovered["debug"] = {
+        **dict(primary.get("debug") or {}),
+        "low_confidence_neighbor_recovery": True,
+        "neighbor_recovery_values": stable_values,
+        "neighbor_recovery_frames": stable_frames,
+        "neighbor_recovery_confidence_floor": round(stable_confidence_floor, 2),
+        "primary_value_kph": primary_value,
+    }
+    return recovered
 
 
 def estimate_release_speed(
@@ -534,6 +661,7 @@ def estimate_release_speed(
     ball_weight_oz: float = BALL_WEIGHT_OZ,
 ) -> Dict[str, Any]:
     release_frame = int(((events.get("release") or {}).get("frame")) or -1)
+    release_confidence = float(((events.get("release") or {}).get("confidence")) or 0.0)
     primary = _estimate_release_speed_pass(
         pose_frames=pose_frames,
         video=video,
@@ -548,8 +676,44 @@ def estimate_release_speed(
         max_arm_cv=0.22,
         max_wrist_cv=0.60,
         salvage_mode=False,
+        release_confidence=release_confidence,
     )
+    if primary.get("reason") in {
+        "release_too_close_to_clip_start",
+        "release_too_close_to_clip_end",
+    }:
+        debug = dict(primary.get("debug") or {})
+        debug["primary_failure_reason"] = primary.get("reason")
+        return {
+            **primary,
+            "reason": "missing_release_window",
+            "debug": debug,
+        }
     if primary.get("available"):
+        if release_confidence < 0.60:
+            neighbor_results = [primary]
+            for candidate_frame in range(max(3, release_frame - 2), release_frame + 3):
+                if candidate_frame == release_frame:
+                    continue
+                neighbor_results.append(
+                    _estimate_release_speed_pass(
+                        pose_frames=pose_frames,
+                        video=video,
+                        hand=hand,
+                        release_frame=candidate_frame,
+                        ball_weight_oz=ball_weight_oz,
+                        window_before=3,
+                        window_after=3,
+                        scale_before=3,
+                        scale_after=3,
+                        sigma_scale=0.03,
+                        max_arm_cv=0.22,
+                        max_wrist_cv=0.60,
+                        salvage_mode=False,
+                        release_confidence=release_confidence,
+                    )
+                )
+            primary = _apply_low_confidence_neighbor_recovery(primary, neighbor_results)
         return primary
 
     if primary.get("reason") not in {"unstable_arm_scale", "unstable_release_window"}:
@@ -569,11 +733,25 @@ def estimate_release_speed(
         max_arm_cv=0.30,
         max_wrist_cv=1.10,
         salvage_mode=True,
+        release_confidence=release_confidence,
     )
     if salvage.get("available"):
         salvage["reason"] = f"recovered_{primary.get('reason')}"
         salvage_debug = salvage.setdefault("debug", {})
         salvage_debug["primary_failure_reason"] = primary.get("reason")
         return salvage
+
+    if salvage.get("reason") in {
+        "release_too_close_to_clip_start",
+        "release_too_close_to_clip_end",
+    }:
+        salvage = {
+            **salvage,
+            "reason": primary.get("reason"),
+            "debug": {
+                **dict(salvage.get("debug") or {}),
+                "primary_failure_reason": primary.get("reason"),
+            },
+        }
 
     return salvage if salvage.get("reason") != primary.get("reason") else primary

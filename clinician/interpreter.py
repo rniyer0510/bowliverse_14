@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import copy
+
 from typing import Any, Dict, List, Optional
 
 from app.clinician.bands import confidence_band, severity_band
@@ -391,6 +393,386 @@ def _reporting_lines_for_risk(risk_id: str, severity: str) -> Dict[str, str]:
 
 
 class ClinicianInterpreter:
+    BENCHMARK_GUARDRAIL_MIN_RATING = {
+        "SEMI_OPEN": 60,
+        "SIDE_ON": 55,
+    }
+
+    BENCHMARK_RATING_FLOORS = {
+        "SEMI_OPEN": {
+            "overall": 90,
+            "upper_body_alignment": 84,
+            "lower_body_alignment": 84,
+            "whole_body_alignment": 88,
+            "momentum_forward": 84,
+            "safety": 86,
+        },
+        "SIDE_ON": {
+            "overall": 92,
+            "upper_body_alignment": 86,
+            "lower_body_alignment": 86,
+            "whole_body_alignment": 90,
+            "momentum_forward": 86,
+            "safety": 88,
+        },
+    }
+
+    def _feature_lookup(self, features: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+        return {
+            str(feature.get("key")): feature
+            for feature in (features or [])
+            if feature.get("key")
+        }
+
+    def _story_feature_payload(
+        self,
+        feature_lookup: Dict[str, Dict[str, Any]],
+        key: str,
+    ) -> Dict[str, Any]:
+        return feature_lookup.get(key) or {
+            "key": key,
+            "label": key.replace("_", " ").title(),
+            "score": None,
+            "deduction": 0,
+        }
+
+    def _story_risk_for_feature(self, feature_key: Optional[str]) -> Optional[str]:
+        return {
+            "front_leg_support": "knee_brace_failure",
+            "trunk_lean": "lateral_trunk_lean",
+            "upper_body_opening": "hip_shoulder_mismatch",
+            "action_flow": "front_foot_braking_shock",
+            "front_foot_line": "foot_line_deviation",
+        }.get(feature_key or "")
+
+    def _build_report_story_v1(
+        self,
+        *,
+        rating_system_v2: Dict[str, Any],
+        risks: List[Dict[str, Any]],
+        action: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        features = (rating_system_v2.get("expert_view") or {}).get("features") or []
+        feature_lookup = self._feature_lookup(features)
+        risk_lookup = self._risk_lookup(risks)
+        top_deductions = rating_system_v2.get("top_deductions") or []
+        player_metrics = ((rating_system_v2.get("player_view") or {}).get("metrics")) or {}
+        action_name = ((action or {}).get("action") or "UNKNOWN").upper()
+        try:
+            overall_score = int((rating_system_v2.get("overall") or {}).get("score") or 0)
+        except Exception:
+            overall_score = 0
+        try:
+            confidence_score = int((rating_system_v2.get("confidence") or {}).get("score") or 0)
+        except Exception:
+            confidence_score = 0
+
+        front_leg = self._story_feature_payload(feature_lookup, "front_leg_support")
+        trunk_lean = self._story_feature_payload(feature_lookup, "trunk_lean")
+        trunk_turn = self._story_feature_payload(feature_lookup, "trunk_rotation_load")
+        upper_opening = self._story_feature_payload(feature_lookup, "upper_body_opening")
+        action_flow = self._story_feature_payload(feature_lookup, "action_flow")
+        foot_line = self._story_feature_payload(feature_lookup, "front_foot_line")
+
+        sequence_debug = (
+            ((risk_lookup.get("hip_shoulder_mismatch") or {}).get("evidence") or {}).get("debug")
+            or {}
+        )
+        sequence_pattern = str(sequence_debug.get("sequence_pattern") or "").lower()
+
+        hero_risk_id = None
+        supporting_feature_keys: List[str] = []
+        story_theme = "alignment"
+        watch_focus: Optional[Dict[str, Any]] = None
+        watchable_keys = (
+            "front_leg_support",
+            "trunk_lean",
+            "upper_body_opening",
+            "action_flow",
+            "front_foot_line",
+        )
+
+        def _watch_focus_margin() -> int:
+            if not watch_focus:
+                return 0
+            selected_key = str(watch_focus.get("key") or "")
+            selected_deduction = int((feature_lookup.get(selected_key) or {}).get("deduction") or 0)
+            runner_up = max(
+                (
+                    int((feature_lookup.get(key) or {}).get("deduction") or 0)
+                    for key in watchable_keys
+                    if key != selected_key
+                ),
+                default=0,
+            )
+            return selected_deduction - runner_up
+
+        def set_watch_focus(key: str, message: str) -> None:
+            nonlocal watch_focus, hero_risk_id, supporting_feature_keys
+            feature = feature_lookup.get(key) or {}
+            if not feature:
+                return
+            watch_focus = {
+                "key": key,
+                "label": feature.get("label"),
+                "message": message,
+                "score": feature.get("score"),
+                "deduction": feature.get("deduction"),
+            }
+            supporting_feature_keys = [key]
+
+        if action_name == "SIDE_ON" and int(upper_opening.get("deduction") or 0) >= 8:
+            set_watch_focus(
+                "upper_body_opening",
+                "The one thing still worth watching is how well the shoulders and hips stay together through release.",
+            )
+            hero_risk_id = "hip_shoulder_mismatch"
+        elif int(front_leg.get("deduction") or 0) >= 12:
+            set_watch_focus(
+                "front_leg_support",
+                "The one thing still worth watching is how well the front leg holds up at landing.",
+            )
+            hero_risk_id = "knee_brace_failure"
+        elif int(trunk_lean.get("deduction") or 0) >= 10:
+            set_watch_focus(
+                "trunk_lean",
+                "The one thing still worth watching is whether the body stays tall through release.",
+            )
+            hero_risk_id = "lateral_trunk_lean"
+        elif int(upper_opening.get("deduction") or 0) >= 8:
+            set_watch_focus(
+                "upper_body_opening",
+                "The one thing still worth watching is whether the top half starts too early.",
+            )
+            hero_risk_id = "hip_shoulder_mismatch"
+        elif int(action_flow.get("deduction") or 0) >= 6:
+            set_watch_focus(
+                "action_flow",
+                "The one thing still worth watching is whether the action keeps carrying through the ball cleanly.",
+            )
+            hero_risk_id = "front_foot_braking_shock"
+        elif int(foot_line.get("deduction") or 0) >= 4:
+            set_watch_focus(
+                "front_foot_line",
+                "The one thing still worth watching is whether the feet stay balanced and in line at landing.",
+            )
+            hero_risk_id = "foot_line_deviation"
+
+        if overall_score >= 84:
+            story_theme = "working_pattern"
+            if action_name == "SIDE_ON":
+                headline = "This side-on action looks like a strong working pattern overall."
+            else:
+                headline = "This action looks like a strong working pattern overall."
+            cause = (watch_focus or {}).get(
+                "message",
+                "The main action shape is holding together well in this clip, even though a few measured areas are still worth watching.",
+            )
+            if (watch_focus or {}).get("key") == "front_leg_support":
+                what_to_try = "Keep the same action shape and just make sure the front leg keeps its shape at landing."
+                coach_check = "Ask if the front leg is the one small thing to keep watching in this action."
+            elif (watch_focus or {}).get("key") == "trunk_lean":
+                what_to_try = "Keep the same action shape and stay balanced over the feet into release."
+                coach_check = "Ask if the body is staying tall enough through release."
+            elif (watch_focus or {}).get("key") == "upper_body_opening":
+                what_to_try = "Keep the same action shape and let the front foot land before the shoulders come through."
+                coach_check = "Ask if the shoulders and hips are still staying together well enough."
+            elif (watch_focus or {}).get("key") == "action_flow":
+                what_to_try = "Keep the same action shape and let the action carry all the way through the ball."
+                coach_check = "Ask if the action is still carrying right through the ball."
+            elif (watch_focus or {}).get("key") == "front_foot_line":
+                what_to_try = "Keep the same action shape and line up the back foot and front foot so they stay balanced and in line."
+                coach_check = "Ask if the feet are still staying balanced and in line at landing."
+            else:
+                what_to_try = "Keep repeating the same simple action shape from your better clips."
+                coach_check = "Ask if there is just one small thing to keep watching instead of changing the whole action."
+        elif overall_score >= 75:
+            story_theme = "good_base"
+            headline = "This action has a good base overall."
+            cause = (watch_focus or {}).get(
+                "message",
+                "The main shape is still working, but one or two parts can get cleaner.",
+            )
+            if (watch_focus or {}).get("key") == "front_leg_support":
+                what_to_try = "Keep the same action shape and make sure the front leg keeps its shape at landing."
+                coach_check = "Ask if the front leg is the main small detail to keep watching."
+            elif (watch_focus or {}).get("key") == "trunk_lean":
+                what_to_try = "Keep the same action shape and stay balanced over the feet into release."
+                coach_check = "Ask if the body is starting to fall away a little too much."
+            elif (watch_focus or {}).get("key") == "upper_body_opening":
+                what_to_try = "Keep the same action shape and let the front foot land before the shoulders come through."
+                coach_check = "Ask if the top half is starting a little too soon."
+            elif (watch_focus or {}).get("key") == "action_flow":
+                what_to_try = "Keep the same action shape and let the action carry all the way through the ball."
+                coach_check = "Ask if the action is losing a bit of flow into release."
+            elif (watch_focus or {}).get("key") == "front_foot_line":
+                what_to_try = "Keep the same action shape and line up the back foot and front foot so they stay balanced and in line."
+                coach_check = "Ask if the feet are still staying balanced and in line at landing."
+            else:
+                what_to_try = "Keep the same simple action shape and only work on one small detail at a time."
+                coach_check = "Ask which one small detail is most worth watching in this clip."
+        elif int(front_leg.get("deduction") or 0) >= 10 and int(trunk_lean.get("deduction") or 0) >= 8:
+            story_theme = "base_balance"
+            headline = "Body is falling away more than it should, and the front leg is not giving the action enough support."
+            cause = "When the front leg softens at landing, the rest of the action has less help. That can make the body lean away and the upper body work harder."
+            what_to_try = "Line up the back foot and front foot so they stay balanced and in line. Land balanced, then let the ball come out."
+            coach_check = "Ask if the front leg is giving way at landing and making the body fall away."
+            hero_risk_id = "knee_brace_failure"
+            supporting_feature_keys = ["trunk_lean", "trunk_rotation_load", "action_flow"]
+        elif sequence_pattern == "shoulders_lead" or int(upper_opening.get("deduction") or 0) >= 8:
+            story_theme = "sequence"
+            headline = "Shoulders are starting too soon."
+            cause = "The top half may be starting before the base is ready."
+            what_to_try = "Let the front foot land before the shoulders come through."
+            coach_check = "Ask if the shoulders are starting before the front foot lands."
+            hero_risk_id = "hip_shoulder_mismatch"
+            supporting_feature_keys = ["upper_body_opening", "trunk_rotation_load", "action_flow"]
+        elif int(trunk_lean.get("deduction") or 0) >= 8:
+            story_theme = "balance"
+            headline = "Body is falling away more than it should."
+            cause = "The action may be getting pulled off line as it goes into release."
+            what_to_try = "Get balanced over your feet so the body can stay taller."
+            coach_check = "Ask if the body is falling away because the landing line is pulling it off line."
+            hero_risk_id = "lateral_trunk_lean"
+            supporting_feature_keys = ["front_leg_support", "front_foot_line", "trunk_rotation_load"]
+        elif int(front_leg.get("deduction") or 0) >= 8:
+            story_theme = "base"
+            headline = "Front leg is not holding shape well enough at landing."
+            cause = "When the front leg softens, the rest of the action has less support to work from."
+            what_to_try = "Land balanced and let the front leg hold its shape."
+            coach_check = "Ask if the front leg is giving way when it lands."
+            hero_risk_id = "knee_brace_failure"
+            supporting_feature_keys = ["trunk_lean", "action_flow", "front_foot_line"]
+        elif int(trunk_turn.get("deduction") or 0) >= 7:
+            story_theme = "sequence"
+            headline = "Upper body is turning harder than it needs to."
+            cause = "The top half may be doing too much of the work through release."
+            what_to_try = "Let the action build up smoothly instead of pulling the upper body around."
+            coach_check = "Ask if the upper body turn looks too sharp through release."
+            hero_risk_id = "trunk_rotation_snap"
+            supporting_feature_keys = ["action_flow", "trunk_lean", "upper_body_opening"]
+        elif int(action_flow.get("deduction") or 0) >= 6:
+            story_theme = "flow"
+            headline = "The action is not carrying through the ball as cleanly as it could."
+            cause = "Some of the movement into release may be breaking down before the ball comes out."
+            what_to_try = "Keep the action moving through the ball instead of losing shape before release."
+            coach_check = "Ask if the action is losing flow into the ball."
+            hero_risk_id = "front_foot_braking_shock"
+            supporting_feature_keys = ["front_leg_support", "trunk_rotation_load", "trunk_lean"]
+        elif int(foot_line.get("deduction") or 0) >= 4:
+            story_theme = "base"
+            headline = "Front foot is landing wider than it should."
+            cause = "A wide landing line can pull the body off line and make the action harder to hold together."
+            what_to_try = "Line up the back foot and front foot so they stay balanced and in line."
+            coach_check = "Ask if the front foot is landing too wide and pulling the body off line."
+            hero_risk_id = "foot_line_deviation"
+            supporting_feature_keys = ["trunk_lean", "front_leg_support", "action_flow"]
+        else:
+            lead_label = (top_deductions[0] or {}).get("label") if top_deductions else "action shape"
+            story_theme = "alignment"
+            headline = "This action has a workable shape, but a few parts are starting to drift."
+            cause = "The clip still has useful parts, but the action is losing some support and shape."
+            what_to_try = "Repeat the same simple shape from your better recent clips."
+            coach_check = "Ask which one part of the action is drifting most from the usual shape."
+            hero_risk_id = "lateral_trunk_lean" if risk_lookup.get("lateral_trunk_lean") else None
+            supporting_feature_keys = [item.get("key") for item in top_deductions[:3] if item.get("key")]
+
+        hero_visual = None
+        if hero_risk_id and (risk_lookup.get(hero_risk_id) or {}).get("evidence"):
+            hero_visual = ((risk_lookup.get(hero_risk_id) or {}).get("evidence") or {}).get("visual")
+        if not hero_visual and story_theme not in {"working_pattern", "good_base"}:
+            for rid in ("knee_brace_failure", "lateral_trunk_lean", "trunk_rotation_snap", "foot_line_deviation", "hip_shoulder_mismatch", "front_foot_braking_shock"):
+                hero_visual = ((risk_lookup.get(rid) or {}).get("evidence") or {}).get("visual")
+                if hero_visual:
+                    hero_risk_id = rid
+                    break
+        if story_theme in {"working_pattern", "good_base"} and watch_focus:
+            preferred_risk_id = self._story_risk_for_feature(watch_focus.get("key"))
+            if preferred_risk_id:
+                hero_risk_id = preferred_risk_id
+                hero_visual = ((risk_lookup.get(preferred_risk_id) or {}).get("evidence") or {}).get("visual")
+            if _watch_focus_margin() < 3 and confidence_score < 75:
+                watch_focus = None
+                hero_risk_id = None
+                hero_visual = None
+                if story_theme == "working_pattern":
+                    cause = "The main action shape is holding together well in this clip, even though a few measured areas are still worth watching."
+                    what_to_try = "Keep repeating the same simple action shape from your better clips."
+                    coach_check = "Ask if there is just one small thing to keep watching instead of changing the whole action."
+                else:
+                    cause = "The main shape is still working, but one or two parts can get cleaner."
+                    what_to_try = "Keep the same simple action shape and only work on one small detail at a time."
+                    coach_check = "Ask which one small detail is most worth watching in this clip."
+            elif not hero_visual and confidence_score < 80:
+                watch_focus = None
+                hero_risk_id = None
+                if story_theme == "working_pattern":
+                    cause = "The main action shape is holding together well in this clip, even though a few measured areas are still worth watching."
+                    what_to_try = "Keep repeating the same simple action shape from your better clips."
+                    coach_check = "Ask if there is just one small thing to keep watching instead of changing the whole action."
+                else:
+                    cause = "The main shape is still working, but one or two parts can get cleaner."
+                    what_to_try = "Keep the same simple action shape and only work on one small detail at a time."
+                    coach_check = "Ask which one small detail is most worth watching in this clip."
+
+        key_metrics: List[Dict[str, Any]] = []
+        if story_theme in {"working_pattern", "good_base"}:
+            for metric_key in (
+                "upper_body_alignment",
+                "lower_body_alignment",
+                "whole_body_alignment",
+                "momentum_forward",
+            ):
+                payload = player_metrics.get(metric_key)
+                if not payload:
+                    continue
+                key_metrics.append(
+                    {
+                        "key": metric_key,
+                        "label": (GROUP_SPECS.get(metric_key) or {}).get("label", metric_key.replace("_", " ").title()),
+                        "score": payload.get("score"),
+                        "deduction": None,
+                    }
+                )
+        else:
+            seen = set()
+            for key in [*(supporting_feature_keys or []), "front_leg_support", "trunk_lean", "trunk_rotation_load", "action_flow"]:
+                if not key or key in seen:
+                    continue
+                seen.add(key)
+                feature = feature_lookup.get(key)
+                if not feature:
+                    continue
+                key_metrics.append(
+                    {
+                        "key": feature.get("key"),
+                        "label": feature.get("label"),
+                        "score": feature.get("score"),
+                        "deduction": feature.get("deduction"),
+                    }
+                )
+        key_metrics.sort(key=lambda item: int(item.get("deduction") or 0), reverse=True)
+
+        sequence_note = None
+        if sequence_pattern == "shoulders_lead":
+            sequence_note = "Shoulders are getting ahead of the hips in this clip."
+        elif sequence_pattern == "hips_lead":
+            sequence_note = "Hips are getting ahead of the shoulders in this clip."
+
+        return {
+            "version": "report_story_v1",
+            "theme": story_theme,
+            "headline": headline,
+            "why_this_matters": cause,
+            "what_to_try": what_to_try,
+            "coach_check": coach_check,
+            "watch_focus": watch_focus,
+            "hero_visual": hero_visual,
+            "hero_risk_id": hero_risk_id,
+            "key_metrics": key_metrics[:4],
+            "sequence_note": sequence_note,
+        }
+
     def _apply_benchmark_summary_guardrail(
         self,
         *,
@@ -398,17 +780,10 @@ class ClinicianInterpreter:
         action: Optional[Dict[str, Any]],
         rating_system_v2: Dict[str, Any],
     ) -> Dict[str, Any]:
-        action_name = ((action or {}).get("action") or "UNKNOWN").upper()
-        try:
-            rating_overall = int((rating_system_v2.get("overall") or {}).get("score") or 0)
-        except Exception:
-            rating_overall = 0
-
-        if (
-            summary.get("overall_severity") == "VERY_HIGH"
-            and summary.get("primary_pillar") == "PROTECTION"
-            and action_name in {"SEMI_OPEN", "SIDE_ON"}
-            and rating_overall >= 60
+        if self._should_apply_benchmark_guardrail(
+            summary=summary,
+            action=action,
+            rating_system_v2=rating_system_v2,
         ):
             softened = dict(summary)
             softened["overall_assessment"] = (
@@ -419,6 +794,123 @@ class ClinicianInterpreter:
             return softened
 
         return summary
+
+    def _should_apply_benchmark_guardrail(
+        self,
+        *,
+        summary: Dict[str, Any],
+        action: Optional[Dict[str, Any]],
+        rating_system_v2: Dict[str, Any],
+    ) -> bool:
+        action_name = ((action or {}).get("action") or "UNKNOWN").upper()
+        min_rating = self.BENCHMARK_GUARDRAIL_MIN_RATING.get(action_name)
+        if min_rating is None:
+            return False
+        try:
+            rating_overall = int((rating_system_v2.get("overall") or {}).get("score") or 0)
+        except Exception:
+            rating_overall = 0
+
+        return (
+            summary.get("overall_severity") == "VERY_HIGH"
+            and summary.get("primary_pillar") == "PROTECTION"
+            and rating_overall >= min_rating
+        )
+
+    def _should_apply_benchmark_rating_guardrail(
+        self,
+        *,
+        summary: Dict[str, Any],
+        action: Optional[Dict[str, Any]],
+        rating_system_v2: Dict[str, Any],
+    ) -> bool:
+        if not self._should_apply_benchmark_guardrail(
+            summary=summary,
+            action=action,
+            rating_system_v2=rating_system_v2,
+        ):
+            return False
+
+        try:
+            confidence_score = int((rating_system_v2.get("confidence") or {}).get("score") or 0)
+        except Exception:
+            confidence_score = 0
+
+        return confidence_score < 80
+
+    def _rating_overall_meaning(
+        self,
+        score: int,
+        *,
+        benchmark_guardrailed: bool = False,
+    ) -> str:
+        if benchmark_guardrailed:
+            if score >= 85:
+                return "This action looks sound overall, with only a few areas still worth watching."
+            return "This action has a good base, with a few areas that can still get cleaner."
+
+        if score >= 85:
+            return "This action is working well in this clip, with only a few visible leaks."
+        if score >= 70:
+            return "This action has a good base, but a few visible leaks are holding it back."
+        if score >= 55:
+            return "This action has useful parts, but clear issues are now pulling it down."
+        return "This action needs close work with a coach before it can work better and safer."
+
+    def _rating_group_meaning(self, score: int) -> str:
+        if score >= 85:
+            return "This part of the action looked solid in this clip."
+        if score >= 70:
+            return "This part of the action has a good base, but it can get cleaner."
+        if score >= 55:
+            return "This part of the action is losing shape or support in this clip."
+        return "This part of the action needs close work with a coach."
+
+    def _apply_benchmark_rating_guardrail(
+        self,
+        *,
+        summary: Dict[str, Any],
+        action: Optional[Dict[str, Any]],
+        rating_system_v2: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        if not self._should_apply_benchmark_rating_guardrail(
+            summary=summary,
+            action=action,
+            rating_system_v2=rating_system_v2,
+        ):
+            return rating_system_v2
+
+        action_name = ((action or {}).get("action") or "UNKNOWN").upper()
+        floors = self.BENCHMARK_RATING_FLOORS.get(action_name)
+        if not floors:
+            return rating_system_v2
+
+        adjusted = copy.deepcopy(rating_system_v2)
+
+        overall = adjusted.get("overall") or {}
+        overall_score = max(int(overall.get("score") or 0), int(floors["overall"]))
+        overall["score"] = overall_score
+        overall["label"] = _score_band_label(overall_score)
+        overall["what_this_score_means"] = self._rating_overall_meaning(
+            overall_score,
+            benchmark_guardrailed=True,
+        )
+        adjusted["overall"] = overall
+
+        for view_name in ("player_view", "coach_view", "expert_view"):
+            metrics = ((adjusted.get(view_name) or {}).get("metrics")) or {}
+            for metric_name, floor in floors.items():
+                if metric_name == "overall":
+                    continue
+                payload = metrics.get(metric_name)
+                if not payload:
+                    continue
+                metric_score = max(int(payload.get("score") or 0), int(floor))
+                payload["score"] = metric_score
+                payload["label"] = _score_band_label(metric_score)
+                payload["what_this_score_means"] = self._rating_group_meaning(metric_score)
+
+        return adjusted
 
     def build_elbow(self, raw: Dict[str, Any]) -> Dict[str, Any]:
         ext_raw = raw.get("extension_deg")
@@ -1206,21 +1698,12 @@ class ClinicianInterpreter:
         main_feature = features.get(main_feature_key) or {"label": "No main issue", "deduction": 0}
         spec = GROUP_SPECS[group_key]
 
-        if score >= 85:
-            meaning = "This part of the action looked solid in this clip."
-        elif score >= 70:
-            meaning = "This part of the action has a good base, but it can get cleaner."
-        elif score >= 55:
-            meaning = "This part of the action is losing shape or support in this clip."
-        else:
-            meaning = "This part of the action needs close work with a coach."
-
         return {
             "score": score,
             "label": _score_band_label(score),
             "what_it_measures": spec["what_it_measures"],
             "what_high_score_means": spec["what_high_score_means"],
-            "what_this_score_means": meaning,
+            "what_this_score_means": self._rating_group_meaning(score),
             "main_issue": main_feature.get("label"),
             "main_deductions": [
                 (features.get(key) or {}).get("label")
@@ -1292,21 +1775,12 @@ class ClinicianInterpreter:
             if feature["deduction"] > 0
         ][:3]
 
-        if overall_score >= 85:
-            overall_meaning = "This action is working well in this clip, with only a few visible leaks."
-        elif overall_score >= 70:
-            overall_meaning = "This action has a good base, but a few visible leaks are holding it back."
-        elif overall_score >= 55:
-            overall_meaning = "This action has useful parts, but clear issues are now pulling it down."
-        else:
-            overall_meaning = "This action needs close work with a coach before it can work better and safer."
-
         overall = {
             "score": overall_score,
             "label": _score_band_label(overall_score),
             "what_it_measures": "This score shows how well the bowling action is working in this clip. It also checks how well the body is handling it.",
             "what_high_score_means": "A high score means the action is working well, staying better lined up, and not showing strong signs of extra stress.",
-            "what_this_score_means": overall_meaning,
+            "what_this_score_means": self._rating_overall_meaning(overall_score),
             "what_lowered_the_score": [item["label"] for item in top_deductions[:3]],
             "needs_to_improve": [item["label"] for item in needs_to_improve],
         }
@@ -1717,15 +2191,21 @@ class ClinicianInterpreter:
             action=action,
             scorecard=scorecard,
         )
-        summary = self.build_summary(
+        raw_summary = self.build_summary(
             chain=chain,
             risks=built_risks,
             elbow=built_elbow,
             action=action,
             scorecard=scorecard,
         )
+        summary = raw_summary
         summary = self._apply_benchmark_summary_guardrail(
             summary=summary,
+            action=action,
+            rating_system_v2=rating_system_v2,
+        )
+        rating_system_v2 = self._apply_benchmark_rating_guardrail(
+            summary=raw_summary,
             action=action,
             rating_system_v2=rating_system_v2,
         )
@@ -1739,6 +2219,11 @@ class ClinicianInterpreter:
             pillars=pillars,
             summary=summary,
         )
+        report_story_v1 = self._build_report_story_v1(
+            rating_system_v2=rating_system_v2,
+            risks=built_risks,
+            action=action,
+        )
 
         return {
             "summary": summary,
@@ -1746,6 +2231,7 @@ class ClinicianInterpreter:
             "kinetic_chain": chain,
             "risks": built_risks,
             "comprehensive_why": comprehensive_why,
+            "report_story_v1": report_story_v1,
             "pillars": pillars,
             "scorecard": scorecard,
             "rating_system_v2": rating_system_v2,

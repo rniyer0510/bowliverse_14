@@ -22,18 +22,18 @@ from app.common.logger import get_logger
 
 logger = get_logger(__name__)
 
-# -----------------------------
-# MediaPipe Pose Init (once)
-# -----------------------------
 _mp_pose = mp.solutions.pose
-_pose = _mp_pose.Pose(
-    static_image_mode=False,
-    model_complexity=2,
-    smooth_landmarks=False,     # IMPORTANT: no smoothing at loader level
-    enable_segmentation=False,
-    min_detection_confidence=0.5,
-    min_tracking_confidence=0.5,
-)
+
+
+def _create_pose_tracker():
+    return _mp_pose.Pose(
+        static_image_mode=False,
+        model_complexity=2,
+        smooth_landmarks=False,     # IMPORTANT: no smoothing at loader level
+        enable_segmentation=False,
+        min_detection_confidence=0.5,
+        min_tracking_confidence=0.5,
+    )
 
 
 def load_video(upload_file):
@@ -73,39 +73,40 @@ def load_video(upload_file):
     # -----------------------------
     # Frame-by-frame pose extraction
     # -----------------------------
-    while True:
-        ret, frame = cap.read()
-        if not ret:
-            break
+    with _create_pose_tracker() as pose_tracker:
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                break
 
-        # OpenCV BGR → RGB
-        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        results = _pose.process(rgb)
+            # OpenCV BGR → RGB
+            rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            results = pose_tracker.process(rgb)
 
-        if results.pose_landmarks:
-            landmarks = [
+            if results.pose_landmarks:
+                landmarks = [
+                    {
+                        "x": lm.x,
+                        "y": lm.y,
+                        "z": lm.z,
+                        "visibility": lm.visibility,
+                    }
+                    for lm in results.pose_landmarks.landmark
+                ]
+            else:
+                landmarks = None  # Explicitly mark missing pose
+
+            pose_frames.append(
                 {
-                    "x": lm.x,
-                    "y": lm.y,
-                    "z": lm.z,
-                    "visibility": lm.visibility,
+                    "frame": frame_idx,
+                    "landmarks": landmarks,
                 }
-                for lm in results.pose_landmarks.landmark
-            ]
-        else:
-            landmarks = None  # Explicitly mark missing pose
+            )
 
-        pose_frames.append(
-            {
-                "frame": frame_idx,
-                "landmarks": landmarks,
-            }
-        )
+            if frame_idx % 100 == 0:
+                logger.info(f"Processed pose frame {frame_idx}/{total_frames}")
 
-        if frame_idx % 100 == 0:
-            logger.info(f"Processed pose frame {frame_idx}/{total_frames}")
-
-        frame_idx += 1
+            frame_idx += 1
 
     cap.release()
 

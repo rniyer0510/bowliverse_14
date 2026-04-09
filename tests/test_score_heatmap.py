@@ -1,14 +1,83 @@
 import unittest
 
 from app.persistence.read_api import (
+    _build_action_change_summary,
     _build_rating_heatmap_v2,
     _build_score_heatmap,
+    _extract_action_change_traits,
     _extract_rating_summary_v2,
     _extract_score_summary,
 )
 
 
 class ScoreHeatmapTests(unittest.TestCase):
+    def _result_json(
+        self,
+        *,
+        overall=77,
+        upper=74,
+        lower=79,
+        whole=72,
+        momentum=80,
+        action_type="SEMI_OPEN",
+        action_intent="semi_open",
+        toe_status="aligned",
+        toe_angle=28.0,
+        front_foot_braking=0.18,
+        knee_brace=0.19,
+        trunk_rotation=0.20,
+        hip_shoulder=0.21,
+        trunk_lean=0.18,
+        foot_line=0.17,
+        kinetic_chain_sequence="in_sync",
+        kinetic_chain_delta=0,
+    ):
+        return {
+            "action": {
+                "action": action_type,
+                "intent": action_intent,
+                "confidence": 0.76,
+            },
+            "risks": [
+                {"risk_id": "front_foot_braking_shock", "signal_strength": front_foot_braking},
+                {"risk_id": "knee_brace_failure", "signal_strength": knee_brace},
+                {"risk_id": "trunk_rotation_snap", "signal_strength": trunk_rotation},
+                {
+                    "risk_id": "hip_shoulder_mismatch",
+                    "signal_strength": hip_shoulder,
+                    "debug": {
+                        "phase_lag": hip_shoulder,
+                        "sequence_pattern": kinetic_chain_sequence,
+                        "sequence_delta_frames": kinetic_chain_delta,
+                    },
+                },
+                {"risk_id": "lateral_trunk_lean", "signal_strength": trunk_lean},
+                {"risk_id": "foot_line_deviation", "signal_strength": foot_line},
+            ],
+            "basics": {
+                "front_foot_toe_alignment": {
+                    "status": toe_status,
+                    "confidence": 1.0,
+                    "debug": {"toe_angle_deg": toe_angle},
+                }
+            },
+            "clinician": {
+                "rating_system_v2": {
+                    "overall": {"score": overall, "label": "Good base"},
+                    "player_view": {
+                        "metrics": {
+                            "upper_body_alignment": {"score": upper},
+                            "lower_body_alignment": {"score": lower},
+                            "whole_body_alignment": {"score": whole},
+                            "momentum_forward": {"score": momentum},
+                        }
+                    },
+                    "coach_view": {"metrics": {"safety": {"score": 69}}},
+                    "confidence": {"score": 71},
+                }
+            },
+        }
+
     def test_extract_score_summary_from_clinician_scorecard(self):
         result_json = {
             "clinician": {
@@ -133,6 +202,121 @@ class ScoreHeatmapTests(unittest.TestCase):
         self.assertEqual(heatmap["rows"][1]["metric"], "upper_body_alignment")
         self.assertEqual(heatmap["rows"][0]["cells"][0]["run_id"], "run-2")
         self.assertEqual(heatmap["rows"][4]["cells"][1]["band"], "watch")
+
+    def test_extract_action_change_traits_from_result_json(self):
+        traits = _extract_action_change_traits(
+            self._result_json(
+                overall=81,
+                upper=78,
+                lower=76,
+                whole=80,
+                momentum=82,
+                action_type="MIXED",
+                action_intent="semi_open",
+                toe_status="semi_open",
+                toe_angle=44.5,
+            )
+        )
+
+        self.assertEqual(traits["numeric"]["overall"], 81)
+        self.assertEqual(traits["numeric"]["front_foot_toe_angle_deg"], 44.5)
+        self.assertEqual(traits["numeric"]["risk_hip_shoulder_mismatch"], 0.21)
+        self.assertEqual(traits["numeric"]["kinetic_chain_delta_frames"], 0.0)
+        self.assertEqual(traits["categorical"]["action_type"], "mixed")
+        self.assertEqual(traits["categorical"]["front_foot_toe_alignment"], "semi_open")
+        self.assertEqual(traits["categorical"]["kinetic_chain_sequence"], "in_sync")
+
+    def test_build_action_change_summary_marks_within_range_when_latest_stays_stable(self):
+        action_change = _build_action_change_summary(
+            [
+                {"run_id": "run-4", "result_json": self._result_json(overall=78, upper=75, lower=77, whole=74, momentum=80, toe_angle=30.0)},
+                {"run_id": "run-3", "result_json": self._result_json(overall=80, upper=76, lower=78, whole=75, momentum=81, toe_angle=31.0)},
+                {"run_id": "run-2", "result_json": self._result_json(overall=79, upper=74, lower=77, whole=73, momentum=79, toe_angle=29.0)},
+                {"run_id": "run-1", "result_json": self._result_json(overall=81, upper=77, lower=79, whole=76, momentum=82, toe_angle=32.0)},
+            ]
+        )
+
+        self.assertEqual(action_change["status"], "within_range")
+        self.assertEqual(action_change["highlights"], [])
+        self.assertEqual(action_change["headline"], "Your action looks like your usual pattern.")
+        self.assertIn("usual pattern", action_change["summary"])
+        self.assertIn("better recent clips", action_change["what_to_try"])
+        self.assertIn("coach", action_change["coach_prompt"].lower())
+
+    def test_build_action_change_summary_flags_clear_drift_in_alignment_and_toe_line(self):
+        action_change = _build_action_change_summary(
+            [
+                {
+                    "run_id": "run-5",
+                    "result_json": self._result_json(
+                        overall=64,
+                        upper=61,
+                        lower=60,
+                        whole=63,
+                        momentum=69,
+                        action_type="FRONT_ON",
+                        action_intent="front_on",
+                        toe_status="open",
+                        toe_angle=72.0,
+                        front_foot_braking=0.34,
+                        knee_brace=0.37,
+                        trunk_rotation=0.48,
+                        hip_shoulder=0.55,
+                        trunk_lean=0.43,
+                        foot_line=0.41,
+                        kinetic_chain_sequence="shoulders_lead",
+                        kinetic_chain_delta=-3,
+                    ),
+                },
+                {"run_id": "run-4", "result_json": self._result_json(overall=80, upper=76, lower=79, whole=75, momentum=82, toe_angle=31.0)},
+                {"run_id": "run-3", "result_json": self._result_json(overall=79, upper=75, lower=77, whole=74, momentum=80, toe_angle=29.0)},
+                {"run_id": "run-2", "result_json": self._result_json(overall=81, upper=77, lower=80, whole=76, momentum=83, toe_angle=32.0)},
+                {"run_id": "run-1", "result_json": self._result_json(overall=80, upper=76, lower=78, whole=75, momentum=81, toe_angle=30.0)},
+            ]
+        )
+
+        self.assertEqual(action_change["status"], "clear_change")
+        self.assertEqual(action_change["headline"], "Shoulders are opening earlier than usual.")
+        highlight_metrics = [item["metric"] for item in action_change["highlights"]]
+        self.assertIn("lower_body_alignment", highlight_metrics)
+        self.assertIn("front_foot_toe_angle_deg", highlight_metrics)
+        self.assertIn("action_type", highlight_metrics)
+        self.assertIn("risk_hip_shoulder_mismatch", highlight_metrics)
+        self.assertIn("risk_trunk_rotation_snap", highlight_metrics)
+        self.assertIn("kinetic_chain_sequence", highlight_metrics)
+        self.assertIn("Shoulders are opening earlier than usual", action_change["summary"])
+        self.assertTrue(any(item["plain_message"] == "Shoulders are opening earlier than usual." for item in action_change["highlights"]))
+        self.assertEqual(
+            action_change["what_to_try"],
+            "Try to let the hips lead the move into the ball instead of pulling the shoulders around early.",
+        )
+        self.assertEqual(
+            action_change["coach_prompt"],
+            "If you can, show these clips to a coach and ask whether the shoulders are opening too early.",
+        )
+        foot_line_item = next(item for item in action_change["highlights"] if item["metric"] == "risk_foot_line_deviation")
+        self.assertEqual(
+            foot_line_item["what_to_try"],
+            "Try to line up the back foot and front foot so they stay balanced and in line.",
+        )
+
+    def test_build_action_change_summary_requires_recent_baseline(self):
+        action_change = _build_action_change_summary(
+            [
+                {"run_id": "run-2", "result_json": self._result_json(overall=70, upper=68, lower=69, whole=67, momentum=72, toe_angle=34.0)},
+                {"run_id": "run-1", "result_json": self._result_json(overall=79, upper=75, lower=77, whole=74, momentum=80, toe_angle=31.0)},
+            ]
+        )
+
+        self.assertEqual(action_change["status"], "insufficient_history")
+        self.assertEqual(action_change["comparisons"], [])
+        self.assertEqual(
+            action_change["headline"],
+            "Action change needs a few more clips before we can judge it well.",
+        )
+        self.assertIn("Need at least 2 recent comparison clips", action_change["summary"])
+        self.assertIn("few more clips", action_change["what_to_try"])
+        self.assertIn("coach", action_change["coach_prompt"].lower())
 
 
 if __name__ == "__main__":

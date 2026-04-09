@@ -29,6 +29,22 @@ class RiskSignalFormatTests(unittest.TestCase):
             frames.append({"frame": i, "landmarks": lm})
         return frames
 
+    def _pose_frames_with_shoulder_lead(self):
+        frames = []
+        shoulder_widths = [0.26, 0.26, 0.26, 0.25, 0.21, 0.17, 0.14, 0.13, 0.13, 0.13, 0.13, 0.13]
+        hip_widths = [0.18, 0.18, 0.18, 0.18, 0.18, 0.17, 0.16, 0.13, 0.10, 0.08, 0.08, 0.08]
+        for i in range(20):
+            lm = _blank_landmarks()
+            local_i = max(0, min(len(shoulder_widths) - 1, i - 2))
+            shoulder_width = shoulder_widths[local_i]
+            hip_width = hip_widths[local_i]
+            lm[11] = {"x": 0.50 - (shoulder_width / 2), "y": 0.30, "visibility": 0.95}
+            lm[12] = {"x": 0.50 + (shoulder_width / 2), "y": 0.30, "visibility": 0.95}
+            lm[23] = {"x": 0.50 - (hip_width / 2), "y": 0.60, "visibility": 0.95}
+            lm[24] = {"x": 0.50 + (hip_width / 2), "y": 0.60, "visibility": 0.95}
+            frames.append({"frame": i, "landmarks": lm})
+        return frames
+
     def test_risk_modules_read_list_landmarks(self):
         pose_frames = self._pose_frames()
         self.assertGreater(compute_lateral_trunk_lean(pose_frames, 8, 10, 12, 60.0, {})['signal_strength'], 0.15)
@@ -36,6 +52,19 @@ class RiskSignalFormatTests(unittest.TestCase):
         self.assertGreater(compute_trunk_rotation_snap(pose_frames, 10, 12, 60.0, {})['signal_strength'], 0.15)
         self.assertGreater(compute_front_foot_braking_shock(pose_frames, 10, 60.0, {}, action={})['signal_strength'], 0.15)
         self.assertGreater(compute_knee_brace_failure(pose_frames, 10, 60.0, {})['signal_strength'], 0.15)
+
+    def test_hip_shoulder_mismatch_exposes_sequence_direction(self):
+        result = compute_hip_shoulder_mismatch(
+            self._pose_frames_with_shoulder_lead(),
+            10,
+            12,
+            60.0,
+            {},
+        )
+
+        self.assertEqual(result["debug"]["sequence_pattern"], "shoulders_lead")
+        self.assertLess(result["debug"]["sequence_delta_frames"], 0)
+        self.assertIn("phase_lag", result["debug"])
 
 
 if __name__ == '__main__':

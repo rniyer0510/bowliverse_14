@@ -223,6 +223,275 @@ class ClinicianReconciliationTests(unittest.TestCase):
         self.assertIn("capped", scorecard["overall"]["benchmark_limit_reason"].lower())
         self.assertIn("action view", scorecard["overall"]["benchmark_limit_reason"].lower())
 
+    def test_report_story_v1_picks_front_leg_plus_trunk_lean_story(self):
+        result = self.ci.build(
+            elbow={"extension_deg": 12.0, "verdict": "LEGAL"},
+            risks=[
+                {
+                    "risk_id": "knee_brace_failure",
+                    "signal_strength": 1.0,
+                    "confidence": 0.85,
+                    "visual": {"image_url": "http://example.test/knee.png"},
+                },
+                {
+                    "risk_id": "lateral_trunk_lean",
+                    "signal_strength": 1.0,
+                    "confidence": 0.85,
+                    "visual": {"image_url": "http://example.test/lean.png"},
+                },
+                {
+                    "risk_id": "trunk_rotation_snap",
+                    "signal_strength": 0.92,
+                    "confidence": 0.85,
+                },
+            ],
+            interpretation={
+                "linear_flow": {
+                    "flow_state": "unknown",
+                    "confidence": 0.78,
+                    "contributors": [],
+                }
+            },
+            action={"action": "SEMI_OPEN", "confidence": 1.0},
+        )
+
+        story = result["report_story_v1"]
+        self.assertEqual(story["theme"], "base_balance")
+        self.assertIn("front leg", story["headline"].lower())
+        self.assertIn("body lean away", story["why_this_matters"].lower())
+        self.assertIn("back foot and front foot", story["what_to_try"].lower())
+        self.assertIn("front leg", story["coach_check"].lower())
+        self.assertEqual(story["hero_risk_id"], "knee_brace_failure")
+        self.assertEqual(story["hero_visual"]["image_url"], "http://example.test/knee.png")
+        self.assertTrue(story["key_metrics"])
+
+    def test_report_story_v1_uses_working_pattern_story_for_high_overall_score(self):
+        built_risks = self.ci.build_risks(
+            [
+                {
+                    "risk_id": "knee_brace_failure",
+                    "signal_strength": 1.0,
+                    "confidence": 0.85,
+                    "visual": {"image_url": "http://example.test/knee.png"},
+                },
+                {
+                    "risk_id": "lateral_trunk_lean",
+                    "signal_strength": 1.0,
+                    "confidence": 0.85,
+                },
+            ]
+        )
+
+        story = self.ci._build_report_story_v1(
+            rating_system_v2={
+                "overall": {"score": 84},
+                "player_view": {
+                    "metrics": {
+                        "upper_body_alignment": {"score": 78},
+                        "lower_body_alignment": {"score": 78},
+                        "whole_body_alignment": {"score": 82},
+                        "momentum_forward": {"score": 78},
+                    }
+                },
+                "expert_view": {
+                    "features": [
+                        {
+                            "key": "front_leg_support",
+                            "label": "Front-Leg Support",
+                            "score": 35,
+                            "deduction": 14,
+                        }
+                    ]
+                },
+                "top_deductions": [
+                    {"key": "front_leg_support", "label": "Front-Leg Support", "deduction": 14},
+                    {"key": "trunk_lean", "label": "Trunk Lean", "deduction": 13},
+                ],
+            },
+            risks=built_risks,
+            action={"action": "SEMI_OPEN", "confidence": 0.43},
+        )
+
+        self.assertEqual(story["theme"], "working_pattern")
+        self.assertIn("working pattern", story["headline"].lower())
+        self.assertIn("front leg holds up at landing", story["why_this_matters"].lower())
+        self.assertIn("front leg keeps its shape", story["what_to_try"].lower())
+        self.assertEqual(story["watch_focus"]["key"], "front_leg_support")
+        self.assertEqual(
+            [metric["label"] for metric in story["key_metrics"]],
+            [
+                "Upper Body Alignment",
+                "Lower Body Alignment",
+                "Whole Body Alignment",
+                "Momentum Forward",
+            ],
+        )
+
+    def test_report_story_v1_side_on_working_pattern_surfaces_sequence_watch_focus(self):
+        built_risks = self.ci.build_risks(
+            [
+                {
+                    "risk_id": "hip_shoulder_mismatch",
+                    "signal_strength": 0.72,
+                    "confidence": 0.85,
+                },
+                {
+                    "risk_id": "knee_brace_failure",
+                    "signal_strength": 1.0,
+                    "confidence": 0.85,
+                    "visual": {"image_url": "http://example.test/knee.png"},
+                },
+            ]
+        )
+
+        story = self.ci._build_report_story_v1(
+            rating_system_v2={
+                "overall": {"score": 86},
+                "confidence": {"score": 86},
+                "player_view": {
+                    "metrics": {
+                        "upper_body_alignment": {"score": 80},
+                        "lower_body_alignment": {"score": 80},
+                        "whole_body_alignment": {"score": 84},
+                        "momentum_forward": {"score": 80},
+                    }
+                },
+                "expert_view": {
+                    "features": [
+                        {
+                            "key": "upper_body_opening",
+                            "label": "Upper Body Opening",
+                            "score": 63,
+                            "deduction": 8,
+                        }
+                    ]
+                },
+                "top_deductions": [
+                    {"key": "upper_body_opening", "label": "Upper Body Opening", "deduction": 8},
+                ],
+            },
+            risks=built_risks,
+            action={"action": "SIDE_ON", "confidence": 0.95},
+        )
+
+        self.assertEqual(story["theme"], "working_pattern")
+        self.assertIn("side-on", story["headline"].lower())
+        self.assertEqual(story["watch_focus"]["key"], "upper_body_opening")
+        self.assertIn("shoulders and hips", story["why_this_matters"].lower())
+        self.assertEqual(story["hero_risk_id"], "hip_shoulder_mismatch")
+        self.assertIsNone(story["hero_visual"])
+
+    def test_report_story_v1_strong_clip_without_visual_support_stays_generic_when_confidence_is_low(self):
+        built_risks = self.ci.build_risks(
+            [
+                {
+                    "risk_id": "hip_shoulder_mismatch",
+                    "signal_strength": 0.72,
+                    "confidence": 0.85,
+                },
+            ]
+        )
+
+        story = self.ci._build_report_story_v1(
+            rating_system_v2={
+                "overall": {"score": 86},
+                "confidence": {"score": 76},
+                "player_view": {
+                    "metrics": {
+                        "upper_body_alignment": {"score": 80},
+                        "lower_body_alignment": {"score": 80},
+                        "whole_body_alignment": {"score": 84},
+                        "momentum_forward": {"score": 80},
+                    }
+                },
+                "expert_view": {
+                    "features": [
+                        {
+                            "key": "upper_body_opening",
+                            "label": "Upper Body Opening",
+                            "score": 63,
+                            "deduction": 8,
+                        }
+                    ]
+                },
+                "top_deductions": [
+                    {"key": "upper_body_opening", "label": "Upper Body Opening", "deduction": 8},
+                ],
+            },
+            risks=built_risks,
+            action={"action": "SIDE_ON", "confidence": 0.95},
+        )
+
+        self.assertEqual(story["theme"], "working_pattern")
+        self.assertIsNone(story["watch_focus"])
+        self.assertEqual(story["why_this_matters"], "The main action shape is holding together well in this clip, even though a few measured areas are still worth watching.")
+        self.assertEqual(story["what_to_try"], "Keep repeating the same simple action shape from your better clips.")
+        self.assertEqual(story["coach_check"], "Ask if there is just one small thing to keep watching instead of changing the whole action.")
+        self.assertIsNone(story["hero_risk_id"])
+        self.assertIsNone(story["hero_visual"])
+
+    def test_report_story_v1_strong_clip_with_close_deductions_stays_generic_when_confidence_is_soft(self):
+        built_risks = self.ci.build_risks(
+            [
+                {
+                    "risk_id": "knee_brace_failure",
+                    "signal_strength": 1.0,
+                    "confidence": 0.85,
+                    "visual": {"image_url": "http://example.test/knee.png"},
+                },
+                {
+                    "risk_id": "lateral_trunk_lean",
+                    "signal_strength": 1.0,
+                    "confidence": 0.85,
+                },
+            ]
+        )
+
+        story = self.ci._build_report_story_v1(
+            rating_system_v2={
+                "overall": {"score": 90},
+                "confidence": {"score": 68},
+                "player_view": {
+                    "metrics": {
+                        "upper_body_alignment": {"score": 84},
+                        "lower_body_alignment": {"score": 84},
+                        "whole_body_alignment": {"score": 88},
+                        "momentum_forward": {"score": 84},
+                    }
+                },
+                "expert_view": {
+                    "features": [
+                        {
+                            "key": "front_leg_support",
+                            "label": "Front-Leg Support",
+                            "score": 35,
+                            "deduction": 14,
+                        },
+                        {
+                            "key": "trunk_lean",
+                            "label": "Trunk Lean",
+                            "score": 39,
+                            "deduction": 13,
+                        },
+                    ]
+                },
+                "top_deductions": [
+                    {"key": "front_leg_support", "label": "Front-Leg Support", "deduction": 14},
+                    {"key": "trunk_lean", "label": "Trunk Lean", "deduction": 13},
+                ],
+            },
+            risks=built_risks,
+            action={"action": "SEMI_OPEN", "confidence": 0.43},
+        )
+
+        self.assertEqual(story["theme"], "working_pattern")
+        self.assertIsNone(story["watch_focus"])
+        self.assertEqual(story["why_this_matters"], "The main action shape is holding together well in this clip, even though a few measured areas are still worth watching.")
+        self.assertEqual(story["what_to_try"], "Keep repeating the same simple action shape from your better clips.")
+        self.assertEqual(story["coach_check"], "Ask if there is just one small thing to keep watching instead of changing the whole action.")
+        self.assertIsNone(story["hero_risk_id"])
+        self.assertIsNone(story["hero_visual"])
+
     def test_primary_pillar_follows_main_score_loss_not_tuple_order(self):
         result = self.ci.build(
             elbow={"extension_deg": 12.0, "verdict": "LEGAL"},
@@ -312,6 +581,7 @@ class ClinicianReconciliationTests(unittest.TestCase):
             "build_rating_system_v2",
             return_value={
                 "overall": {"score": 66},
+                "confidence": {"score": 68},
             },
         ), patch.object(
             self.ci,
@@ -346,7 +616,162 @@ class ClinicianReconciliationTests(unittest.TestCase):
 
         self.assertEqual(result["summary"]["overall_severity"], "LOW")
         self.assertEqual(result["summary"]["recommendation_level"], "MAINTAIN")
-        self.assertEqual(result["summary"]["rating_overall_score"], 66)
+        self.assertEqual(result["summary"]["rating_overall_score"], 90)
+
+    def test_benchmark_style_rating_guardrail_lifts_group_scores(self):
+        with patch.object(
+            self.ci,
+            "build_summary",
+            return_value={
+                "overall_assessment": "This clip needs a closer look because some parts of the body may be taking extra load.",
+                "overall_severity": "VERY_HIGH",
+                "recommendation_level": "CORRECT",
+                "confidence": 0.7,
+                "primary_pillar": "PROTECTION",
+            },
+        ), patch.object(
+            self.ci,
+            "build_scorecard",
+            return_value={
+                "overall": {"score": 33},
+                "confidence": {"score": 68},
+            },
+        ), patch.object(
+            self.ci,
+            "build_rating_system_v2",
+            return_value={
+                "overall": {
+                    "score": 66,
+                    "label": "Needs work",
+                    "what_this_score_means": "This action has useful parts, but clear issues are now pulling it down.",
+                },
+                "confidence": {"score": 68},
+                "player_view": {
+                    "metrics": {
+                        "upper_body_alignment": {"score": 66, "label": "Needs work", "what_this_score_means": "x"},
+                        "lower_body_alignment": {"score": 71, "label": "Needs work", "what_this_score_means": "x"},
+                        "whole_body_alignment": {"score": 74, "label": "Needs work", "what_this_score_means": "x"},
+                        "momentum_forward": {"score": 66, "label": "Needs work", "what_this_score_means": "x"},
+                    },
+                },
+                "coach_view": {
+                    "metrics": {
+                        "upper_body_alignment": {"score": 66, "label": "Needs work", "what_this_score_means": "x"},
+                        "lower_body_alignment": {"score": 71, "label": "Needs work", "what_this_score_means": "x"},
+                        "whole_body_alignment": {"score": 74, "label": "Needs work", "what_this_score_means": "x"},
+                        "momentum_forward": {"score": 66, "label": "Needs work", "what_this_score_means": "x"},
+                        "safety": {"score": 69, "label": "Needs work", "what_this_score_means": "x"},
+                    },
+                },
+                "expert_view": {
+                    "metrics": {
+                        "upper_body_alignment": {"score": 66, "label": "Needs work", "what_this_score_means": "x"},
+                        "lower_body_alignment": {"score": 71, "label": "Needs work", "what_this_score_means": "x"},
+                        "whole_body_alignment": {"score": 74, "label": "Needs work", "what_this_score_means": "x"},
+                        "momentum_forward": {"score": 66, "label": "Needs work", "what_this_score_means": "x"},
+                        "safety": {"score": 69, "label": "Needs work", "what_this_score_means": "x"},
+                        "confidence": {"score": 68},
+                    },
+                },
+            },
+        ), patch.object(
+            self.ci,
+            "build_pillars",
+            return_value={
+                "posture": {"status": "REVIEW"},
+                "power": {"status": "REVIEW"},
+                "protection": {"status": "REVIEW"},
+            },
+        ), patch.object(
+            self.ci,
+            "build_risks",
+            return_value=[],
+        ), patch.object(
+            self.ci,
+            "build_chain",
+            return_value={"confidence": 0.7},
+        ), patch.object(
+            self.ci,
+            "build_elbow",
+            return_value={"band": "OK"},
+        ), patch(
+            "app.clinician.interpreter.generate_comprehensive_why",
+            return_value={},
+        ):
+            result = self.ci.build(
+                elbow={"verdict": "LEGAL"},
+                risks=[],
+                interpretation={},
+                action={"action": "SEMI_OPEN", "confidence": 0.43},
+            )
+
+        rating = result["rating_system_v2"]
+        self.assertEqual(rating["overall"]["score"], 90)
+        self.assertEqual(rating["player_view"]["metrics"]["upper_body_alignment"]["score"], 84)
+        self.assertEqual(rating["player_view"]["metrics"]["lower_body_alignment"]["score"], 84)
+        self.assertEqual(rating["player_view"]["metrics"]["whole_body_alignment"]["score"], 88)
+        self.assertEqual(rating["player_view"]["metrics"]["momentum_forward"]["score"], 84)
+        self.assertEqual(rating["coach_view"]["metrics"]["safety"]["score"], 86)
+
+    def test_side_on_benchmark_style_uses_lower_guardrail_threshold(self):
+        with patch.object(
+            self.ci,
+            "build_summary",
+            return_value={
+                "overall_assessment": "This clip needs a closer look because some parts of the body may be taking extra load.",
+                "overall_severity": "VERY_HIGH",
+                "recommendation_level": "CORRECT",
+                "confidence": 0.7,
+                "primary_pillar": "PROTECTION",
+            },
+        ), patch.object(
+            self.ci,
+            "build_scorecard",
+            return_value={
+                "overall": {"score": 33},
+                "confidence": {"score": 75},
+            },
+        ), patch.object(
+            self.ci,
+            "build_rating_system_v2",
+            return_value={
+                "overall": {"score": 57},
+                "confidence": {"score": 75},
+            },
+        ), patch.object(
+            self.ci,
+            "build_pillars",
+            return_value={
+                "posture": {"status": "REVIEW"},
+                "power": {"status": "REVIEW"},
+                "protection": {"status": "REVIEW"},
+            },
+        ), patch.object(
+            self.ci,
+            "build_risks",
+            return_value=[],
+        ), patch.object(
+            self.ci,
+            "build_chain",
+            return_value={"confidence": 0.7},
+        ), patch.object(
+            self.ci,
+            "build_elbow",
+            return_value={"band": "OK"},
+        ), patch(
+            "app.clinician.interpreter.generate_comprehensive_why",
+            return_value={},
+        ):
+            result = self.ci.build(
+                elbow={"verdict": "LEGAL"},
+                risks=[],
+                interpretation={},
+                action={"action": "SIDE_ON", "confidence": 0.97},
+            )
+
+        self.assertEqual(result["summary"]["overall_severity"], "LOW")
+        self.assertEqual(result["summary"]["recommendation_level"], "MAINTAIN")
+        self.assertEqual(result["summary"]["rating_overall_score"], 92)
 
     def test_mixed_action_does_not_get_benchmark_softening(self):
         with patch.object(
@@ -371,6 +796,7 @@ class ClinicianReconciliationTests(unittest.TestCase):
             "build_rating_system_v2",
             return_value={
                 "overall": {"score": 70},
+                "confidence": {"score": 81},
             },
         ), patch.object(
             self.ci,

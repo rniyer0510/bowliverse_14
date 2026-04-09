@@ -73,15 +73,39 @@ def compute_hip_shoulder_mismatch(
     if len(hips) < 4:
         return {"risk_id": "hip_shoulder_mismatch", "signal_strength": floor, "confidence": 0.0}
 
-    phase = float(np.mean(np.abs(np.array(hips, dtype=float) - np.array(shoulders, dtype=float))))
+    hips_arr = np.array(hips, dtype=float)
+    shoulders_arr = np.array(shoulders, dtype=float)
+
+    phase = float(np.mean(np.abs(hips_arr - shoulders_arr)))
     signal = min(1.0, phase / float(config.get("phase_norm", 0.12)))
     signal = round(max(signal, floor), 3)
 
     confidence = round(float(np.mean(vis)) * 0.85, 3) if vis else 0.0
 
+    hip_velocity = np.abs(np.diff(hips_arr))
+    shoulder_velocity = np.abs(np.diff(shoulders_arr))
+    hip_peak_idx = int(np.argmax(hip_velocity)) if len(hip_velocity) else 0
+    shoulder_peak_idx = int(np.argmax(shoulder_velocity)) if len(shoulder_velocity) else 0
+    hip_peak_frame = max(0, anchor - 8) + hip_peak_idx + 1
+    shoulder_peak_frame = max(0, anchor - 8) + shoulder_peak_idx + 1
+    sequence_delta_frames = int(shoulder_peak_frame - hip_peak_frame)
+
+    if sequence_delta_frames <= -2:
+        sequence_pattern = "shoulders_lead"
+    elif sequence_delta_frames >= 2:
+        sequence_pattern = "hips_lead"
+    else:
+        sequence_pattern = "in_sync"
+
     return {
         "risk_id": "hip_shoulder_mismatch",
         "signal_strength": signal,
         "confidence": confidence,
-        "debug": {"phase_lag": round(phase, 3)},
+        "debug": {
+            "phase_lag": round(phase, 3),
+            "hip_peak_frame": int(hip_peak_frame),
+            "shoulder_peak_frame": int(shoulder_peak_frame),
+            "sequence_delta_frames": sequence_delta_frames,
+            "sequence_pattern": sequence_pattern,
+        },
     }
