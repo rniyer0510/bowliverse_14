@@ -14,3 +14,4 @@ venv/
 *.bak*
 *.old*
 clinician/yaml_backup/
+storage/renders/

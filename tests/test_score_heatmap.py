@@ -1,12 +1,15 @@
 import unittest
+from datetime import datetime
 
 from app.persistence.read_api import (
     _build_action_change_summary,
+    _build_player_baseline_state,
     _build_rating_heatmap_v2,
     _build_score_heatmap,
     _extract_action_change_traits,
     _extract_rating_summary_v2,
     _extract_score_summary,
+    _extract_visual_walkthrough,
 )
 
 
@@ -31,12 +34,19 @@ class ScoreHeatmapTests(unittest.TestCase):
         foot_line=0.17,
         kinetic_chain_sequence="in_sync",
         kinetic_chain_delta=0,
+        event_chain_quality=0.72,
+        walkthrough=None,
     ):
-        return {
+        result = {
             "action": {
                 "action": action_type,
                 "intent": action_intent,
                 "confidence": 0.76,
+            },
+            "events": {
+                "event_chain": {
+                    "quality": event_chain_quality,
+                }
             },
             "risks": [
                 {"risk_id": "front_foot_braking_shock", "signal_strength": front_foot_braking},
@@ -77,6 +87,9 @@ class ScoreHeatmapTests(unittest.TestCase):
                 }
             },
         }
+        if walkthrough is not None:
+            result["visual_walkthrough"] = walkthrough
+        return result
 
     def test_extract_score_summary_from_clinician_scorecard(self):
         result_json = {
@@ -317,6 +330,35 @@ class ScoreHeatmapTests(unittest.TestCase):
         self.assertIn("Need at least 2 recent comparison clips", action_change["summary"])
         self.assertIn("few more clips", action_change["what_to_try"])
         self.assertIn("coach", action_change["coach_prompt"].lower())
+
+    def test_extract_visual_walkthrough_from_result_json(self):
+        walkthrough = {
+            "available": True,
+            "url": "/renders/run-1_walkthrough.mp4",
+            "renderer_version": "coach_video_renderer_v1",
+        }
+        result_json = self._result_json(walkthrough=walkthrough)
+
+        self.assertEqual(_extract_visual_walkthrough(result_json), walkthrough)
+
+    def test_build_player_baseline_state_marks_refresh_candidate_on_sustained_action_shift(self):
+        baseline_state = _build_player_baseline_state(
+            [
+                {"run_id": "run-8", "created_at": datetime(2026, 4, 8), "result_json": self._result_json(action_type="MIXED", action_intent="mixed")},
+                {"run_id": "run-7", "created_at": datetime(2026, 4, 7), "result_json": self._result_json(action_type="MIXED", action_intent="mixed")},
+                {"run_id": "run-6", "created_at": datetime(2026, 4, 6), "result_json": self._result_json(action_type="MIXED", action_intent="mixed")},
+                {"run_id": "run-5", "created_at": datetime(2026, 4, 5), "result_json": self._result_json(action_type="MIXED", action_intent="mixed")},
+                {"run_id": "run-4", "created_at": datetime(2026, 3, 20), "result_json": self._result_json(action_type="SEMI_OPEN", action_intent="semi_open")},
+                {"run_id": "run-3", "created_at": datetime(2026, 3, 19), "result_json": self._result_json(action_type="SEMI_OPEN", action_intent="semi_open")},
+                {"run_id": "run-2", "created_at": datetime(2026, 3, 18), "result_json": self._result_json(action_type="SEMI_OPEN", action_intent="semi_open")},
+                {"run_id": "run-1", "created_at": datetime(2026, 3, 17), "result_json": self._result_json(action_type="SEMI_OPEN", action_intent="semi_open")},
+            ]
+        )
+
+        self.assertEqual(baseline_state["status"], "refresh_candidate")
+        self.assertTrue(baseline_state["should_refresh_baseline"])
+        self.assertEqual(baseline_state["recent_action_type_mode"], "mixed")
+        self.assertEqual(baseline_state["trigger_reason"], "sustained_action_type_shift")
 
 
 if __name__ == "__main__":

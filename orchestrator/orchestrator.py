@@ -4,12 +4,14 @@ from datetime import datetime
 import os
 import time
 import uuid
+from typing import Optional, Tuple
 
 from app.common.logger import get_logger
 from app.common.auth import get_current_account
 from app.io.loader import load_video
 from app.workers.screening.video_screen import run_preanalysis_screen
 from app.workers.speed.release_speed import estimate_release_speed
+from app.workers.render.coach_video_renderer import render_skeleton_video, RENDER_DIR
 
 # Events
 from app.workers.events.release_uah import detect_release_uah
@@ -251,16 +253,107 @@ def _gate_speed_estimate(
     return estimated_release_speed
 
 
+def _walkthrough_render_window(
+    *,
+    events: dict,
+    total_frames: int,
+) -> Tuple[int, Optional[int]]:
+    bfc_frame = (events.get("bfc") or {}).get("frame")
+    ffc_frame = (events.get("ffc") or {}).get("frame")
+    release_frame = (events.get("release") or {}).get("frame")
+
+    anchors = [
+        int(frame)
+        for frame in (bfc_frame, ffc_frame, release_frame)
+        if isinstance(frame, int) and frame >= 0
+    ]
+    if not anchors:
+        fallback_end = min(total_frames, 180) if total_frames else 180
+        return 0, fallback_end
+
+    start = max(0, min(anchors) - 30)
+    end = min(total_frames, max(anchors) + 28) if total_frames else max(anchors) + 28
+    if end <= start:
+        return start, None
+    return start, end
+
+
+def _build_walkthrough_render(
+    *,
+    run_id: str,
+    video: dict,
+    pose_frames: list,
+    events: dict,
+    hand: str,
+    action: dict,
+    elbow: dict,
+    risks: list,
+    estimated_release_speed: dict,
+    report_story: Optional[dict],
+) -> dict:
+    video_path = video.get("path")
+    if not video_path or not os.path.exists(video_path):
+        return {"available": False, "reason": "missing_video_path"}
+
+    total_frames = int(video.get("total_frames") or len(pose_frames) or 0)
+    start_frame, end_frame = _walkthrough_render_window(
+        events=events,
+        total_frames=total_frames,
+    )
+    output_path = os.path.join(RENDERS_DIR, f"{run_id}_walkthrough.mp4")
+
+    try:
+        render_result = render_skeleton_video(
+            video_path=video_path,
+            pose_frames=pose_frames,
+            events=events,
+            hand=hand,
+            action=action,
+            elbow=elbow,
+            risks=risks,
+            estimated_release_speed=estimated_release_speed,
+            report_story=report_story,
+            output_path=output_path,
+            start_frame=start_frame,
+            end_frame=end_frame,
+        )
+    except Exception as exc:
+        logger.warning(
+            f"[analyze:walkthrough_render_failed] run_id={run_id} error={exc}"
+        )
+        return {"available": False, "reason": "render_failed"}
+
+    if not render_result.get("available"):
+        return {
+            "available": False,
+            "reason": render_result.get("reason") or "render_unavailable",
+        }
+
+    return {
+        **render_result,
+        "renderer_version": "coach_video_renderer_v1",
+        "artifact_type": "walkthrough_mp4",
+        "url": f"/renders/{os.path.basename(output_path)}",
+    }
+
+
 # ------------------------------------------------------------
 # Serve Visual Evidence
 # ------------------------------------------------------------
 VISUALS_DIR = "/tmp/actionlab_frames"
+RENDERS_DIR = RENDER_DIR
 
 if os.path.isdir(VISUALS_DIR):
     app.mount("/visuals", StaticFiles(directory=VISUALS_DIR), name="visuals")
     logger.info(f"Mounted visual evidence directory: {VISUALS_DIR}")
 else:
     logger.warning(f"Visual evidence directory not found: {VISUALS_DIR}")
+
+if os.path.isdir(RENDERS_DIR):
+    app.mount("/renders", StaticFiles(directory=RENDERS_DIR), name="renders")
+    logger.info(f"Mounted walkthrough render directory: {RENDERS_DIR}")
+else:
+    logger.warning(f"Walkthrough render directory not found: {RENDERS_DIR}")
 
 
 # ------------------------------------------------------------
@@ -607,6 +700,18 @@ def analyze(
             "interpretation": interpretation,
             "clinician": clinician,
         }
+        result["visual_walkthrough"] = _build_walkthrough_render(
+            run_id=run_id,
+            video=video,
+            pose_frames=pose_frames,
+            events=events,
+            hand=hand,
+            action=action,
+            elbow=elbow,
+            risks=risks,
+            estimated_release_speed=estimated_release_speed,
+            report_story=(clinician or {}).get("report_story_v1"),
+        )
 
         # ------------------------------------------------------------
         # Persist

@@ -33,6 +33,9 @@ router = APIRouter()
 
 ACTION_CHANGE_BASELINE_WINDOW = 4
 ACTION_CHANGE_MIN_BASELINE_RUNS = 2
+BASELINE_REFRESH_WINDOW = 4
+BASELINE_REFRESH_MIN_RUNS = 3
+BASELINE_REVIEW_GAP_DAYS = 180
 ACTION_CHANGE_NUMERIC_RULES = {
     "overall": {"min_range": 4.0, "spread_cushion": 2.0, "watch_buffer": 4.0},
     "upper_body_alignment": {"min_range": 4.0, "spread_cushion": 2.0, "watch_buffer": 4.0},
@@ -264,6 +267,121 @@ def _extract_action_change_traits(result_json: Optional[Dict[str, Any]]) -> Dict
             "action_confidence": round(float(action.get("confidence") or 0.0), 2),
             "front_foot_toe_alignment_confidence": round(float(toe_alignment.get("confidence") or 0.0), 2),
         },
+    }
+
+
+def _extract_visual_walkthrough(result_json: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    if not isinstance(result_json, dict):
+        return None
+    walkthrough = result_json.get("visual_walkthrough")
+    return walkthrough if isinstance(walkthrough, dict) else None
+
+
+def _analysis_is_baseline_eligible(result_json: Optional[Dict[str, Any]]) -> bool:
+    if not isinstance(result_json, dict):
+        return False
+    action_confidence = float(((result_json.get("action") or {}).get("confidence") or 0.0))
+    chain_quality = float((((result_json.get("events") or {}).get("event_chain") or {}).get("quality") or 0.0))
+    if action_confidence < 0.35:
+        return False
+    if chain_quality < 0.20:
+        return False
+    return True
+
+
+def _build_player_baseline_state(run_entries: List[Dict[str, Any]]) -> Dict[str, Any]:
+    valid_entries = [entry for entry in run_entries if isinstance(entry.get("result_json"), dict)]
+    trusted_entries = [
+        entry for entry in valid_entries
+        if _analysis_is_baseline_eligible(entry.get("result_json"))
+    ]
+    if not trusted_entries:
+        return {
+            "version": "player_baseline_v1",
+            "status": "collecting",
+            "should_refresh_baseline": False,
+            "headline": "ActionLab is still collecting trusted clips for your personal baseline.",
+            "summary": "Keep recording a few more clear clips before ActionLab updates what it treats as your normal action pattern.",
+            "recent_trusted_run_ids": [],
+            "reference_run_ids": [],
+            "trigger_reason": "no_trusted_clips",
+        }
+
+    recent_entries = trusted_entries[:BASELINE_REFRESH_WINDOW]
+    older_entries = trusted_entries[BASELINE_REFRESH_WINDOW:BASELINE_REFRESH_WINDOW * 2]
+    recent_traits = [
+        _extract_action_change_traits(entry.get("result_json"))
+        for entry in recent_entries
+    ]
+    recent_action_types = [
+        str((traits.get("categorical") or {}).get("action_type") or "")
+        for traits in recent_traits
+        if str((traits.get("categorical") or {}).get("action_type") or "") not in {"", "unknown"}
+    ]
+    recent_mode = None
+    recent_mode_ratio = 0.0
+    if recent_action_types:
+        counts = Counter(recent_action_types)
+        recent_mode, recent_mode_count = counts.most_common(1)[0]
+        recent_mode_ratio = recent_mode_count / len(recent_action_types)
+
+    older_action_types = [
+        str((_extract_action_change_traits(entry.get("result_json")).get("categorical") or {}).get("action_type") or "")
+        for entry in older_entries
+        if str((_extract_action_change_traits(entry.get("result_json")).get("categorical") or {}).get("action_type") or "") not in {"", "unknown"}
+    ]
+    older_mode = None
+    if older_action_types:
+        older_mode = Counter(older_action_types).most_common(1)[0][0]
+
+    latest_created_at = recent_entries[0].get("created_at")
+    oldest_recent_created_at = recent_entries[-1].get("created_at")
+    long_gap = False
+    if latest_created_at and oldest_recent_created_at:
+        try:
+            long_gap = abs((latest_created_at - oldest_recent_created_at).days) >= BASELINE_REVIEW_GAP_DAYS
+        except Exception:
+            long_gap = False
+
+    if len(recent_entries) < BASELINE_REFRESH_MIN_RUNS:
+        status = "collecting"
+        headline = "ActionLab is still collecting trusted clips for your personal baseline."
+        summary = "Need a few more strong clips before ActionLab updates your normal action pattern."
+        trigger_reason = "not_enough_recent_trusted_runs"
+        should_refresh = False
+    elif older_mode and recent_mode and recent_mode != older_mode and recent_mode_ratio >= 0.75:
+        status = "refresh_candidate"
+        headline = "Your recent action pattern may be becoming the new normal."
+        summary = (
+            f"The last {len(recent_entries)} trusted clips are clustering around a {recent_mode.replace('_', ' ')} action, "
+            f"which is different from the older baseline pattern."
+        )
+        trigger_reason = "sustained_action_type_shift"
+        should_refresh = True
+    elif long_gap:
+        status = "review_due"
+        headline = "Your personal baseline may need a fresh review."
+        summary = "These trusted clips are spread across a long time gap, so ActionLab should review whether your current normal has changed."
+        trigger_reason = "long_time_gap"
+        should_refresh = False
+    else:
+        status = "stable"
+        headline = "Your current personal baseline still looks usable."
+        summary = "Recent trusted clips are still close enough to the current pattern, so ActionLab can keep using the same normal for now."
+        trigger_reason = "recent_pattern_stable"
+        should_refresh = False
+
+    return {
+        "version": "player_baseline_v1",
+        "status": status,
+        "should_refresh_baseline": should_refresh,
+        "headline": headline,
+        "summary": summary,
+        "recent_trusted_run_ids": [entry.get("run_id") for entry in recent_entries],
+        "reference_run_ids": [entry.get("run_id") for entry in older_entries],
+        "recent_action_type_mode": recent_mode,
+        "recent_action_type_mode_ratio": round(float(recent_mode_ratio), 2) if recent_mode_ratio else 0.0,
+        "trigger_reason": trigger_reason,
     }
 
 
@@ -993,6 +1111,7 @@ def list_analysis_runs(
             "total_frames": r.total_frames,
             "score_summary": score_summary,
             "rating_summary_v2": rating_summary_v2,
+            "visual_walkthrough": _extract_visual_walkthrough(raw.result_json if raw else None),
         }
         items.append(item)
         heatmap_entries.append(
@@ -1009,6 +1128,16 @@ def list_analysis_runs(
         "heatmap": _build_score_heatmap(heatmap_entries),
         "heatmap_v2": _build_rating_heatmap_v2(heatmap_entries),
         "action_change": _build_action_change_summary(
+            [
+                {
+                    "run_id": str(r.run_id),
+                    "created_at": r.created_at,
+                    "result_json": (raw_by_run_id.get(r.run_id).result_json if raw_by_run_id.get(r.run_id) else None),
+                }
+                for r in runs
+            ]
+        ),
+        "baseline_state": _build_player_baseline_state(
             [
                 {
                     "run_id": str(r.run_id),
@@ -1055,5 +1184,6 @@ def get_analysis_run(
         "created_at": run.created_at,
         "schema_version": run.schema_version,
         "coach_notes": run.coach_notes,
+        "visual_walkthrough": _extract_visual_walkthrough(raw.result_json if raw else None),
         "result": raw.result_json if raw else None,
     }
