@@ -23,9 +23,10 @@ SessionLocal = sessionmaker(
 def get_db():
     """
     FastAPI dependency for database sessions.
-    
-    Yields a database session and ensures it's closed after use.
-    
+
+    Yields a database session, rolls back on any exception to return the
+    connection to the pool in a clean state, then closes it.
+
     Usage:
         @app.get("/items")
         def get_items(db: Session = Depends(get_db)):
@@ -34,5 +35,8 @@ def get_db():
     db = SessionLocal()
     try:
         yield db
+    except Exception:
+        db.rollback()
+        raise
     finally:
         db.close()

@@ -12,6 +12,7 @@ from app.io.loader import load_video
 from app.workers.screening.video_screen import run_preanalysis_screen
 from app.workers.speed.release_speed import estimate_release_speed
 from app.workers.render.coach_video_renderer import render_skeleton_video, RENDER_DIR
+from app.workers.release_shape import build_release_shape_skeleton
 
 # Events
 from app.workers.events.release_uah import detect_release_uah
@@ -181,7 +182,7 @@ def _gate_speed_estimate(
         return estimated_release_speed
 
     ordered = bool((event_chain or {}).get("ordered"))
-    chain_quality = float((event_chain or {}).get("quality") or 0.0)
+    chain_quality_score = float((event_chain or {}).get("quality") or 0.0)
     release_confidence = float(((events or {}).get("release") or {}).get("confidence") or 0.0)
     speed_confidence = float(estimated_release_speed.get("confidence") or 0.0)
 
@@ -209,10 +210,10 @@ def _gate_speed_estimate(
         ordered
         and release_confidence >= 0.50
         and speed_confidence >= 0.50
-        and chain_quality >= 0.20
+        and chain_quality_score >= 0.20
     )
 
-    if chain_quality < 0.35 and can_show_low_confidence:
+    if chain_quality_score < 0.35 and can_show_low_confidence:
         return {
             **estimated_release_speed,
             "available": True,
@@ -220,7 +221,7 @@ def _gate_speed_estimate(
             "reason": "low_event_chain_quality",
         }
 
-    if chain_quality < 0.35:
+    if chain_quality_score < 0.35:
         return {
             **estimated_release_speed,
             "available": False,
@@ -240,15 +241,15 @@ def _gate_speed_estimate(
         }
 
     if weak_anchor_names:
-            return {
-                **estimated_release_speed,
-                "available": False,
-                "display_policy": "suppress",
-                "display": None,
-                "value_kph": None,
-                "confidence": 0.0,
-                "reason": f"weak_{'_'.join(weak_anchor_names)}_anchor",
-            }
+        return {
+            **estimated_release_speed,
+            "available": False,
+            "display_policy": "suppress",
+            "display": None,
+            "value_kph": None,
+            "confidence": 0.0,
+            "reason": f"weak_{'_'.join(weak_anchor_names)}_anchor",
+        }
 
     return estimated_release_speed
 
@@ -410,6 +411,17 @@ def analyze(
     }
 
     # ------------------------------------------------------------
+    # Validate player_id format before any DB queries
+    # ------------------------------------------------------------
+    try:
+        player_uuid = uuid.UUID(player_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid player_id format",
+        )
+
+    # ------------------------------------------------------------
     # Enforce Player Ownership
     # ------------------------------------------------------------
     db = SessionLocal()
@@ -419,7 +431,7 @@ def analyze(
             db.query(AccountPlayerLink)
             .filter(
                 AccountPlayerLink.account_id == current_account.account_id,
-                AccountPlayerLink.player_id == player_id,
+                AccountPlayerLink.player_id == player_uuid,
             )
             .first()
         )
@@ -433,7 +445,7 @@ def analyze(
         # Step 2: Fetch player
         player = (
             db.query(Player)
-            .filter(Player.player_id == player_id)
+            .filter(Player.player_id == player_uuid)
             .first()
         )
 
@@ -674,6 +686,12 @@ def analyze(
             interpretation=interpretation,
             action=action,
         )
+        release_shape = build_release_shape_skeleton(
+            pose_frames=pose_frames,
+            events=events,
+            hand=hand,
+            action=action,
+        )
 
         # ------------------------------------------------------------
         # Build Response
@@ -695,6 +713,7 @@ def analyze(
             "elbow": elbow,
             "estimated_release_speed": estimated_release_speed,
             "action": action,
+            "release_shape": release_shape,
             "risks": risks,
             "basics": basics,
             "interpretation": interpretation,

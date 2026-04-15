@@ -147,8 +147,11 @@ def register(data: dict, db: Session = Depends(get_db)):
 
         handedness = normalize_handedness(handedness)
 
-        if season:
-            season = validate_season(int(season))
+        if season is not None:
+            try:
+                season = validate_season(int(season))
+            except (ValueError, TypeError):
+                raise HTTPException(status_code=400, detail="Invalid season format")
         else:
             season = get_current_season()
 
@@ -306,6 +309,13 @@ def delete_account(
             AccountPlayerLink.account_id == account_id
         ).delete(synchronize_session=False)
 
+        # Delete login audit records before removing User/Account to
+        # satisfy FK constraints (LoginAudit.user_id → user.user_id and
+        # LoginAudit.account_id → account.account_id).
+        db.query(LoginAudit).filter(
+            LoginAudit.account_id == account_id
+        ).delete(synchronize_session=False)
+
         db.query(User).filter(User.account_id == account_id).delete(
             synchronize_session=False
         )
@@ -314,8 +324,11 @@ def delete_account(
         )
 
         db.commit()
-    except Exception:
+    except Exception as e:
         db.rollback()
+        logger.error(
+            "[delete_account] account_id=%s error=%s", account_id, e, exc_info=True
+        )
         raise HTTPException(
             status_code=500,
             detail="Failed to delete account",

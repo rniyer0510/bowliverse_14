@@ -5,6 +5,7 @@ from datetime import datetime
 from typing import Optional
 
 from sqlalchemy import (
+    Column,
     String,
     Integer,
     Float,
@@ -12,6 +13,7 @@ from sqlalchemy import (
     ForeignKey,
     Text,
     Date,
+    DateTime,
     TIMESTAMP,
     CheckConstraint,
 )
@@ -326,11 +328,6 @@ class AnalysisResultRaw(Base):
 # ------------------------------------------------------------
 # Phase 1 Auth - User Model
 # ------------------------------------------------------------
-
-import uuid
-from sqlalchemy import Column, String, DateTime, ForeignKey
-from sqlalchemy.dialects.postgresql import UUID
-from datetime import datetime
 
 class User(Base):
     __tablename__ = "user"

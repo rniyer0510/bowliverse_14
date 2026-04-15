@@ -27,7 +27,7 @@ class CoachNotesUpdate(BaseModel):
 
 
 @router.patch("/analysis/{run_id}/coach-notes")
-async def update_coach_notes(
+def update_coach_notes(
     run_id: str,
     update: CoachNotesUpdate,
     current_account=Depends(get_current_account),
@@ -91,7 +91,7 @@ async def update_coach_notes(
 
 
 @router.get("/analysis/{run_id}/coach-notes")
-async def get_coach_notes(
+def get_coach_notes(
     run_id: str,
     current_account=Depends(get_current_account),
     db: Session = Depends(get_db)
