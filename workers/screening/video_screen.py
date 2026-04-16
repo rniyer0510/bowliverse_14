@@ -10,8 +10,8 @@ from app.workers.events.delivery_guard import detect_delivery_candidates
 
 POSE_MIN_VIS = 0.20
 MAX_SCREEN_DURATION_SEC = 15.0
-PROMINENT_HEIGHT_RATIO = 0.72
-PROMINENT_AREA_RATIO = 0.55
+PROMINENT_HEIGHT_RATIO = 0.85
+PROMINENT_AREA_RATIO = 0.70
 DUPLICATE_IOU = 0.35
 MIN_PERSON_WEIGHT = 0.25
 MIN_PERSON_HEIGHT_RATIO = 0.20
@@ -295,7 +295,7 @@ def assess_primary_subject(
     frame_threshold = (
         1
         if detector_frames < 4
-        else max(2, int(math.ceil(detector_frames * 0.25)))
+        else max(3, int(math.ceil(detector_frames * 0.40)))
     )
     passed = len(competitor_frames) <= frame_threshold
 
@@ -363,13 +363,13 @@ def run_preanalysis_screen(
         )
 
     if not primary_subject.get("passed", True):
-        blocking_issues.append(
+        warnings.append(
             {
                 "code": "multiple_prominent_people",
                 "detail": (
-                    "Please upload a clip with one clear bowler in frame. "
-                    "A smaller umpire or distant bystander is fine, but there "
-                    "cannot be two prominent athletes in the delivery window."
+                    "Another prominent person was detected in several frames. "
+                    "Analysis will proceed but results may be less reliable if "
+                    "two active bowlers are present."
                 ),
             }
         )
