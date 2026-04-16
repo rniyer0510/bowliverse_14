@@ -350,11 +350,9 @@ if os.path.isdir(VISUALS_DIR):
 else:
     logger.warning(f"Visual evidence directory not found: {VISUALS_DIR}")
 
-if os.path.isdir(RENDERS_DIR):
-    app.mount("/renders", StaticFiles(directory=RENDERS_DIR), name="renders")
-    logger.info(f"Mounted walkthrough render directory: {RENDERS_DIR}")
-else:
-    logger.warning(f"Walkthrough render directory not found: {RENDERS_DIR}")
+os.makedirs(RENDERS_DIR, exist_ok=True)
+app.mount("/renders", StaticFiles(directory=RENDERS_DIR), name="renders")
+logger.info(f"Mounted walkthrough render directory: {RENDERS_DIR}")
 
 
 # ------------------------------------------------------------
@@ -402,17 +400,11 @@ def analyze(
         )
         raise HTTPException(status_code=415, detail="Unsupported media type")
 
-    # ------------------------------------------------------------
-    # Secure Actor Injection
-    # ------------------------------------------------------------
     actor_obj = {
         "account_id": str(current_account.account_id),
         "role": current_account.role,
     }
 
-    # ------------------------------------------------------------
-    # Validate player_id format before any DB queries
-    # ------------------------------------------------------------
     try:
         player_uuid = uuid.UUID(player_id)
     except ValueError:
@@ -421,12 +413,8 @@ def analyze(
             detail="Invalid player_id format",
         )
 
-    # ------------------------------------------------------------
-    # Enforce Player Ownership
-    # ------------------------------------------------------------
     db = SessionLocal()
     try:
-        # Step 1: Check link (ownership)
         link = (
             db.query(AccountPlayerLink)
             .filter(
@@ -442,7 +430,6 @@ def analyze(
                 detail="You do not have access to this player",
             )
 
-        # Step 2: Fetch player
         player = (
             db.query(Player)
             .filter(Player.player_id == player_uuid)
@@ -497,9 +484,6 @@ def analyze(
     cleanup_scheduled = False
 
     try:
-        # ------------------------------------------------------------
-        # Load Video
-        # ------------------------------------------------------------
         try:
             video, pose_frames, _ = load_video(file)
         except RuntimeError:
@@ -547,18 +531,12 @@ def analyze(
                 screening=screening,
             )
 
-        # ------------------------------------------------------------
-        # Events
-        # ------------------------------------------------------------
         events = detect_release_uah(
             pose_frames=pose_frames,
             hand=hand,
             fps=fps_val,
         )
 
-        # ------------------------------------------------------------
-        # FFC / BFC
-        # ------------------------------------------------------------
         release_frame = (events.get("release") or {}).get("frame")
         delivery_window = events.get("delivery_window")
 
@@ -591,9 +569,6 @@ def analyze(
             release_confidence=release_confidence,
         )
 
-        # ------------------------------------------------------------
-        # Action Classification
-        # ------------------------------------------------------------
         action = classify_action(
             pose_frames=pose_frames,
             hand=hand,
@@ -601,9 +576,6 @@ def analyze(
             ffc_frame=ffc_frame,
         )
 
-        # ------------------------------------------------------------
-        # Risk Worker
-        # ------------------------------------------------------------
         risks = run_risk_worker(
             pose_frames=pose_frames,
             video=video,
@@ -612,9 +584,6 @@ def analyze(
             run_id=run_id,
         )
 
-        # ------------------------------------------------------------
-        # Basics
-        # ------------------------------------------------------------
         basics = analyze_basics(
             pose_frames=pose_frames,
             hand=hand,
@@ -622,14 +591,8 @@ def analyze(
             action=action,
         )
 
-        # ------------------------------------------------------------
-        # Interpretation
-        # ------------------------------------------------------------
         interpretation = interpret_risks(risks)
 
-        # ------------------------------------------------------------
-        # Elbow
-        # ------------------------------------------------------------
         elbow_signal = compute_elbow_signal(
             pose_frames=pose_frames,
             hand=hand,
@@ -643,9 +606,6 @@ def analyze(
             hand=hand,
         )
 
-        # ------------------------------------------------------------
-        # Estimated Release Speed (Research)
-        # ------------------------------------------------------------
         estimated_release_speed = estimate_release_speed(
             pose_frames=pose_frames,
             events=events,
@@ -677,9 +637,6 @@ def analyze(
             f"wrist_window_cv={speed_debug.get('wrist_window_cv', '-')}"
         )
 
-        # ------------------------------------------------------------
-        # Clinician Layer
-        # ------------------------------------------------------------
         clinician = clinician_engine.build(
             elbow=elbow,
             risks=risks,
@@ -693,9 +650,6 @@ def analyze(
             action=action,
         )
 
-        # ------------------------------------------------------------
-        # Build Response
-        # ------------------------------------------------------------
         result = {
             "run_id": run_id,
             "schema": "actionlab.v14",
@@ -732,9 +686,6 @@ def analyze(
             report_story=(clinician or {}).get("report_story_v1"),
         )
 
-        # ------------------------------------------------------------
-        # Persist
-        # ------------------------------------------------------------
         try:
             write_analysis(
                 result=result,
@@ -745,10 +696,10 @@ def analyze(
                 age_group=effective_age_group,
                 season=effective_season,
             )
-        except Exception as e:
-            logger.error(
+        except Exception:
+            logger.exception(
                 f"[analyze:persistence_failed] request_id={request_id} "
-                f"run_id={run_id} error={e}"
+                f"run_id={run_id}"
             )
             raise HTTPException(status_code=500, detail="Analysis persistence failed")
 
@@ -767,9 +718,6 @@ def analyze(
             _delete_temp_video_safely(video_temp_path)
 
 
-# ------------------------------------------------------------
-# Routers
-# ------------------------------------------------------------
 app.include_router(auth_router)
 app.include_router(persistence_read_router)
 app.include_router(persistence_write_router)
