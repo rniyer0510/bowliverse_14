@@ -7,6 +7,7 @@ from app.persistence.read_api import (
     _build_rating_heatmap_v2,
     _build_score_heatmap,
     _extract_action_change_traits,
+    _extract_release_shape,
     _extract_rating_summary_v2,
     _extract_score_summary,
     _extract_visual_walkthrough,
@@ -36,6 +37,7 @@ class ScoreHeatmapTests(unittest.TestCase):
         kinetic_chain_delta=0,
         event_chain_quality=0.72,
         walkthrough=None,
+        release_shape=None,
     ):
         result = {
             "action": {
@@ -89,6 +91,8 @@ class ScoreHeatmapTests(unittest.TestCase):
         }
         if walkthrough is not None:
             result["visual_walkthrough"] = walkthrough
+        if release_shape is not None:
+            result["release_shape"] = release_shape
         return result
 
     def test_extract_score_summary_from_clinician_scorecard(self):
@@ -340,6 +344,25 @@ class ScoreHeatmapTests(unittest.TestCase):
         result_json = self._result_json(walkthrough=walkthrough)
 
         self.assertEqual(_extract_visual_walkthrough(result_json), walkthrough)
+
+    def test_extract_release_shape_from_result_json(self):
+        release_shape = {
+            "version": "release_shape_v1",
+            "available": False,
+            "category": {"key": None, "label": None},
+            "release_geometry": {"height_m": None, "angle_deg": None, "arc_deg": None},
+            "drift_from_usual": {
+                "available": False,
+                "status": "not_available",
+                "summary": None,
+                "delta_deg": None,
+            },
+            "confidence": 0.0,
+            "reason": "release_shape_not_computed_yet",
+        }
+        result_json = self._result_json(release_shape=release_shape)
+
+        self.assertEqual(_extract_release_shape(result_json), release_shape)
 
     def test_build_player_baseline_state_marks_refresh_candidate_on_sustained_action_shift(self):
         baseline_state = _build_player_baseline_state(

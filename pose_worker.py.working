@@ -1,0 +1,187 @@
+"""
+Pose worker (V14).
+
+Pass 3 additions:
+- visibility-aware landmarks
+- ROI-based bowler isolation using previous valid pose window
+- fallback to full-frame reacquisition
+- outputs full-frame normalized landmarks for downstream compatibility
+"""
+
+import cv2
+import mediapipe as mp
+
+mp_pose = mp.solutions.pose
+
+LEFT_SHOULDER = 11
+RIGHT_SHOULDER = 12
+LEFT_HIP = 23
+RIGHT_HIP = 24
+LEFT_KNEE = 25
+RIGHT_KNEE = 26
+LEFT_ANKLE = 27
+RIGHT_ANKLE = 28
+
+CORE_JOINTS = [LEFT_SHOULDER, RIGHT_SHOULDER, LEFT_HIP, RIGHT_HIP, LEFT_KNEE, RIGHT_KNEE]
+
+MIN_VIS = 0.45
+MIN_ROI_SIZE = 96
+ROI_PAD_RATIO = 0.28
+MAX_MISSES_BEFORE_RESET = 4
+
+
+def _joint_visible(landmarks, idx, min_vis=MIN_VIS):
+    if not isinstance(landmarks, list) or idx >= len(landmarks):
+        return False
+    lm = landmarks[idx]
+    if not isinstance(lm, dict):
+        return False
+    vis = float(lm.get("visibility", 0.0) or 0.0)
+    x = lm.get("x")
+    y = lm.get("y")
+    return x is not None and y is not None and vis >= min_vis
+
+
+def _is_valid_human_pose(landmarks):
+    if not isinstance(landmarks, list) or len(landmarks) <= RIGHT_ANKLE:
+        return False
+    torso_ok = (
+        _joint_visible(landmarks, LEFT_SHOULDER)
+        and _joint_visible(landmarks, RIGHT_SHOULDER)
+        and _joint_visible(landmarks, LEFT_HIP)
+        and _joint_visible(landmarks, RIGHT_HIP)
+    )
+    if not torso_ok:
+        return False
+    leg_ok = (
+        _joint_visible(landmarks, LEFT_KNEE) and _joint_visible(landmarks, LEFT_ANKLE)
+    ) or (
+        _joint_visible(landmarks, RIGHT_KNEE) and _joint_visible(landmarks, RIGHT_ANKLE)
+    )
+    return leg_ok
+
+
+def _landmarks_to_dicts(result):
+    if not result or not result.pose_landmarks:
+        return None
+    return [
+        {
+            "x": lm.x,
+            "y": lm.y,
+            "z": lm.z,
+            "visibility": getattr(lm, "visibility", 0.0),
+        }
+        for lm in result.pose_landmarks.landmark
+    ]
+
+
+def _roi_from_landmarks(landmarks, frame_w, frame_h):
+    pts = []
+    for idx in CORE_JOINTS + [LEFT_ANKLE, RIGHT_ANKLE]:
+        if _joint_visible(landmarks, idx, min_vis=0.35):
+            lm = landmarks[idx]
+            pts.append((float(lm["x"]) * frame_w, float(lm["y"]) * frame_h))
+    if len(pts) < 4:
+        return None
+    xs = [p[0] for p in pts]
+    ys = [p[1] for p in pts]
+    x0, x1 = min(xs), max(xs)
+    y0, y1 = min(ys), max(ys)
+    w = max(MIN_ROI_SIZE, int(round(x1 - x0)))
+    h = max(MIN_ROI_SIZE, int(round(y1 - y0)))
+    pad_x = int(round(w * ROI_PAD_RATIO))
+    pad_y = int(round(h * ROI_PAD_RATIO))
+    rx0 = max(0, int(round(x0)) - pad_x)
+    ry0 = max(0, int(round(y0)) - pad_y)
+    rx1 = min(frame_w, int(round(x1)) + pad_x)
+    ry1 = min(frame_h, int(round(y1)) + pad_y)
+    if rx1 - rx0 < MIN_ROI_SIZE or ry1 - ry0 < MIN_ROI_SIZE:
+        return None
+    return (rx0, ry0, rx1, ry1)
+
+
+def _map_roi_landmarks_to_full_frame(landmarks, roi, frame_w, frame_h):
+    if not isinstance(landmarks, list):
+        return None
+    x0, y0, x1, y1 = roi
+    roi_w = max(1, x1 - x0)
+    roi_h = max(1, y1 - y0)
+    mapped = []
+    for lm in landmarks:
+        mapped_x = (x0 + float(lm["x"]) * roi_w) / float(frame_w)
+        mapped_y = (y0 + float(lm["y"]) * roi_h) / float(frame_h)
+        mapped.append(
+            {
+                "x": mapped_x,
+                "y": mapped_y,
+                "z": lm.get("z", 0.0),
+                "visibility": lm.get("visibility", 0.0),
+            }
+        )
+    return mapped
+
+
+def run_pose(video_path):
+    cap = cv2.VideoCapture(video_path)
+    pose = mp_pose.Pose(static_image_mode=False)
+
+    pose_frames = []
+    frame_idx = 0
+    last_valid_landmarks = None
+    misses = 0
+
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            break
+
+        frame_h, frame_w = frame.shape[:2]
+        rgb_full = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+
+        landmarks = None
+        used_roi = None
+
+        # First try ROI-guided pose using previous valid pose.
+        if last_valid_landmarks is not None:
+            roi = _roi_from_landmarks(last_valid_landmarks, frame_w, frame_h)
+            if roi is not None:
+                x0, y0, x1, y1 = roi
+                crop = frame[y0:y1, x0:x1]
+                if crop is not None and crop.size > 0:
+                    rgb_crop = cv2.cvtColor(crop, cv2.COLOR_BGR2RGB)
+                    roi_result = pose.process(rgb_crop)
+                    roi_landmarks = _landmarks_to_dicts(roi_result)
+                    if _is_valid_human_pose(roi_landmarks):
+                        landmarks = _map_roi_landmarks_to_full_frame(roi_landmarks, roi, frame_w, frame_h)
+                        used_roi = roi
+
+        # Fallback to full-frame reacquisition.
+        if landmarks is None:
+            result = pose.process(rgb_full)
+            full_landmarks = _landmarks_to_dicts(result)
+            if _is_valid_human_pose(full_landmarks):
+                landmarks = full_landmarks
+                used_roi = None
+
+        if landmarks is not None:
+            last_valid_landmarks = landmarks
+            misses = 0
+        else:
+            misses += 1
+            if misses >= MAX_MISSES_BEFORE_RESET:
+                last_valid_landmarks = None
+
+        pose_frames.append(
+            {
+                "frame": frame_idx,
+                "landmarks": landmarks,
+                "roi": used_roi,
+            }
+        )
+
+        frame_idx += 1
+
+    cap.release()
+    pose.close()
+
+    return pose_frames

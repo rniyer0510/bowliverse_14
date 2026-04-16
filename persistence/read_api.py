@@ -27,6 +27,7 @@ from app.persistence.models import (
     AnalysisRun,
     AnalysisResultRaw,
 )
+from app.persistence.release_shape_drift import enrich_release_shape_drift
 from app.common.auth import get_current_account
 
 router = APIRouter()
@@ -275,6 +276,26 @@ def _extract_visual_walkthrough(result_json: Optional[Dict[str, Any]]) -> Option
         return None
     walkthrough = result_json.get("visual_walkthrough")
     return walkthrough if isinstance(walkthrough, dict) else None
+
+
+def _extract_release_shape(result_json: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    if not isinstance(result_json, dict):
+        return None
+    release_shape = result_json.get("release_shape")
+    return release_shape if isinstance(release_shape, dict) else None
+
+
+def _extract_release_shape_with_drift(
+    result_json: Optional[Dict[str, Any]],
+    drift: Optional[Dict[str, Any]],
+) -> Optional[Dict[str, Any]]:
+    release_shape = _extract_release_shape(result_json)
+    if not release_shape:
+        return None
+    enriched = dict(release_shape)
+    if isinstance(drift, dict):
+        enriched["drift_from_usual"] = drift
+    return enriched
 
 
 def _analysis_is_baseline_eligible(result_json: Optional[Dict[str, Any]]) -> bool:
@@ -1097,6 +1118,18 @@ def list_analysis_runs(
 
     items = []
     heatmap_entries = []
+    release_shape_by_run = enrich_release_shape_drift(
+        [
+            {
+                "run_id": str(r.run_id),
+                "result_json": (raw_by_run_id.get(r.run_id).result_json if raw_by_run_id.get(r.run_id) else None),
+                "trusted": _analysis_is_baseline_eligible(
+                    raw_by_run_id.get(r.run_id).result_json if raw_by_run_id.get(r.run_id) else None
+                ),
+            }
+            for r in runs
+        ]
+    )
     for r in runs:
         raw = raw_by_run_id.get(r.run_id)
         score_summary = _extract_score_summary(raw.result_json if raw else None)
@@ -1112,6 +1145,10 @@ def list_analysis_runs(
             "score_summary": score_summary,
             "rating_summary_v2": rating_summary_v2,
             "visual_walkthrough": _extract_visual_walkthrough(raw.result_json if raw else None),
+            "release_shape": _extract_release_shape_with_drift(
+                raw.result_json if raw else None,
+                release_shape_by_run.get(str(r.run_id)),
+            ),
         }
         items.append(item)
         heatmap_entries.append(
@@ -1175,6 +1212,35 @@ def get_analysis_run(
         raise HTTPException(status_code=403, detail="Access denied")
 
     raw = db.query(AnalysisResultRaw).filter_by(run_id=run_id).first()
+    sibling_runs = (
+        db.query(AnalysisRun)
+        .filter_by(player_id=run.player_id)
+        .order_by(AnalysisRun.created_at.desc())
+        .all()
+    )
+    sibling_run_ids = [item.run_id for item in sibling_runs]
+    sibling_raw_by_run_id: Dict[Any, AnalysisResultRaw] = {}
+    if sibling_run_ids:
+        sibling_raw_rows = db.query(AnalysisResultRaw).filter(AnalysisResultRaw.run_id.in_(sibling_run_ids)).all()
+        sibling_raw_by_run_id = {row.run_id: row for row in sibling_raw_rows}
+    release_shape_by_run = enrich_release_shape_drift(
+        [
+            {
+                "run_id": str(item.run_id),
+                "result_json": (
+                    sibling_raw_by_run_id.get(item.run_id).result_json
+                    if sibling_raw_by_run_id.get(item.run_id)
+                    else None
+                ),
+                "trusted": _analysis_is_baseline_eligible(
+                    sibling_raw_by_run_id.get(item.run_id).result_json
+                    if sibling_raw_by_run_id.get(item.run_id)
+                    else None
+                ),
+            }
+            for item in sibling_runs
+        ]
+    )
 
     return {
         "run_id": str(run.run_id),
@@ -1185,5 +1251,9 @@ def get_analysis_run(
         "schema_version": run.schema_version,
         "coach_notes": run.coach_notes,
         "visual_walkthrough": _extract_visual_walkthrough(raw.result_json if raw else None),
+        "release_shape": _extract_release_shape_with_drift(
+            raw.result_json if raw else None,
+            release_shape_by_run.get(str(run.run_id)),
+        ),
         "result": raw.result_json if raw else None,
     }

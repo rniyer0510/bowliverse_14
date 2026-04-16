@@ -5,7 +5,15 @@ import unittest
 import cv2
 import numpy as np
 
-from app.workers.render.coach_video_renderer import render_skeleton_video, _summary_issue_lines
+from app.workers.render.coach_video_renderer import (
+    _load_hotspot_regions,
+    _preferred_ffc_cue_risk_id,
+    _release_hotspot_risk_id,
+    _summary_issue_lines,
+    _summary_load_watch_text,
+    _summary_symptom_text,
+    render_skeleton_video,
+)
 
 
 def _blank_landmarks():
@@ -182,6 +190,195 @@ class CoachVideoRendererTest(unittest.TestCase):
 
         self.assertEqual(lines[0], "Keep watching Upper Body Opening")
         self.assertIn("Body stays fairly tall", lines)
+
+    def test_summary_symptom_prefers_story_watch_focus_for_positive_theme(self):
+        symptom = _summary_symptom_text(
+            {},
+            report_story={
+                "theme": "working_pattern",
+                "watch_focus": {
+                    "key": "trunk_lean",
+                    "label": "Trunk Lean",
+                },
+            },
+        )
+
+        self.assertEqual(symptom, "Keep watching Trunk Lean")
+
+    def test_summary_load_watch_maps_primary_story_risk(self):
+        load_watch = _summary_load_watch_text(
+            {
+                "lateral_trunk_lean": {
+                    "risk_id": "lateral_trunk_lean",
+                    "signal_strength": 0.8,
+                    "confidence": 0.9,
+                }
+            },
+            events={
+                "release": {"frame": 15, "confidence": 0.9},
+            },
+            report_story={
+                "theme": "balance",
+                "hero_risk_id": "lateral_trunk_lean",
+            },
+        )
+
+        self.assertEqual(load_watch, "Lower back / side trunk")
+
+    def test_summary_load_watch_adds_secondary_distinct_body_region(self):
+        load_watch = _summary_load_watch_text(
+            {
+                "knee_brace_failure": {
+                    "risk_id": "knee_brace_failure",
+                    "signal_strength": 1.0,
+                    "confidence": 0.85,
+                },
+                "trunk_rotation_snap": {
+                    "risk_id": "trunk_rotation_snap",
+                    "signal_strength": 1.0,
+                    "confidence": 0.85,
+                },
+                "lateral_trunk_lean": {
+                    "risk_id": "lateral_trunk_lean",
+                    "signal_strength": 1.0,
+                    "confidence": 0.85,
+                },
+            },
+            events={
+                "ffc": {"frame": 10, "confidence": 0.62},
+                "release": {"frame": 15, "confidence": 0.75},
+                "event_chain": {"quality": 0.48},
+            },
+            report_story={
+                "theme": "base_balance",
+                "hero_risk_id": "knee_brace_failure",
+                "watch_focus": {
+                    "key": "front_leg_support",
+                    "label": "Front-Leg Support",
+                },
+            },
+        )
+
+        self.assertEqual(
+            load_watch,
+            "Front knee / leg chain\nLower back / side trunk",
+        )
+
+    def test_summary_ignores_ffc_story_when_landing_anchor_is_untrusted(self):
+        symptom = _summary_symptom_text(
+            {
+                "knee_brace_failure": {
+                    "risk_id": "knee_brace_failure",
+                    "signal_strength": 0.9,
+                    "confidence": 0.9,
+                },
+                "lateral_trunk_lean": {
+                    "risk_id": "lateral_trunk_lean",
+                    "signal_strength": 0.7,
+                    "confidence": 0.85,
+                },
+            },
+            events={
+                "ffc": {"frame": 10, "confidence": 0.12},
+                "release": {"frame": 15, "confidence": 0.9},
+                "event_chain": {"quality": 0.08},
+            },
+            report_story={
+                "theme": "balance",
+                "hero_risk_id": "knee_brace_failure",
+            },
+        )
+
+        self.assertEqual(symptom, "Body falls away at release")
+
+    def test_summary_symptom_uses_sequence_specific_language(self):
+        symptom = _summary_symptom_text(
+            {
+                "hip_shoulder_mismatch": {
+                    "risk_id": "hip_shoulder_mismatch",
+                    "signal_strength": 0.7,
+                    "confidence": 0.8,
+                    "debug": {"sequence_pattern": "shoulders_lead"},
+                }
+            }
+        )
+
+        self.assertEqual(symptom, "Shoulders start too soon")
+
+    def test_release_hotspot_follows_release_story_not_overall_hero_risk(self):
+        risk_by_id = {
+            "knee_brace_failure": {
+                "risk_id": "knee_brace_failure",
+                "signal_strength": 0.9,
+                "confidence": 0.9,
+            },
+            "lateral_trunk_lean": {
+                "risk_id": "lateral_trunk_lean",
+                "signal_strength": 0.8,
+                "confidence": 0.85,
+            },
+        }
+
+        hotspot_risk_id = _release_hotspot_risk_id(
+            risk_by_id,
+            events={
+                "release": {"frame": 15, "confidence": 0.9},
+            },
+            report_story={
+                "theme": "base_balance",
+                "hero_risk_id": "knee_brace_failure",
+                "watch_focus": {
+                    "key": "trunk_lean",
+                    "label": "Trunk Lean",
+                },
+            },
+        )
+
+        self.assertEqual(hotspot_risk_id, "lateral_trunk_lean")
+
+    def test_ffc_cue_prefers_single_strongest_supported_risk(self):
+        cue_risk_id = _preferred_ffc_cue_risk_id(
+            {
+                "knee_brace_failure": {
+                    "risk_id": "knee_brace_failure",
+                    "signal_strength": 0.52,
+                    "confidence": 0.72,
+                },
+                "foot_line_deviation": {
+                    "risk_id": "foot_line_deviation",
+                    "signal_strength": 0.81,
+                    "confidence": 0.91,
+                },
+            },
+            report_story=None,
+            events={
+                "ffc": {"frame": 10, "confidence": 0.9},
+                "event_chain": {"quality": 0.9},
+            },
+        )
+
+        self.assertEqual(cue_risk_id, "foot_line_deviation")
+
+    def test_load_hotspot_regions_expose_biomechanical_region_keys(self):
+        tracks = {
+            23: {"raw": [None, None, (90, 60)]},
+            25: {"raw": [None, None, (92, 96)]},
+            27: {"raw": [None, None, (95, 138)]},
+        }
+
+        regions = _load_hotspot_regions(
+            tracks=tracks,
+            frame_idx=2,
+            hand="R",
+            risk_id="knee_brace_failure",
+        )
+
+        self.assertTrue(regions)
+        region_keys = [str(region.get("region_key") or "") for region in regions]
+        self.assertIn("groin", region_keys)
+        self.assertIn("knee", region_keys)
+        self.assertIn("shin", region_keys)
+        self.assertTrue(all("label_offset" in region for region in regions))
 
 
 if __name__ == "__main__":
