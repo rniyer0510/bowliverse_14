@@ -103,6 +103,10 @@ FFC_DEPENDENT_RISKS = {
 
 MIN_FFC_STORY_CONFIDENCE = 0.35
 MIN_EVENT_CHAIN_QUALITY = 0.20
+MIN_RENDER_ELIGIBILITY_FRAMES = 3
+BEHIND_VIEW_RATIO_THRESHOLD = 0.32
+BEHIND_VIEW_ASYMMETRY_THRESHOLD = 0.10
+BEHIND_VIEW_SUPPORT_RATIO = 0.60
 
 
 def _safe_float(value: Any) -> Optional[float]:
@@ -441,6 +445,15 @@ def _track_point(
     return None
 
 
+def _core_torso_visible(tracks: Dict[int, Dict[str, Any]], frame_idx: int) -> bool:
+    resolved = sum(
+        1
+        for joint_idx in (LEFT_SHOULDER, RIGHT_SHOULDER, LEFT_HIP, RIGHT_HIP)
+        if _track_point(tracks, joint_idx, frame_idx) is not None
+    )
+    return resolved >= 2
+
+
 def _frame_point(
     pose_frames: List[Dict[str, Any]],
     *,
@@ -455,6 +468,76 @@ def _frame_point(
     if point is None:
         return None
     return (int(round(point[0])), int(round(point[1])))
+
+
+def _render_support_window(pose_frames: List[Dict[str, Any]], events: Optional[Dict[str, Any]]) -> List[int]:
+    total_frames = len(pose_frames)
+    if total_frames <= 0:
+        return []
+    bfc_frame = _safe_int(((events or {}).get("bfc") or {}).get("frame"))
+    ffc_frame = _safe_int(((events or {}).get("ffc") or {}).get("frame"))
+    release_frame = _safe_int(((events or {}).get("release") or {}).get("frame"))
+    candidates = [frame for frame in (bfc_frame, ffc_frame, release_frame) if frame is not None]
+    if not candidates:
+        return []
+    start = max(0, min(candidates))
+    stop = min(total_frames, max(candidates) + 1)
+    return list(range(start, stop))
+
+
+def assess_walkthrough_render_support(
+    *,
+    pose_frames: List[Dict[str, Any]],
+    events: Optional[Dict[str, Any]],
+    width: int,
+    height: int,
+) -> Dict[str, Any]:
+    window = _render_support_window(pose_frames, events)
+    if not window:
+        return {"supported": True, "reason": "insufficient_window"}
+
+    behind_votes = 0
+    eligible_frames = 0
+    for frame_idx in window:
+        left_shoulder = _frame_point(pose_frames, frame_idx=frame_idx, joint_idx=LEFT_SHOULDER, width=width, height=height)
+        right_shoulder = _frame_point(pose_frames, frame_idx=frame_idx, joint_idx=RIGHT_SHOULDER, width=width, height=height)
+        left_hip = _frame_point(pose_frames, frame_idx=frame_idx, joint_idx=LEFT_HIP, width=width, height=height)
+        right_hip = _frame_point(pose_frames, frame_idx=frame_idx, joint_idx=RIGHT_HIP, width=width, height=height)
+        if not (left_shoulder and right_shoulder and left_hip and right_hip):
+            continue
+
+        shoulder_width = abs(right_shoulder[0] - left_shoulder[0])
+        hip_width = abs(right_hip[0] - left_hip[0])
+        torso_height = max(
+            abs(((left_shoulder[1] + right_shoulder[1]) / 2.0) - ((left_hip[1] + right_hip[1]) / 2.0)),
+            1.0,
+        )
+        shoulder_center_x = (left_shoulder[0] + right_shoulder[0]) / 2.0
+        hip_center_x = (left_hip[0] + right_hip[0]) / 2.0
+        asymmetry = abs(shoulder_center_x - hip_center_x) / torso_height
+        width_ratio = max(shoulder_width, hip_width) / torso_height
+
+        eligible_frames += 1
+        if width_ratio >= BEHIND_VIEW_RATIO_THRESHOLD and asymmetry <= BEHIND_VIEW_ASYMMETRY_THRESHOLD:
+            behind_votes += 1
+
+    if eligible_frames < MIN_RENDER_ELIGIBILITY_FRAMES:
+        return {"supported": True, "reason": "insufficient_geometry", "eligible_frames": eligible_frames}
+
+    if (behind_votes / float(eligible_frames)) >= BEHIND_VIEW_SUPPORT_RATIO:
+        return {
+            "supported": False,
+            "reason": "unsupported_camera_angle",
+            "eligible_frames": eligible_frames,
+            "behind_votes": behind_votes,
+        }
+
+    return {
+        "supported": True,
+        "reason": "supported_camera_angle",
+        "eligible_frames": eligible_frames,
+        "behind_votes": behind_votes,
+    }
 
 
 def _draw_joint(frame: np.ndarray, point: Tuple[int, int], scale: int) -> None:
@@ -551,31 +634,13 @@ def _draw_phase_rail(frame: np.ndarray, *, phase_idx: int, progress: float) -> N
         active = idx == phase_idx
         fill = ACTIVE_FILL if active else INACTIVE_FILL
         edge = ACTIVE_EDGE if active else PANEL_EDGE
-        _overlay_panel(
-            frame,
-            x0=seg_x0,
-            y0=rail_y0,
-            x1=seg_x1,
-            y1=rail_y0 + rail_h,
-            fill_color=fill,
-            edge_color=edge,
-            alpha=0.88 if active else 0.72,
-        )
+        _overlay_panel(frame, x0=seg_x0, y0=rail_y0, x1=seg_x1, y1=rail_y0 + rail_h, fill_color=fill, edge_color=edge, alpha=0.88 if active else 0.72)
         label = phase["title"].replace(" Contact", "")
         text_scale = max(0.38, min(width, height) / 1800.0)
         text_size, _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, text_scale, 1)
         text_x = seg_x0 + max(10, (segment_w - text_size[0]) // 2)
         text_y = rail_y0 + int(rail_h * 0.63)
-        cv2.putText(
-            frame,
-            label,
-            (text_x, text_y),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            text_scale,
-            TEXT_COLOR if active else MUTED_TEXT,
-            1,
-            cv2.LINE_AA,
-        )
+        cv2.putText(frame, label, (text_x, text_y), cv2.FONT_HERSHEY_SIMPLEX, text_scale, TEXT_COLOR if active else MUTED_TEXT, 1, cv2.LINE_AA)
 
     tracker_x = rail_x0 + int(round((rail_x1 - rail_x0) * max(0.0, min(1.0, progress))))
     tracker_y0 = rail_y0 - int(round(height * 0.012))
@@ -590,14 +655,7 @@ def _draw_phase_overlay(frame: np.ndarray, *, frame_idx: int, start: int, stop: 
     _draw_phase_rail(frame, phase_idx=phase_idx, progress=progress)
 
 
-def _draw_top_risk_panel(
-    frame: np.ndarray,
-    *,
-    title: str,
-    headline: str,
-    body: str,
-    accent: Tuple[int, int, int],
-) -> None:
+def _draw_top_risk_panel(frame: np.ndarray, *, title: str, headline: str, body: str, accent: Tuple[int, int, int]) -> None:
     width = frame.shape[1]
     height = frame.shape[0]
     card_w = int(round(width * 0.58))
@@ -606,16 +664,7 @@ def _draw_top_risk_panel(
     y0 = int(round(height * 0.05))
     x1 = min(width - 18, x0 + card_w)
     y1 = y0 + card_h
-    _overlay_panel(
-        frame,
-        x0=x0,
-        y0=y0,
-        x1=x1,
-        y1=y1,
-        fill_color=PANEL_BG,
-        edge_color=accent,
-        alpha=0.84,
-    )
+    _overlay_panel(frame, x0=x0, y0=y0, x1=x1, y1=y1, fill_color=PANEL_BG, edge_color=accent, alpha=0.84)
     cv2.putText(frame, title, (x0 + 18, y0 + int(card_h * 0.28)), cv2.FONT_HERSHEY_SIMPLEX, max(0.44, min(width, height) / 1400.0), accent, 1, cv2.LINE_AA)
     cv2.putText(frame, headline, (x0 + 18, y0 + int(card_h * 0.58)), cv2.FONT_HERSHEY_SIMPLEX, max(0.58, min(width, height) / 1100.0), TEXT_COLOR, 2, cv2.LINE_AA)
     cv2.putText(frame, body, (x0 + 18, y0 + int(card_h * 0.84)), cv2.FONT_HERSHEY_SIMPLEX, max(0.38, min(width, height) / 1550.0), MUTED_TEXT, 1, cv2.LINE_AA)
@@ -636,23 +685,19 @@ def _draw_front_leg_support_callout(frame: np.ndarray, *, tracks: Dict[int, Dict
     caption = _front_leg_support_caption(risk)
     if not caption:
         return
-
     hip_idx, knee_idx, ankle_idx = _front_leg_joints(hand)
     hip = _track_point(tracks, hip_idx, frame_idx)
     knee = _track_point(tracks, knee_idx, frame_idx)
     ankle = _track_point(tracks, ankle_idx, frame_idx)
     if knee is None:
         return
-
     scale = min(frame.shape[0], frame.shape[1])
     signal = float((risk or {}).get("signal_strength") or 0.0)
     accent = (90, 220, 255) if signal < 0.35 else ((0, 196, 255) if signal < 0.65 else (0, 126, 255))
     radius = max(16, scale // 14)
     thickness = max(3, scale // 160)
-
     cv2.circle(frame, knee, radius + 4, SKELETON_SHADOW, thickness + 2, cv2.LINE_AA)
     cv2.circle(frame, knee, radius, accent, thickness, cv2.LINE_AA)
-
     if hip is not None and ankle is not None:
         direction = (ankle[0] - hip[0], ankle[1] - hip[1])
         arrow_start = (int(round(knee[0] + direction[0] * 0.10)), int(round(knee[1] - radius * 1.25)))
@@ -660,7 +705,6 @@ def _draw_front_leg_support_callout(frame: np.ndarray, *, tracks: Dict[int, Dict
     else:
         arrow_start = (knee[0], knee[1] - int(radius * 1.6))
         arrow_end = (knee[0], knee[1] + int(radius * 1.4))
-
     cv2.arrowedLine(frame, arrow_start, arrow_end, accent, thickness, cv2.LINE_AA, tipLength=0.16)
     _draw_top_risk_panel(frame, title=RISK_TITLE_BY_ID["knee_brace_failure"], headline=caption["title"], body=caption["body"], accent=accent)
 
@@ -686,7 +730,6 @@ def _draw_trunk_lean_callout(frame: np.ndarray, *, tracks: Dict[int, Dict[str, A
     right_hip = _track_point(tracks, RIGHT_HIP, frame_idx)
     if not (left_shoulder and right_shoulder and left_hip and right_hip):
         return
-
     shoulder_mid = ((left_shoulder[0] + right_shoulder[0]) // 2, (left_shoulder[1] + right_shoulder[1]) // 2)
     hip_mid = ((left_hip[0] + right_hip[0]) // 2, (left_hip[1] + right_hip[1]) // 2)
     dx = shoulder_mid[0] - hip_mid[0]
@@ -695,14 +738,12 @@ def _draw_trunk_lean_callout(frame: np.ndarray, *, tracks: Dict[int, Dict[str, A
     scale = min(frame.shape[0], frame.shape[1])
     thickness = max(3, scale // 160)
     offset_x = int(round(scale * 0.04))
-
     cv2.line(frame, hip_mid, shoulder_mid, accent, thickness, cv2.LINE_AA)
     arrow_dir = 1 if dx >= 0 else -1
     arrow_start = (shoulder_mid[0], shoulder_mid[1] - int(scale * 0.02))
     arrow_end = (shoulder_mid[0] + arrow_dir * offset_x, shoulder_mid[1] - int(scale * 0.08))
     cv2.arrowedLine(frame, arrow_start, arrow_end, accent, thickness, cv2.LINE_AA, tipLength=0.18)
     cv2.circle(frame, shoulder_mid, max(12, scale // 18), accent, thickness, cv2.LINE_AA)
-
     _draw_top_risk_panel(frame, title=RISK_TITLE_BY_ID["lateral_trunk_lean"], headline=caption["title"], body=caption["body"], accent=accent)
 
 
@@ -735,18 +776,15 @@ def _draw_hip_shoulder_callout(frame: np.ndarray, *, tracks: Dict[int, Dict[str,
     right_hip = _track_point(tracks, RIGHT_HIP, frame_idx)
     if not (left_shoulder and right_shoulder and left_hip and right_hip):
         return
-
     shoulder_mid = ((left_shoulder[0] + right_shoulder[0]) // 2, (left_shoulder[1] + right_shoulder[1]) // 2)
     hip_mid = ((left_hip[0] + right_hip[0]) // 2, (left_hip[1] + right_hip[1]) // 2)
     signal = float((risk or {}).get("signal_strength") or 0.0)
     accent = (90, 220, 255) if signal < 0.45 else (0, 196, 255)
     scale = min(frame.shape[0], frame.shape[1])
     thickness = max(3, scale // 170)
-
     cv2.line(frame, left_shoulder, right_shoulder, accent, thickness, cv2.LINE_AA)
     cv2.line(frame, left_hip, right_hip, accent, thickness, cv2.LINE_AA)
     cv2.line(frame, hip_mid, shoulder_mid, accent, max(2, thickness - 1), cv2.LINE_AA)
-
     debug = (risk or {}).get("debug") or {}
     sequence_pattern = str(debug.get("sequence_pattern") or "").lower()
     arrow_dx = int(round(scale * 0.05))
@@ -754,19 +792,10 @@ def _draw_hip_shoulder_callout(frame: np.ndarray, *, tracks: Dict[int, Dict[str,
         cv2.arrowedLine(frame, (shoulder_mid[0] - arrow_dx, shoulder_mid[1] - arrow_dx), (shoulder_mid[0] + arrow_dx, shoulder_mid[1] - arrow_dx), accent, thickness, cv2.LINE_AA, tipLength=0.18)
     elif sequence_pattern == "hips_lead":
         cv2.arrowedLine(frame, (hip_mid[0] - arrow_dx, hip_mid[1] + arrow_dx), (hip_mid[0] + arrow_dx, hip_mid[1] + arrow_dx), accent, thickness, cv2.LINE_AA, tipLength=0.18)
-
     _draw_top_risk_panel(frame, title=RISK_TITLE_BY_ID["hip_shoulder_mismatch"], headline=caption["title"], body=caption["body"], accent=accent)
 
 
-def _draw_release_callout(
-    frame: np.ndarray,
-    *,
-    tracks: Dict[int, Dict[str, Any]],
-    frame_idx: int,
-    risk_by_id: Dict[str, Dict[str, Any]],
-    report_story: Optional[Dict[str, Any]] = None,
-    events: Optional[Dict[str, Any]] = None,
-) -> None:
+def _draw_release_callout(frame: np.ndarray, *, tracks: Dict[int, Dict[str, Any]], frame_idx: int, risk_by_id: Dict[str, Dict[str, Any]], report_story: Optional[Dict[str, Any]] = None, events: Optional[Dict[str, Any]] = None) -> None:
     preferred_risk_id = _story_risk_for_phase(report_story, phase_key="release", events=events)
     if preferred_risk_id == "hip_shoulder_mismatch":
         _draw_hip_shoulder_callout(frame, tracks=tracks, frame_idx=frame_idx, risk=risk_by_id.get("hip_shoulder_mismatch"))
@@ -776,7 +805,6 @@ def _draw_release_callout(
         return
     if isinstance(report_story, dict) and str(report_story.get("theme") or "") in {"working_pattern", "good_base"}:
         return
-
     hip_shoulder = risk_by_id.get("hip_shoulder_mismatch")
     trunk_lean = risk_by_id.get("lateral_trunk_lean")
     if _risk_weight(hip_shoulder) >= max(0.20, _risk_weight(trunk_lean) + 0.03):
@@ -793,8 +821,6 @@ def _draw_speed_chip(frame: np.ndarray, *, speed: Optional[Dict[str, Any]]) -> N
     height = frame.shape[0]
     low_conf = str(speed.get("display_policy") or "") == "show_low_confidence"
     accent = (110, 210, 255) if low_conf else (70, 225, 140)
-    title = "Ball Speed"
-    value = display
     card_w = int(round(width * 0.28))
     card_h = int(round(height * 0.10))
     x1 = int(round(width * 0.95))
@@ -802,8 +828,8 @@ def _draw_speed_chip(frame: np.ndarray, *, speed: Optional[Dict[str, Any]]) -> N
     y0 = int(round(height * 0.05))
     y1 = y0 + card_h
     _overlay_panel(frame, x0=x0, y0=y0, x1=x1, y1=y1, fill_color=PANEL_BG, edge_color=accent, alpha=0.84)
-    cv2.putText(frame, title, (x0 + 16, y0 + int(card_h * 0.34)), cv2.FONT_HERSHEY_SIMPLEX, max(0.40, min(width, height) / 1500.0), accent, 1, cv2.LINE_AA)
-    cv2.putText(frame, value, (x0 + 16, y0 + int(card_h * 0.72)), cv2.FONT_HERSHEY_SIMPLEX, max(0.58, min(width, height) / 1100.0), TEXT_COLOR, 2, cv2.LINE_AA)
+    cv2.putText(frame, "Ball Speed", (x0 + 16, y0 + int(card_h * 0.34)), cv2.FONT_HERSHEY_SIMPLEX, max(0.40, min(width, height) / 1500.0), accent, 1, cv2.LINE_AA)
+    cv2.putText(frame, display, (x0 + 16, y0 + int(card_h * 0.72)), cv2.FONT_HERSHEY_SIMPLEX, max(0.58, min(width, height) / 1100.0), TEXT_COLOR, 2, cv2.LINE_AA)
 
 
 def _draw_action_chip(frame: np.ndarray, *, action: Optional[Dict[str, Any]], below_speed: bool = False) -> None:
@@ -813,7 +839,6 @@ def _draw_action_chip(frame: np.ndarray, *, action: Optional[Dict[str, Any]], be
     width = frame.shape[1]
     height = frame.shape[0]
     accent = (130, 214, 255)
-    title = "Action Type"
     card_w = int(round(width * 0.28))
     card_h = int(round(height * 0.10))
     x1 = int(round(width * 0.95))
@@ -824,7 +849,7 @@ def _draw_action_chip(frame: np.ndarray, *, action: Optional[Dict[str, Any]], be
     y0 = base_y
     y1 = y0 + card_h
     _overlay_panel(frame, x0=x0, y0=y0, x1=x1, y1=y1, fill_color=PANEL_BG, edge_color=accent, alpha=0.84)
-    cv2.putText(frame, title, (x0 + 16, y0 + int(card_h * 0.34)), cv2.FONT_HERSHEY_SIMPLEX, max(0.40, min(width, height) / 1500.0), accent, 1, cv2.LINE_AA)
+    cv2.putText(frame, "Action Type", (x0 + 16, y0 + int(card_h * 0.34)), cv2.FONT_HERSHEY_SIMPLEX, max(0.40, min(width, height) / 1500.0), accent, 1, cv2.LINE_AA)
     cv2.putText(frame, label, (x0 + 16, y0 + int(card_h * 0.72)), cv2.FONT_HERSHEY_SIMPLEX, max(0.56, min(width, height) / 1120.0), TEXT_COLOR, 2, cv2.LINE_AA)
 
 
@@ -834,7 +859,6 @@ def _draw_legality_chip(frame: np.ndarray, *, elbow: Optional[Dict[str, Any]], s
         return
     width = frame.shape[1]
     height = frame.shape[0]
-    title = "Legality"
     if verdict == "LEGAL":
         value = "Legal"
         accent = (70, 225, 140)
@@ -851,26 +875,19 @@ def _draw_legality_chip(frame: np.ndarray, *, elbow: Optional[Dict[str, Any]], s
     y0 = int(round(height * 0.05)) + stack_index * (card_h + int(round(height * 0.015)))
     y1 = y0 + card_h
     _overlay_panel(frame, x0=x0, y0=y0, x1=x1, y1=y1, fill_color=PANEL_BG, edge_color=accent, alpha=0.84)
-    cv2.putText(frame, title, (x0 + 16, y0 + int(card_h * 0.34)), cv2.FONT_HERSHEY_SIMPLEX, max(0.40, min(width, height) / 1500.0), accent, 1, cv2.LINE_AA)
+    cv2.putText(frame, "Legality", (x0 + 16, y0 + int(card_h * 0.34)), cv2.FONT_HERSHEY_SIMPLEX, max(0.40, min(width, height) / 1500.0), accent, 1, cv2.LINE_AA)
     cv2.putText(frame, value, (x0 + 16, y0 + int(card_h * 0.72)), cv2.FONT_HERSHEY_SIMPLEX, max(0.56, min(width, height) / 1120.0), TEXT_COLOR, 2, cv2.LINE_AA)
 
 
-def _summary_issue_lines(
-    risk_by_id: Dict[str, Dict[str, Any]],
-    *,
-    events: Optional[Dict[str, Any]] = None,
-    report_story: Optional[Dict[str, Any]] = None,
-) -> List[str]:
+def _summary_issue_lines(risk_by_id: Dict[str, Dict[str, Any]], *, events: Optional[Dict[str, Any]] = None, report_story: Optional[Dict[str, Any]] = None) -> List[str]:
     positive_lines = _positive_recap_lines(report_story)
     if positive_lines:
         return positive_lines
-
     story_labels = _story_feature_labels(report_story)
     if story_labels:
         filtered = [label for label in story_labels if label != "Front-Leg Support" or _supports_ffc_story(events)]
         if filtered:
             return filtered[:4]
-
     ranked: List[Tuple[float, str]] = []
     allow_ffc_stories = _supports_ffc_story(events)
     for risk_id, risk in (risk_by_id or {}).items():
@@ -894,20 +911,10 @@ def _summary_issue_lines(
     return deduped
 
 
-def _draw_end_summary(
-    frame: np.ndarray,
-    *,
-    risk_by_id: Dict[str, Dict[str, Any]],
-    events: Optional[Dict[str, Any]],
-    action: Optional[Dict[str, Any]],
-    speed: Optional[Dict[str, Any]],
-    elbow: Optional[Dict[str, Any]] = None,
-    report_story: Optional[Dict[str, Any]] = None,
-) -> None:
+def _draw_end_summary(frame: np.ndarray, *, risk_by_id: Dict[str, Dict[str, Any]], events: Optional[Dict[str, Any]], action: Optional[Dict[str, Any]], speed: Optional[Dict[str, Any]], elbow: Optional[Dict[str, Any]] = None, report_story: Optional[Dict[str, Any]] = None) -> None:
     overlay = frame.copy()
     cv2.rectangle(overlay, (0, 0), (frame.shape[1], frame.shape[0]), (18, 22, 28), -1)
     cv2.addWeighted(overlay, 0.22, frame, 0.78, 0.0, frame)
-
     width = frame.shape[1]
     height = frame.shape[0]
     card_w = int(round(width * 0.60))
@@ -917,24 +924,18 @@ def _draw_end_summary(
     x1 = x0 + card_w
     y1 = y0 + card_h
     _overlay_panel(frame, x0=x0, y0=y0, x1=x1, y1=y1, fill_color=PANEL_BG, edge_color=PANEL_EDGE, alpha=0.88)
-
     story_theme = str((report_story or {}).get("theme") or "")
     heading = "Action recap" if story_theme in {"working_pattern", "good_base"} else "What to watch"
     cv2.putText(frame, heading, (x0 + 18, y0 + int(card_h * 0.20)), cv2.FONT_HERSHEY_SIMPLEX, max(0.46, min(width, height) / 1450.0), MUTED_TEXT, 1, cv2.LINE_AA)
-
     issue_lines = _summary_issue_lines(risk_by_id, events=events, report_story=report_story)
     if not issue_lines:
-        if story_theme in {"working_pattern", "good_base"}:
-            issue_lines = ["Strong working pattern", "Keep repeating this shape"]
-        else:
-            issue_lines = ["No major issue flagged"]
+        issue_lines = ["Strong working pattern", "Keep repeating this shape"] if story_theme in {"working_pattern", "good_base"} else ["No major issue flagged"]
     start_y = y0 + int(card_h * 0.42)
     row_gap = int(card_h * 0.18)
     for idx, line in enumerate(issue_lines[:4]):
         row_y = start_y + idx * row_gap
         cv2.putText(frame, line, (x0 + 30, row_y), cv2.FONT_HERSHEY_SIMPLEX, max(0.44, min(width, height) / 1500.0), TEXT_COLOR, 1, cv2.LINE_AA)
         cv2.circle(frame, (x0 + 18, row_y - 4), max(3, min(width, height) // 220), ACTIVE_EDGE, -1, cv2.LINE_AA)
-
     speed_visible = _speed_display_text(speed) is not None
     action_visible = _format_action_label(action) is not None
     legality_stack = (1 if speed_visible else 0) + (1 if action_visible else 0)
@@ -943,15 +944,7 @@ def _draw_end_summary(
     _draw_legality_chip(frame, elbow=elbow, stack_index=legality_stack)
 
 
-def _draw_foot_line_overlay(
-    frame: np.ndarray,
-    *,
-    pose_frames: List[Dict[str, Any]],
-    frame_idx: int,
-    events: Optional[Dict[str, Any]],
-    hand: Optional[str],
-    risk: Optional[Dict[str, Any]],
-) -> None:
+def _draw_foot_line_overlay(frame: np.ndarray, *, pose_frames: List[Dict[str, Any]], frame_idx: int, events: Optional[Dict[str, Any]], hand: Optional[str], risk: Optional[Dict[str, Any]]) -> None:
     if not isinstance(risk, dict):
         return
     width = frame.shape[1]
@@ -963,7 +956,6 @@ def _draw_foot_line_overlay(
     front_heel = _frame_point(pose_frames, frame_idx=frame_idx, joint_idx=front_heel_idx, width=width, height=height)
     if not (back_toe and front_toe and front_heel):
         return
-
     signal = float(risk.get("signal_strength") or 0.0)
     accent = (120, 210, 255) if signal < 0.35 else ((0, 196, 255) if signal < 0.65 else (0, 126, 255))
     muted = (190, 202, 214)
@@ -971,7 +963,6 @@ def _draw_foot_line_overlay(
     dx = front_toe[0] - back_toe[0]
     dy = front_toe[1] - back_toe[1]
     line_end = (back_toe[0] + int(round(dx * 1.10)), back_toe[1] + int(round(dy * 1.10)))
-
     cv2.line(frame, back_toe, line_end, muted, thickness, cv2.LINE_AA)
     cv2.line(frame, front_heel, front_toe, accent, thickness + 1, cv2.LINE_AA)
     cv2.circle(frame, front_toe, max(8, min(width, height) // 40), accent, thickness + 1, cv2.LINE_AA)
@@ -1019,10 +1010,14 @@ def render_skeleton_video(
     width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH) or 0)
     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT) or 0)
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or len(pose_frames))
-
     if width <= 0 or height <= 0:
         cap.release()
         return {"available": False, "reason": "missing_video_geometry"}
+
+    render_support = assess_walkthrough_render_support(pose_frames=pose_frames, events=events, width=width, height=height)
+    if not render_support.get("supported", True):
+        cap.release()
+        return {"available": False, "reason": render_support.get("reason") or "unsupported_camera_angle", "render_support": render_support}
 
     start = max(0, int(start_frame))
     stop = min(total_frames, len(pose_frames), int(end_frame) if end_frame is not None else min(total_frames, len(pose_frames)))
@@ -1058,7 +1053,8 @@ def render_skeleton_video(
             ok, frame = cap.read()
             if not ok or frame is None:
                 break
-            _draw_skeleton(frame, tracks, frame_idx)
+            if _core_torso_visible(tracks, frame_idx):
+                _draw_skeleton(frame, tracks, frame_idx)
             _draw_phase_overlay(frame, frame_idx=frame_idx, start=start, stop=stop, events=events)
             final_summary_frame = frame.copy()
             writer.write(frame)
@@ -1124,13 +1120,7 @@ def render_skeleton_video(
         return {"available": False, "reason": "render_failed", "detail": str(exc)}
 
     final_path, encoding = _finalize_render_video(intermediate_path, out_path)
-
-    logger.info(
-        "[coach_video_renderer] Rendered skeleton video path=%s frames=%s fps=%.2f",
-        final_path,
-        frames_rendered,
-        fps,
-    )
+    logger.info("[coach_video_renderer] Rendered skeleton video path=%s frames=%s fps=%.2f", final_path, frames_rendered, fps)
     return {
         "available": True,
         "path": final_path,
@@ -1145,4 +1135,5 @@ def render_skeleton_video(
         "slow_motion_factor": round(float(slow_motion_factor or 1.0), 2),
         "end_summary_seconds": round(float(end_summary_seconds or 0.0), 2),
         "encoding": encoding,
+        "render_support": render_support,
     }
