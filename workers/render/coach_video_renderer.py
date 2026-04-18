@@ -1296,15 +1296,16 @@ def _draw_hotspot_marker(
     overlay = frame.copy()
     pulse = 0.5 - 0.5 * np.cos(float(pulse_phase) * np.pi * 2.0)
     pulse_weight = max(0.0, min(1.0, weight))
-    base = max(8, scale // 44)
-    ring = int(round(base * (1.6 + pulse_weight * 0.55 + pulse * 0.35)))
-    outer = int(round(ring * (1.45 + pulse * 0.25)))
-    halo_alpha = 0.16 + pulse * 0.10
-    cv2.circle(overlay, center, outer, HOTSPOT_SOFT, -1, cv2.LINE_AA)
-    cv2.circle(overlay, center, int(round(outer * 0.78)), HOTSPOT_RING, max(2, scale // 260), cv2.LINE_AA)
-    cv2.circle(overlay, center, int(round(ring * 0.62)), HOTSPOT_RING, max(2, scale // 260), cv2.LINE_AA)
+    base = max(7, scale // 50)
+    inner_ring = int(round(base * (1.7 + pulse_weight * 0.35)))
+    mid_ring = int(round(base * (2.45 + pulse_weight * 0.45 + pulse * 0.35)))
+    outer_ring = int(round(base * (3.15 + pulse_weight * 0.55 + pulse * 0.65)))
+    halo_alpha = 0.18 + pulse * 0.12 + pulse_weight * 0.05
+    cv2.circle(overlay, center, outer_ring, HOTSPOT_SOFT, -1, cv2.LINE_AA)
+    cv2.circle(overlay, center, mid_ring, HOTSPOT_RING, max(2, scale // 280), cv2.LINE_AA)
+    cv2.circle(overlay, center, inner_ring, HOTSPOT_RING, max(2, scale // 280), cv2.LINE_AA)
     cv2.circle(overlay, center, base, HOTSPOT_CORE, -1, cv2.LINE_AA)
-    cv2.addWeighted(overlay, halo_alpha, frame, 1.0 - halo_alpha, 0.0, frame)
+    cv2.addWeighted(overlay, min(0.42, halo_alpha), frame, 1.0 - min(0.42, halo_alpha), 0.0, frame)
 
 
 def _load_watch_support_text(load_watch_text: str) -> str:

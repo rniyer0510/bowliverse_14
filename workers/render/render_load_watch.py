@@ -26,6 +26,10 @@ def _risk_weight(risk: Optional[Dict[str, Any]]) -> float:
     return max(0.0, float(risk.get("signal_strength") or 0.0)) * max(0.0, float(risk.get("confidence") or 0.0))
 
 
+def _clamp01(value: float) -> float:
+    return max(0.0, min(1.0, float(value)))
+
+
 def _safe_int(value: Any) -> Optional[int]:
     try:
         return int(value)
@@ -201,9 +205,18 @@ def _load_hotspot_regions(*, tracks: Dict[int, Dict[str, Any]], frame_idx: int, 
         knee_brace = _risk_weight(risk_by_id.get("knee_brace_failure"))
         foot_line = _risk_weight(risk_by_id.get("foot_line_deviation"))
         braking = _risk_weight(risk_by_id.get("front_foot_braking_shock"))
-        groin_w = max(collapse * 0.9, foot_line, knee_brace * 0.55)
-        knee_w = max(knee_brace, collapse * 0.75, braking * 0.45)
-        shin_w = max(braking, foot_line * 0.55, knee_brace * 0.35)
+        if risk_id == "knee_brace_failure":
+            groin_w = _clamp01(max(collapse * 0.72, foot_line * 0.48, knee_brace * 0.42))
+            knee_w = _clamp01(max(knee_brace, collapse * 0.78, braking * 0.42))
+            shin_w = _clamp01(max(braking * 0.78, knee_brace * 0.46, foot_line * 0.26))
+        elif risk_id == "foot_line_deviation":
+            groin_w = _clamp01(max(foot_line, collapse * 0.82))
+            knee_w = _clamp01(max(foot_line * 0.62, collapse * 0.52, knee_brace * 0.28))
+            shin_w = _clamp01(max(foot_line * 0.34, braking * 0.22))
+        else:
+            groin_w = _clamp01(max(collapse * 0.38, foot_line * 0.28, braking * 0.16))
+            knee_w = _clamp01(max(braking * 0.62, knee_brace * 0.44))
+            shin_w = _clamp01(max(braking, knee_brace * 0.34, foot_line * 0.18))
         return [
             _region("groin", _mix(hip, knee, 0.28), groin_w, body_mid),
             _region("knee", knee, knee_w, body_mid),
@@ -219,8 +232,23 @@ def _load_hotspot_regions(*, tracks: Dict[int, Dict[str, Any]], frame_idx: int, 
         lean = _risk_weight(risk_by_id.get("lateral_trunk_lean"))
         mismatch = _risk_weight(risk_by_id.get("hip_shoulder_mismatch"))
         rotation = _risk_weight(risk_by_id.get("trunk_rotation_snap"))
-        side_w = max(lean, mismatch * 0.65, rotation * 0.35)
-        lumbar_w = max(rotation, mismatch * 0.75, lean * 0.5)
+        pattern = str((((risk_by_id.get("hip_shoulder_mismatch") or {}).get("debug")) or {}).get("sequence_pattern") or "").lower()
+        if risk_id == "lateral_trunk_lean":
+            side_w = _clamp01(max(lean, mismatch * 0.42, rotation * 0.18))
+            lumbar_w = _clamp01(max(lean * 0.42, rotation * 0.34, mismatch * 0.28))
+        elif risk_id == "trunk_rotation_snap":
+            side_w = _clamp01(max(rotation * 0.34, mismatch * 0.22, lean * 0.20))
+            lumbar_w = _clamp01(max(rotation, mismatch * 0.58, lean * 0.32))
+        else:
+            if pattern == "shoulders_lead":
+                side_w = _clamp01(max(mismatch, lean * 0.34))
+                lumbar_w = _clamp01(max(mismatch * 0.42, rotation * 0.38))
+            elif pattern == "hips_lead":
+                side_w = _clamp01(max(mismatch * 0.36, lean * 0.28))
+                lumbar_w = _clamp01(max(mismatch, rotation * 0.56))
+            else:
+                side_w = _clamp01(max(mismatch * 0.68, lean * 0.34))
+                lumbar_w = _clamp01(max(mismatch * 0.74, rotation * 0.44))
         return [
             _region("side_trunk", side_trunk, side_w, body_mid),
             _region("lumbar", lumbar, lumbar_w, body_mid),
