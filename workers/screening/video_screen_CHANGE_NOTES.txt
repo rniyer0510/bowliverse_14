@@ -1,0 +1,13 @@
+# Apply these edits to workers/screening/video_screen.py
+# 1) Tighten prominence thresholds
+PROMINENT_HEIGHT_RATIO = 0.85
+PROMINENT_AREA_RATIO = 0.70
+
+# 2) In assess_primary_subject, loosen frame threshold
+frame_threshold = (
+    1 if detector_frames < 4
+    else max(3, int(math.ceil(detector_frames * 0.40)))
+)
+
+# 3) In run_preanalysis_screen, move multiple_prominent_people from blocking_issues to warnings
+# and keep the detail as a soft warning rather than a rejection.

@@ -1,15 +1,26 @@
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import cv2
 import numpy as np
 
 from .render_constants import ACTIVE_EDGE, MUTED_TEXT, PANEL_BG, PANEL_EDGE, TEXT_COLOR
-from .render_helpers import _positive_recap_lines, _story_feature_labels, _supports_ffc_story, _risk_weight, _speed_display_text
+from .render_helpers import (
+    _foot_indices,
+    _format_action_label,
+    _positive_recap_lines,
+    _risk_weight,
+    _safe_int,
+    _speed_display_text,
+    _story_feature_labels,
+    _supports_ffc_story,
+)
 from .render_constants import FFC_DEPENDENT_RISKS, RISK_TITLE_BY_ID
 from .render_phase import _overlay_panel
 from .render_risk_callouts import _draw_action_chip, _draw_legality_chip, _draw_speed_chip
+from .render_tracks import _frame_point
+
 
 def _summary_issue_lines(
     risk_by_id: Dict[str, Dict[str, Any]],
@@ -127,6 +138,9 @@ def _draw_end_summary(
         cv2.circle(frame, (x0 + 18, row_y - 4), max(3, min(width, height) // 220), ACTIVE_EDGE, -1, cv2.LINE_AA)
 
     speed_visible = _speed_display_text(speed) is not None
+    action_visible = _format_action_label(action) is not None
+    legality_stack = (1 if speed_visible else 0) + (1 if action_visible else 0)
+
     _draw_speed_chip(frame, speed=speed)
     _draw_action_chip(
         frame,
@@ -136,7 +150,7 @@ def _draw_end_summary(
     _draw_legality_chip(
         frame,
         elbow=elbow,
-        stack_index=2 if speed_visible else 1,
+        stack_index=legality_stack,
     )
 
 
@@ -155,9 +169,27 @@ def _draw_foot_line_overlay(
     height = frame.shape[0]
     front_toe_idx, front_heel_idx, back_toe_idx = _foot_indices(hand)
     bfc_frame = _safe_int(((events or {}).get("bfc") or {}).get("frame"))
-    back_toe = _frame_point(pose_frames, frame_idx=bfc_frame if bfc_frame is not None else frame_idx, joint_idx=back_toe_idx, width=width, height=height)
-    front_toe = _frame_point(pose_frames, frame_idx=frame_idx, joint_idx=front_toe_idx, width=width, height=height)
-    front_heel = _frame_point(pose_frames, frame_idx=frame_idx, joint_idx=front_heel_idx, width=width, height=height)
+    back_toe = _frame_point(
+        pose_frames,
+        frame_idx=bfc_frame if bfc_frame is not None else frame_idx,
+        joint_idx=back_toe_idx,
+        width=width,
+        height=height,
+    )
+    front_toe = _frame_point(
+        pose_frames,
+        frame_idx=frame_idx,
+        joint_idx=front_toe_idx,
+        width=width,
+        height=height,
+    )
+    front_heel = _frame_point(
+        pose_frames,
+        frame_idx=frame_idx,
+        joint_idx=front_heel_idx,
+        width=width,
+        height=height,
+    )
     if not (back_toe and front_toe and front_heel):
         return
 
@@ -188,5 +220,3 @@ def _pause_anchor_frames(
         if start <= frame_value < stop:
             anchors[int(frame_value)] = key
     return dict(sorted(anchors.items()))
-
-
