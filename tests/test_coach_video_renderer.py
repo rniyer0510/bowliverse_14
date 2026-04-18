@@ -6,6 +6,11 @@ import cv2
 import numpy as np
 
 from app.workers.render.coach_video_renderer import render_skeleton_video, _summary_issue_lines
+from app.workers.render.render_load_watch import (
+    _load_hotspot_regions,
+    _summary_load_watch_text,
+    _summary_symptom_text,
+)
 
 
 def _blank_landmarks():
@@ -182,6 +187,81 @@ class CoachVideoRendererTest(unittest.TestCase):
 
         self.assertEqual(lines[0], "Keep watching Upper Body Opening")
         self.assertIn("Body stays fairly tall", lines)
+
+    def test_summary_load_watch_uses_distinct_body_families(self):
+        text = _summary_load_watch_text(
+            {
+                "knee_brace_failure": {
+                    "risk_id": "knee_brace_failure",
+                    "signal_strength": 0.9,
+                    "confidence": 0.9,
+                },
+                "lateral_trunk_lean": {
+                    "risk_id": "lateral_trunk_lean",
+                    "signal_strength": 0.8,
+                    "confidence": 0.9,
+                },
+            },
+            events={
+                "ffc": {"frame": 2, "confidence": 0.9},
+                "event_chain": {"quality": 0.9},
+            },
+        )
+
+        self.assertEqual(text, "Front knee / leg chain\nLower back / side trunk")
+
+    def test_summary_symptom_prefers_release_story_when_present(self):
+        text = _summary_symptom_text(
+            {
+                "lateral_trunk_lean": {
+                    "risk_id": "lateral_trunk_lean",
+                    "signal_strength": 0.9,
+                    "confidence": 0.9,
+                }
+            },
+            report_story={"hero_risk_id": "lateral_trunk_lean"},
+            events={"release": {"frame": 4, "confidence": 0.9}},
+        )
+
+        self.assertEqual(text, "Body falls away at release")
+
+    def test_load_hotspot_regions_include_leg_and_trunk_targets(self):
+        pose_frames = [_pose_frame(i, shift=0.01 * i) for i in range(5)]
+        tracks = {
+            joint_idx: {"raw": [None] * len(pose_frames)}
+            for joint_idx in (11, 12, 23, 24, 25, 26, 27, 28)
+        }
+        width = 160
+        height = 120
+        for frame_idx, pose_frame in enumerate(pose_frames):
+            for joint_idx in tracks:
+                point = pose_frame["landmarks"][joint_idx]
+                tracks[joint_idx]["raw"][frame_idx] = (
+                    int(round(point["x"] * width)),
+                    int(round(point["y"] * height)),
+                )
+
+        leg_regions = _load_hotspot_regions(
+            tracks=tracks,
+            frame_idx=2,
+            hand="R",
+            risk_id="knee_brace_failure",
+        )
+        trunk_regions = _load_hotspot_regions(
+            tracks=tracks,
+            frame_idx=2,
+            hand="R",
+            risk_id="lateral_trunk_lean",
+        )
+
+        self.assertEqual(
+            [region["region_key"] for region in leg_regions],
+            ["groin", "knee", "shin"],
+        )
+        self.assertEqual(
+            [region["region_key"] for region in trunk_regions],
+            ["side_trunk", "lumbar"],
+        )
 
 
 if __name__ == "__main__":
