@@ -12,18 +12,19 @@ import numpy as np
 from scipy.ndimage import gaussian_filter1d
 
 from app.common.logger import get_logger
+from .render_storage import get_render_dir
+from .render_load_watch import (
+    _load_hotspot_regions,
+    _load_watch_label,
+    _preferred_ffc_cue_risk_id,
+    _release_hotspot_risk_id,
+    _summary_load_watch_text,
+    _summary_symptom_text,
+)
 
 logger = get_logger(__name__)
 
-DEFAULT_RENDER_DIR = os.path.abspath(
-    os.path.join(os.path.dirname(__file__), "..", "..", "storage", "renders")
-)
-RENDER_DIR = os.getenv("ACTIONLAB_RENDER_DIR", DEFAULT_RENDER_DIR)
-try:
-    os.makedirs(RENDER_DIR, exist_ok=True)
-except OSError:
-    RENDER_DIR = "/tmp/actionlab_renders"
-    os.makedirs(RENDER_DIR, exist_ok=True)
+RENDER_DIR = get_render_dir()
 
 MIN_VISIBILITY = 0.35
 SKELETON_COLOR = (240, 225, 70)
@@ -36,6 +37,9 @@ PANEL_EDGE = (62, 73, 88)
 ACTIVE_FILL = (74, 194, 242)
 ACTIVE_EDGE = (105, 222, 255)
 INACTIVE_FILL = (44, 52, 62)
+HOTSPOT_CORE = (48, 58, 235)
+HOTSPOT_RING = (0, 132, 255)
+HOTSPOT_SOFT = (90, 190, 255)
 
 LEFT_SHOULDER = 11
 RIGHT_SHOULDER = 12
@@ -1201,74 +1205,43 @@ def _draw_end_summary(
 
     width = frame.shape[1]
     height = frame.shape[0]
-    card_w = int(round(width * 0.60))
-    card_h = int(round(height * 0.24))
-    x0 = int(round(width * 0.05))
-    y0 = int(round(height * 0.08))
-    x1 = x0 + card_w
-    y1 = y0 + card_h
-    _overlay_panel(
-        frame,
-        x0=x0,
-        y0=y0,
-        x1=x1,
-        y1=y1,
-        fill_color=PANEL_BG,
-        edge_color=PANEL_EDGE,
-        alpha=0.88,
-    )
+    top_y = int(round(height * 0.05))
+    top_h = int(round(height * 0.14))
+    top_w = int(round(width * 0.42))
+    left_x = int(round(width * 0.05))
+    right_x = int(round(width * 0.53))
+    symptom_text = _summary_symptom_text(risk_by_id, events=events, report_story=report_story)
+    load_watch_text = _summary_load_watch_text(risk_by_id, events=events, report_story=report_story)
+    for x0, title, body, accent in (
+        (left_x, "Symptom", symptom_text, (92, 220, 255)),
+        (right_x, "Load Watch", load_watch_text, (0, 132, 255)),
+    ):
+        x1 = min(width - 18, x0 + top_w)
+        y1 = top_y + top_h
+        _overlay_panel(frame, x0=x0, y0=top_y, x1=x1, y1=y1, fill_color=PANEL_BG, edge_color=accent, alpha=0.84)
+        cv2.putText(frame, title, (x0 + 16, top_y + int(top_h * 0.24)), cv2.FONT_HERSHEY_SIMPLEX, max(0.40, min(width, height) / 1500.0), accent, 1, cv2.LINE_AA)
+        for idx, line in enumerate(str(body or "").splitlines()[:2]):
+            cv2.putText(frame, line, (x0 + 16, top_y + int(top_h * (0.54 + idx * 0.22))), cv2.FONT_HERSHEY_SIMPLEX, max(0.54, min(width, height) / 1150.0), TEXT_COLOR, 2 if idx == 0 else 1, cv2.LINE_AA)
 
-    story_theme = str((report_story or {}).get("theme") or "")
-    heading = "Action recap" if story_theme in {"working_pattern", "good_base"} else "What to watch"
-    cv2.putText(
-        frame,
-        heading,
-        (x0 + 18, y0 + int(card_h * 0.20)),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        max(0.46, min(width, height) / 1450.0),
-        MUTED_TEXT,
-        1,
-        cv2.LINE_AA,
-    )
-
-    issue_lines = _summary_issue_lines(
-        risk_by_id,
-        events=events,
-        report_story=report_story,
-    )
-    if not issue_lines:
-        if story_theme in {"working_pattern", "good_base"}:
-            issue_lines = ["Strong working pattern", "Keep repeating this shape"]
-        else:
-            issue_lines = ["No major issue flagged"]
-    start_y = y0 + int(card_h * 0.42)
-    row_gap = int(card_h * 0.18)
-    for idx, line in enumerate(issue_lines[:4]):
-        row_y = start_y + idx * row_gap
-        cv2.putText(
-            frame,
-            line,
-            (x0 + 30, row_y),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            max(0.44, min(width, height) / 1500.0),
-            TEXT_COLOR,
-            1,
-            cv2.LINE_AA,
-        )
-        cv2.circle(frame, (x0 + 18, row_y - 4), max(3, min(width, height) // 220), ACTIVE_EDGE, -1, cv2.LINE_AA)
-
-    speed_visible = _speed_display_text(speed) is not None
-    _draw_speed_chip(frame, speed=speed)
-    _draw_action_chip(
-        frame,
-        action=action,
-        below_speed=speed_visible,
-    )
-    _draw_legality_chip(
-        frame,
-        elbow=elbow,
-        stack_index=2 if speed_visible else 1,
-    )
+    bottom_y = int(round(height * 0.73))
+    stat_h = int(round(height * 0.13))
+    gap = int(round(width * 0.03))
+    stat_w = int(round((width - (left_x * 2) - (gap * 2)) / 3.0))
+    stats = [
+        ("Speed", _speed_display_text(speed) or "-", (70, 225, 140)),
+        ("Action Type", _format_action_label(action) or "-", (130, 214, 255)),
+    ]
+    verdict = str((elbow or {}).get("verdict") or "").strip().upper()
+    legality_value = "Legal" if verdict == "LEGAL" else (verdict.title() if verdict else "-")
+    legality_accent = (70, 225, 140) if verdict == "LEGAL" else ((72, 92, 235) if verdict == "ILLEGAL" else (120, 210, 255))
+    stats.append(("Legality", legality_value, legality_accent))
+    for idx, (title, value, accent) in enumerate(stats):
+        x0 = left_x + idx * (stat_w + gap)
+        x1 = x0 + stat_w
+        y1 = bottom_y + stat_h
+        _overlay_panel(frame, x0=x0, y0=bottom_y, x1=x1, y1=y1, fill_color=PANEL_BG, edge_color=accent, alpha=0.84)
+        cv2.putText(frame, title, (x0 + 14, bottom_y + int(stat_h * 0.26)), cv2.FONT_HERSHEY_SIMPLEX, max(0.34, min(width, height) / 1700.0), accent, 1, cv2.LINE_AA)
+        cv2.putText(frame, value, (x0 + 14, bottom_y + int(stat_h * 0.64)), cv2.FONT_HERSHEY_SIMPLEX, max(0.48, min(width, height) / 1250.0), TEXT_COLOR, 2, cv2.LINE_AA)
 
 
 def _draw_foot_line_overlay(
@@ -1303,6 +1276,123 @@ def _draw_foot_line_overlay(
     cv2.line(frame, back_toe, line_end, muted, thickness, cv2.LINE_AA)
     cv2.line(frame, front_heel, front_toe, accent, thickness + 1, cv2.LINE_AA)
     cv2.circle(frame, front_toe, max(8, min(width, height) // 40), accent, thickness + 1, cv2.LINE_AA)
+
+
+def _draw_hotspot_marker(
+    frame: np.ndarray,
+    *,
+    center: Tuple[int, int],
+    scale: int,
+    weight: float,
+    pulse_phase: float,
+) -> None:
+    overlay = frame.copy()
+    pulse = 0.5 - 0.5 * np.cos(float(pulse_phase) * np.pi * 2.0)
+    pulse_weight = max(0.0, min(1.0, weight))
+    base = max(5, scale // 66)
+    ring_step = max(5, scale // 55)
+    inner_ring = int(round(base + ring_step * (0.65 + pulse_weight * 0.15)))
+    mid_ring = int(round(base + ring_step * (1.45 + pulse_weight * 0.22 + pulse * 0.30)))
+    outer_ring = int(round(base + ring_step * (2.35 + pulse_weight * 0.28 + pulse * 0.65)))
+    ring_thickness = max(2, scale // 320)
+    halo_alpha = 0.12 + pulse * 0.05 + pulse_weight * 0.03
+    cv2.circle(overlay, center, outer_ring, HOTSPOT_SOFT, ring_thickness, cv2.LINE_AA)
+    cv2.circle(overlay, center, mid_ring, HOTSPOT_RING, ring_thickness, cv2.LINE_AA)
+    cv2.circle(overlay, center, inner_ring, HOTSPOT_RING, ring_thickness, cv2.LINE_AA)
+    cv2.circle(overlay, center, base + 1, HOTSPOT_SOFT, -1, cv2.LINE_AA)
+    cv2.circle(overlay, center, base, HOTSPOT_CORE, -1, cv2.LINE_AA)
+    cv2.addWeighted(overlay, min(0.24, halo_alpha), frame, 1.0 - min(0.24, halo_alpha), 0.0, frame)
+
+
+def _load_watch_support_text(load_watch_text: str) -> str:
+    lower = str(load_watch_text or "").lower()
+    if "lower back" in lower or "side trunk" in lower:
+        return "This is where extra body load may build if the pattern repeats."
+    return "This is where extra body load may build if the pattern repeats."
+
+
+def _draw_load_watch_card(
+    frame: np.ndarray,
+    *,
+    load_watch_text: str,
+) -> None:
+    width = frame.shape[1]
+    height = frame.shape[0]
+    card_w = int(round(width * 0.48))
+    card_h = int(round(height * 0.14))
+    top_y = int(round(height * 0.05))
+    left_x = int(round(width * 0.05))
+    x1 = min(width - 18, left_x + card_w)
+    y1 = top_y + card_h
+    accent = (0, 132, 255)
+    _overlay_panel(frame, x0=left_x, y0=top_y, x1=x1, y1=y1, fill_color=PANEL_BG, edge_color=accent, alpha=0.84)
+    cv2.putText(frame, "Load watch", (left_x + 16, top_y + int(card_h * 0.24)), cv2.FONT_HERSHEY_SIMPLEX, max(0.40, min(width, height) / 1500.0), accent, 1, cv2.LINE_AA)
+    cv2.putText(frame, load_watch_text, (left_x + 16, top_y + int(card_h * 0.52)), cv2.FONT_HERSHEY_SIMPLEX, max(0.58, min(width, height) / 1120.0), TEXT_COLOR, 2, cv2.LINE_AA)
+    cv2.putText(frame, _load_watch_support_text(load_watch_text), (left_x + 16, top_y + int(card_h * 0.80)), cv2.FONT_HERSHEY_SIMPLEX, max(0.30, min(width, height) / 1900.0), MUTED_TEXT, 1, cv2.LINE_AA)
+
+
+def _draw_load_watch_phase(
+    frame: np.ndarray,
+    *,
+    tracks: Dict[int, Dict[str, Any]],
+    frame_idx: int,
+    hand: Optional[str],
+    risk_id: Optional[str],
+    risk_by_id: Dict[str, Dict[str, Any]],
+    load_watch_text: str,
+    pulse_phase: float,
+) -> None:
+    if not risk_id:
+        return
+    regions = _load_hotspot_regions(
+        tracks=tracks,
+        frame_idx=frame_idx,
+        hand=hand,
+        risk_id=risk_id,
+        risk_by_id=risk_by_id,
+    )
+    if not regions:
+        return
+    ranked_regions = sorted(
+        (
+            region
+            for region in regions
+            if float(region.get("weight") or 0.0) >= 0.34
+        ),
+        key=lambda region: float(region.get("weight") or 0.0),
+        reverse=True,
+    )
+    if not ranked_regions:
+        ranked_regions = sorted(
+            regions,
+            key=lambda region: float(region.get("weight") or 0.0),
+            reverse=True,
+        )[:1]
+    elif len(ranked_regions) > 1:
+        lead = float(ranked_regions[0].get("weight") or 0.0)
+        ranked_regions = [
+            region
+            for idx, region in enumerate(ranked_regions)
+            if idx == 0
+            or (
+                idx == 1
+                and float(region.get("weight") or 0.0) >= max(0.50, lead * 0.72)
+            )
+        ][:2]
+
+    scale = min(frame.shape[0], frame.shape[1])
+    _draw_load_watch_card(frame, load_watch_text=load_watch_text)
+    for region in ranked_regions:
+        center = region.get("center")
+        if not isinstance(center, tuple) or len(center) != 2:
+            continue
+        _draw_hotspot_marker(
+            frame,
+            center=(int(center[0]), int(center[1])),
+            scale=scale,
+            weight=float(region.get("weight") or 0.8),
+            pulse_phase=pulse_phase,
+        )
 
 
 def _pause_anchor_frames(
@@ -1418,22 +1508,34 @@ def render_skeleton_video(
             pause_key = pause_anchors.get(frame_idx)
             if pause_frames > 0 and pause_key:
                 paused_frame = frame.copy()
+                hotspot_payload: Optional[Dict[str, str]] = None
                 if pause_key == "ffc":
                     if _supports_ffc_story(events):
-                        preferred_ffc_risk = _story_risk_for_phase(
-                            report_story,
-                            phase_key="ffc",
+                        preferred_ffc_risk = _preferred_ffc_cue_risk_id(
+                            risk_by_id,
+                            report_story=report_story,
                             events=events,
                         )
                         should_draw_front_leg = preferred_ffc_risk == "knee_brace_failure"
                         should_draw_foot_line = preferred_ffc_risk == "foot_line_deviation"
                         if not preferred_ffc_risk:
-                            should_draw_front_leg = False
-                            should_draw_foot_line = False
+                            preferred_ffc_risk = _story_risk_for_phase(
+                                report_story,
+                                phase_key="ffc",
+                                events=events,
+                            )
+                        if not preferred_ffc_risk:
                             story_theme = str((report_story or {}).get("theme") or "")
                             if not report_story or story_theme not in {"working_pattern", "good_base"}:
-                                should_draw_front_leg = True
-                                should_draw_foot_line = True
+                                front_leg_weight = _risk_weight(risk_by_id.get("knee_brace_failure"))
+                                foot_line_weight = _risk_weight(risk_by_id.get("foot_line_deviation"))
+                                if front_leg_weight >= foot_line_weight and front_leg_weight > 0.0:
+                                    preferred_ffc_risk = "knee_brace_failure"
+                                elif foot_line_weight > 0.0:
+                                    preferred_ffc_risk = "foot_line_deviation"
+                        if preferred_ffc_risk:
+                            should_draw_front_leg = preferred_ffc_risk == "knee_brace_failure"
+                            should_draw_foot_line = preferred_ffc_risk == "foot_line_deviation"
                         if should_draw_front_leg:
                             _draw_front_leg_support_callout(
                                 paused_frame,
@@ -1451,7 +1553,18 @@ def render_skeleton_video(
                                 hand=hand,
                                 risk=risk_by_id.get("foot_line_deviation"),
                             )
+                        if preferred_ffc_risk:
+                            hotspot_payload = {
+                                "risk_id": preferred_ffc_risk,
+                                "symptom_text": _summary_symptom_text(risk_by_id, events=events, report_story=report_story),
+                                "load_watch_text": _load_watch_label(preferred_ffc_risk) or _summary_load_watch_text(risk_by_id, events=events, report_story=report_story),
+                            }
                 elif pause_key == "release":
+                    release_hotspot_risk = _release_hotspot_risk_id(
+                        risk_by_id,
+                        events=events,
+                        report_story=report_story,
+                    )
                     _draw_release_callout(
                         paused_frame,
                         tracks=tracks,
@@ -1460,23 +1573,31 @@ def render_skeleton_video(
                         report_story=report_story,
                         events=events,
                     )
-                    _draw_speed_chip(
-                        paused_frame,
-                        speed=estimated_release_speed,
-                    )
-                    speed_visible = _speed_display_text(estimated_release_speed) is not None
-                    _draw_action_chip(
-                        paused_frame,
-                        action=action,
-                        below_speed=speed_visible,
-                    )
-                    _draw_legality_chip(
-                        paused_frame,
-                        elbow=elbow,
-                        stack_index=2 if speed_visible else 1,
-                    )
-                for _ in range(pause_frames):
+                    if release_hotspot_risk:
+                        hotspot_payload = {
+                            "risk_id": release_hotspot_risk,
+                            "symptom_text": _summary_symptom_text(risk_by_id, events=events, report_story=report_story),
+                            "load_watch_text": _load_watch_label(release_hotspot_risk) or _summary_load_watch_text(risk_by_id, events=events, report_story=report_story),
+                        }
+                cue_hold = pause_frames if hotspot_payload is None else max(1, int(round(pause_frames * 0.45)))
+                hotspot_hold = 0 if hotspot_payload is None else max(1, pause_frames - cue_hold)
+                for _ in range(cue_hold):
                     writer.write(paused_frame)
+                    frames_rendered += 1
+                for hotspot_idx in range(hotspot_hold):
+                    hotspot_frame = frame.copy()
+                    pulse_phase = 0.0 if hotspot_hold <= 1 else float(hotspot_idx) / float(hotspot_hold - 1)
+                    _draw_load_watch_phase(
+                        hotspot_frame,
+                        tracks=tracks,
+                        frame_idx=frame_idx,
+                        hand=hand,
+                        risk_id=str((hotspot_payload or {}).get("risk_id") or ""),
+                        risk_by_id=risk_by_id,
+                        load_watch_text=str((hotspot_payload or {}).get("load_watch_text") or ""),
+                        pulse_phase=pulse_phase,
+                    )
+                    writer.write(hotspot_frame)
                     frames_rendered += 1
             frame_idx += 1
 
