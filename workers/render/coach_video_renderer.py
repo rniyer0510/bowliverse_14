@@ -1304,46 +1304,6 @@ def _draw_hotspot_marker(
     cv2.addWeighted(overlay, min(0.24, halo_alpha), frame, 1.0 - min(0.24, halo_alpha), 0.0, frame)
 
 
-def _draw_hotspot_label(
-    frame: np.ndarray,
-    *,
-    center: Tuple[int, int],
-    label: str,
-    direction: Tuple[float, float],
-    scale: int,
-) -> None:
-    if not label:
-        return
-    width = frame.shape[1]
-    height = frame.shape[0]
-    dx, dy = direction
-    if abs(dx) < 0.12 and abs(dy) < 0.12:
-        dx, dy = 1.0, -0.25
-
-    offset = max(18, scale // 18)
-    text_x = int(round(center[0] + dx * offset))
-    text_y = int(round(center[1] + dy * offset))
-    text_x = max(10, min(width - 86, text_x))
-    text_y = max(18, min(height - 10, text_y))
-
-    anchor = (
-        int(round(center[0] + dx * max(8, scale // 45))),
-        int(round(center[1] + dy * max(8, scale // 45))),
-    )
-    target = (text_x, text_y - 5)
-    cv2.line(frame, anchor, target, MUTED_TEXT, 1, cv2.LINE_AA)
-    cv2.putText(
-        frame,
-        label,
-        (text_x, text_y),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        max(0.28, scale / 2100.0),
-        (246, 248, 252),
-        1,
-        cv2.LINE_AA,
-    )
-
-
 def _load_watch_support_text(load_watch_text: str) -> str:
     lower = str(load_watch_text or "").lower()
     if "lower back" in lower or "side trunk" in lower:
@@ -1432,13 +1392,6 @@ def _draw_load_watch_phase(
             scale=scale,
             weight=float(region.get("weight") or 0.8),
             pulse_phase=pulse_phase,
-        )
-        _draw_hotspot_label(
-            frame,
-            center=(int(center[0]), int(center[1])),
-            label=str(region.get("label") or ""),
-            direction=tuple(region.get("direction") or (1.0, -0.25)),
-            scale=scale,
         )
 
 
