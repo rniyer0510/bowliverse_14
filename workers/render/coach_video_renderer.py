@@ -340,10 +340,24 @@ def _intermediate_render_path(final_path: str) -> str:
     return os.path.join(base_dir, name)
 
 
+def _publish_fallback_render(intermediate_path: str, final_path: str) -> str:
+    try:
+        os.replace(intermediate_path, final_path)
+        return final_path
+    except OSError:
+        logger.warning(
+            "[coach_video_renderer] Could not publish fallback render to final path; keeping intermediate encode",
+        )
+        return intermediate_path
+
+
 def _finalize_render_video(intermediate_path: str, final_path: str) -> Tuple[str, str]:
     ffmpeg_bin = shutil.which("ffmpeg")
     if not ffmpeg_bin:
-        return intermediate_path, "mp4v"
+        logger.warning(
+            "[coach_video_renderer] ffmpeg not available; publishing mp4v fallback that may be unsupported on some browsers/iOS clients",
+        )
+        return _publish_fallback_render(intermediate_path, final_path), "mp4v"
 
     command = [
         ffmpeg_bin,
@@ -372,14 +386,14 @@ def _finalize_render_video(intermediate_path: str, final_path: str) -> Tuple[str
         )
     except Exception as exc:
         logger.warning("[coach_video_renderer] ffmpeg finalize failed: %s", exc)
-        return intermediate_path, "mp4v"
+        return _publish_fallback_render(intermediate_path, final_path), "mp4v"
 
     if completed.returncode != 0 or not os.path.exists(final_path):
         logger.warning(
-            "[coach_video_renderer] ffmpeg finalize returned %s; keeping intermediate encode",
+            "[coach_video_renderer] ffmpeg finalize returned %s; publishing mp4v fallback that may be unsupported on some browsers/iOS clients",
             completed.returncode,
         )
-        return intermediate_path, "mp4v"
+        return _publish_fallback_render(intermediate_path, final_path), "mp4v"
 
     try:
         if os.path.exists(intermediate_path):
