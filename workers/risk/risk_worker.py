@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from typing import Any, Dict, List, Optional
 
 from app.common.logger import get_logger
@@ -15,6 +16,11 @@ from app.workers.risk.visual_utils import draw_and_save_visual
 from app.workers.risk.benchmarks import attach_deviation_and_impact
 
 logger = get_logger(__name__)
+
+ENABLE_SYNTHETIC_BENCHMARK_PERCENTILES = (
+    os.getenv("ACTIONLAB_ENABLE_SYNTHETIC_BENCHMARK_PERCENTILES", "").strip().lower()
+    == "true"
+)
 
 FULL_BODY_GUIDANCE_MESSAGE = (
     "For better assessment, please record from the front-side angle "
@@ -423,6 +429,12 @@ def _percentile_from_signal_strength(v: float) -> float:
     return 50.0
 
 
+def _benchmark_percentile(signal_strength: float) -> Optional[float]:
+    if not ENABLE_SYNTHETIC_BENCHMARK_PERCENTILES:
+        return None
+    return _percentile_from_signal_strength(signal_strength)
+
+
 # ---------------------------------------------------------------------
 # Main worker
 # ---------------------------------------------------------------------
@@ -484,7 +496,7 @@ def run_risk_worker(
 
     out: List[Dict[str, Any]] = []
     for r in raw:
-        percentile = _percentile_from_signal_strength(
+        percentile = _benchmark_percentile(
             float(r.get("signal_strength", 0.0))
         )
 

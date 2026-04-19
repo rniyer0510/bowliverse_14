@@ -10,6 +10,7 @@ from app.clinician.loader import load_yaml
 
 ELBOW = load_yaml("elbow.yaml") or {}
 RISKS = load_yaml("risks.yaml") or {}
+GLOBALS = load_yaml("globals.yaml") or {}
 
 SEVERITY_POINTS = {
     "LOW": 0.0,
@@ -393,12 +394,20 @@ def _reporting_lines_for_risk(risk_id: str, severity: str) -> Dict[str, str]:
 
 
 class ClinicianInterpreter:
-    BENCHMARK_GUARDRAIL_MIN_RATING = {
+    BENCHMARK_GUARDRAIL_MIN_RATING = (
+        (GLOBALS.get("benchmark_guardrail_min_rating") or {})
+        if isinstance(GLOBALS, dict)
+        else {}
+    ) or {
         "SEMI_OPEN": 60,
         "SIDE_ON": 55,
     }
 
-    BENCHMARK_RATING_FLOORS = {
+    BENCHMARK_RATING_FLOORS = (
+        (GLOBALS.get("benchmark_rating_floors") or {})
+        if isinstance(GLOBALS, dict)
+        else {}
+    ) or {
         "SEMI_OPEN": {
             "overall": 90,
             "upper_body_alignment": 84,

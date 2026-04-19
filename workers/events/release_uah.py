@@ -32,10 +32,11 @@ RS, RE, RW = 12, 14, 16
 LH, RH = 23, 24
 
 MIN_VIS = 0.25
-DEBUG = True
-
-DEBUG_DIR = "/tmp/actionlab_debug/release_uah"
-os.makedirs(DEBUG_DIR, exist_ok=True)
+DEBUG = os.getenv("ACTIONLAB_RELEASE_UAH_DEBUG", "").strip().lower() == "true"
+DEBUG_DIR = os.getenv(
+    "ACTIONLAB_RELEASE_UAH_DEBUG_DIR",
+    "/tmp/actionlab_debug/release_uah",
+)
 
 # ---------------------------------------------------------------------
 # Helpers
@@ -60,6 +61,7 @@ def _unit(v):
 def _dump(video_path, idx, tag):
     if not DEBUG or not video_path or idx is None or idx < 0:
         return
+    os.makedirs(DEBUG_DIR, exist_ok=True)
     cap = cv2.VideoCapture(video_path)
     cap.set(cv2.CAP_PROP_POS_FRAMES, int(idx))
     ok, frame = cap.read()

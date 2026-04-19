@@ -103,6 +103,7 @@ def _risk_style(style_band: str, scale: int):
 # ---------------------------------------------------------------------
 
 _HOG = None
+_SUBJECT_GEOMETRY_CACHE = {}
 
 def _get_hog():
     global _HOG
@@ -159,6 +160,21 @@ def _estimate_subject_geometry(frame) -> Tuple[int, int]:
     return int(w * 0.50), int(h * 0.45)
 
 
+def _cached_subject_geometry(
+    *,
+    video_path: str,
+    frame_idx: int,
+    frame,
+) -> Tuple[int, int]:
+    cache_key = (str(video_path), int(frame_idx))
+    cached = _SUBJECT_GEOMETRY_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
+    geometry = _estimate_subject_geometry(frame)
+    _SUBJECT_GEOMETRY_CACHE[cache_key] = geometry
+    return geometry
+
+
 # ---------------------------------------------------------------------
 # Horizontal refinement for FRONT FOOT (not centroid)
 # ---------------------------------------------------------------------
@@ -199,13 +215,13 @@ def _refine_x_using_ground_mass(frame, cx):
 # Risk visuals (FRAME ONLY — NO POSE)
 # ---------------------------------------------------------------------
 
-def _draw_ffbs(frame, conf):
+def _draw_ffbs(frame, conf, *, subject_geometry: Optional[Tuple[int, int]] = None):
     """
     Front Foot Braking Shock
     """
     h, w = frame.shape[:2]
 
-    cx, subject_h = _estimate_subject_geometry(frame)
+    cx, subject_h = subject_geometry or _estimate_subject_geometry(frame)
     cx = _refine_x_using_ground_mass(frame, cx)
 
     color, t = _risk_style(conf, subject_h)
@@ -229,7 +245,13 @@ def _draw_ffbs(frame, conf):
     )
 
 
-def _draw_knee_brace(frame, conf, anchor_x: Optional[int] = None):
+def _draw_knee_brace(
+    frame,
+    conf,
+    anchor_x: Optional[int] = None,
+    *,
+    subject_geometry: Optional[Tuple[int, int]] = None,
+):
     """
     Knee Brace Failure
     Visual: thick downward arrow crossing the knee joint,
@@ -238,7 +260,7 @@ def _draw_knee_brace(frame, conf, anchor_x: Optional[int] = None):
     h, w = frame.shape[:2]
 
     # Use same geometry logic as rest of visual_utils
-    cx, subject_h = _estimate_subject_geometry(frame)
+    cx, subject_h = subject_geometry or _estimate_subject_geometry(frame)
     cx = _refine_x_using_ground_mass(frame, cx)
 
     scale = subject_h
@@ -292,7 +314,7 @@ def _draw_knee_brace(frame, conf, anchor_x: Optional[int] = None):
             )
 
 
-def _draw_trunk_rotation(frame, conf):
+def _draw_trunk_rotation(frame, conf, *, subject_geometry: Optional[Tuple[int, int]] = None):
     """
     Trunk Rotation Snap
     Visual: short, thick horizontal arrow at mid-upper trunk,
@@ -301,7 +323,7 @@ def _draw_trunk_rotation(frame, conf):
     """
     h, w = frame.shape[:2]
 
-    cx, subject_h = _estimate_subject_geometry(frame)
+    cx, subject_h = subject_geometry or _estimate_subject_geometry(frame)
     color, base_t = _risk_style(conf, subject_h)
 
     # ── SUBJECT-RELATIVE torso anchor (critical fix) ───────────────────
@@ -356,14 +378,14 @@ def _draw_trunk_rotation(frame, conf):
     )
 
 
-def _draw_hip_shoulder(frame, conf):
+def _draw_hip_shoulder(frame, conf, *, subject_geometry: Optional[Tuple[int, int]] = None):
     """
     Hip–Shoulder Mismatch
     Visual: diagonal torsional cue spanning hip → shoulder region,
     indicating poor sequencing / mismatch (not pure rotation, not impact).
     """
     h, w = frame.shape[:2]
-    cx, subject_h = _estimate_subject_geometry(frame)
+    cx, subject_h = subject_geometry or _estimate_subject_geometry(frame)
 
     color, base_t = _risk_style(conf, subject_h)
 
@@ -413,14 +435,14 @@ def _draw_hip_shoulder(frame, conf):
     cv2.circle(frame, (x2, y2), r, color, -1)
 
 
-def _draw_lateral_trunk(frame, conf):
+def _draw_lateral_trunk(frame, conf, *, subject_geometry: Optional[Tuple[int, int]] = None):
     """
     Lateral Trunk Lean
     Visual: short diagonal arrow indicating sideways collapse of torso mass.
     """
     h, w = frame.shape[:2]
 
-    cx, subject_h = _estimate_subject_geometry(frame)
+    cx, subject_h = subject_geometry or _estimate_subject_geometry(frame)
     color, base_t = _risk_style(conf, subject_h)
 
     # Torso anchor (same semantic level as other torso visuals)
@@ -464,7 +486,12 @@ def _draw_lateral_trunk(frame, conf):
 
 
 
-def _draw_foot_line_deviation(frame, conf):
+def _draw_foot_line_deviation(
+    frame,
+    conf,
+    *,
+    subject_geometry: Optional[Tuple[int, int]] = None,
+):
     """
     Foot-Line Deviation
     Visual: diagonal lateral cue near pelvis/lower trunk indicating sideways correction.
@@ -472,7 +499,7 @@ def _draw_foot_line_deviation(frame, conf):
     """
     h, w = frame.shape[:2]
 
-    cx, subject_h = _estimate_subject_geometry(frame)
+    cx, subject_h = subject_geometry or _estimate_subject_geometry(frame)
     color, base_t = _risk_style(conf, subject_h)
 
     y = int(h * 0.60)
@@ -538,19 +565,28 @@ def draw_and_save_visual(
         return None
 
     style_band = (load_level or visual_confidence or "LOW").upper()
+    subject_geometry = _cached_subject_geometry(
+        video_path=video_path,
+        frame_idx=frame_idx,
+        frame=frame,
+    )
 
     if risk_id == "front_foot_braking_shock":
-        _draw_ffbs(frame, style_band)
+        _draw_ffbs(frame, style_band, subject_geometry=subject_geometry)
     elif risk_id == "knee_brace_failure":
-        _draw_knee_brace(frame, style_band)
+        _draw_knee_brace(frame, style_band, subject_geometry=subject_geometry)
     elif risk_id == "trunk_rotation_snap":
-        _draw_trunk_rotation(frame, style_band)
+        _draw_trunk_rotation(frame, style_band, subject_geometry=subject_geometry)
     elif risk_id == "hip_shoulder_mismatch":
-        _draw_hip_shoulder(frame, style_band)
+        _draw_hip_shoulder(frame, style_band, subject_geometry=subject_geometry)
     elif risk_id == "lateral_trunk_lean":
-        _draw_lateral_trunk(frame, style_band)
+        _draw_lateral_trunk(frame, style_band, subject_geometry=subject_geometry)
     elif risk_id == "foot_line_deviation":
-        _draw_foot_line_deviation(frame, style_band)
+        _draw_foot_line_deviation(
+            frame,
+            style_band,
+            subject_geometry=subject_geometry,
+        )
 
     out_dir = os.path.join(VISUAL_DIR, run_id)
     os.makedirs(out_dir, exist_ok=True)

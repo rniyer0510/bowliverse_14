@@ -10,3 +10,23 @@ severity_bands:
   moderate: { min: 0.35, max: 0.6 }
   high: { min: 0.6, max: 0.85 }
   very_high: { min: 0.85, max: 1.01 }
+
+benchmark_guardrail_min_rating:
+  SEMI_OPEN: 60
+  SIDE_ON: 55
+
+benchmark_rating_floors:
+  SEMI_OPEN:
+    overall: 90
+    upper_body_alignment: 84
+    lower_body_alignment: 84
+    whole_body_alignment: 88
+    momentum_forward: 84
+    safety: 86
+  SIDE_ON:
+    overall: 92
+    upper_body_alignment: 86
+    lower_body_alignment: 86
+    whole_body_alignment: 90
+    momentum_forward: 86
+    safety: 88

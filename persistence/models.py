@@ -27,6 +27,10 @@ class Base(DeclarativeBase):
     pass
 
 
+def _current_season() -> int:
+    return datetime.utcnow().year
+
+
 # =====================================================
 # Identity
 # =====================================================
@@ -93,7 +97,7 @@ class Player(Base):
     season: Mapped[int] = mapped_column(
         Integer,
         nullable=False,
-        default=2025,
+        default=_current_season,
     )
 
     created_at: Mapped[datetime] = mapped_column(

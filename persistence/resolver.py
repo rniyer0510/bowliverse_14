@@ -1,9 +1,35 @@
+from datetime import datetime
+
 from app.persistence.models import Account, Player, AccountPlayerLink
 from app.common.logger import get_logger
 
 logger = get_logger(__name__)
 
 MAX_PARENT_PLAYERS = 3
+
+
+def _current_season() -> int:
+    return datetime.utcnow().year
+
+
+def _normalize_handedness(value):
+    if value is None:
+        return None
+    text = str(value).strip().upper()
+    if text in {"R", "RIGHT"}:
+        return "R"
+    if text in {"L", "LEFT"}:
+        return "L"
+    return None
+
+
+def _required_handedness(actor: dict, *, role: str) -> str:
+    handedness = _normalize_handedness(actor.get("handedness"))
+    if handedness:
+        return handedness
+    raise ValueError(
+        f"handedness required when creating a player for role={role}"
+    )
 
 
 def resolve_account(db, actor: dict):
@@ -51,8 +77,9 @@ def resolve_player(db, account: Account, actor: dict):
         player = Player(
             primary_owner_account_id=account.account_id,
             created_by_account_id=account.account_id,
+            handedness=_required_handedness(actor, role=role),
             age_group="SENIOR",
-            season=2025,
+            season=_current_season(),
         )
         db.add(player)
         db.flush()
@@ -100,8 +127,9 @@ def resolve_player(db, account: Account, actor: dict):
     player = Player(
         primary_owner_account_id=account.account_id,
         created_by_account_id=account.account_id,
+        handedness=_required_handedness(actor, role=role),
         age_group="SENIOR",
-        season=2025,
+        season=_current_season(),
     )
     db.add(player)
     db.flush()
