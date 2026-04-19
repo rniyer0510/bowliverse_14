@@ -1,6 +1,7 @@
 import os
 import tempfile
 import unittest
+from unittest import mock
 
 import cv2
 import numpy as np
@@ -124,6 +125,46 @@ class CoachVideoRendererTest(unittest.TestCase):
             self.assertEqual(result["pause_seconds"], 1.0)
             self.assertEqual(result["end_frame"], 4)
             self.assertEqual(result["frames_rendered"], 41)
+
+    def test_render_skeleton_video_publishes_stable_output_path_without_ffmpeg(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            video_path = os.path.join(tmpdir, "input.mp4")
+            output_path = os.path.join(tmpdir, "output.mp4")
+
+            writer = cv2.VideoWriter(
+                video_path,
+                cv2.VideoWriter_fourcc(*"mp4v"),
+                24.0,
+                (160, 120),
+            )
+            self.assertTrue(writer.isOpened())
+            for _ in range(5):
+                writer.write(np.zeros((120, 160, 3), dtype=np.uint8))
+            writer.release()
+
+            pose_frames = [_pose_frame(i, shift=0.01 * i) for i in range(5)]
+            with mock.patch(
+                "app.workers.render.coach_video_renderer.shutil.which",
+                return_value=None,
+            ):
+                result = render_skeleton_video(
+                    video_path=video_path,
+                    pose_frames=pose_frames,
+                    events={
+                        "bfc": {"frame": 1},
+                        "ffc": {"frame": 2},
+                        "release": {"frame": 4},
+                    },
+                    output_path=output_path,
+                    pause_seconds=0.0,
+                    end_summary_seconds=0.0,
+                )
+
+            self.assertTrue(result["available"])
+            self.assertEqual(result["encoding"], "mp4v")
+            self.assertEqual(result["path"], output_path)
+            self.assertTrue(os.path.exists(output_path))
+            self.assertGreater(os.path.getsize(output_path), 0)
 
     def test_summary_filters_ffc_risks_when_landing_anchor_is_low_confidence(self):
         lines = _summary_issue_lines(

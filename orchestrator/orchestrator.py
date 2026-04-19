@@ -68,6 +68,11 @@ if AUTO_CREATE_SCHEMA:
 
 logger = get_logger(__name__)
 clinician_engine = ClinicianInterpreter()
+RENDERS_DIR = RENDER_DIR
+
+WALKTHROUGH_PAUSE_SECONDS = 1.0
+WALKTHROUGH_SLOW_MOTION_FACTOR = 2.0
+WALKTHROUGH_END_SUMMARY_SECONDS = 1.5
 
 _render_cleanup = cleanup_old_renders(
     RENDER_DIR,
@@ -329,6 +334,9 @@ def _build_walkthrough_render(
             output_path=output_path,
             start_frame=start_frame,
             end_frame=end_frame,
+            pause_seconds=WALKTHROUGH_PAUSE_SECONDS,
+            slow_motion_factor=WALKTHROUGH_SLOW_MOTION_FACTOR,
+            end_summary_seconds=WALKTHROUGH_END_SUMMARY_SECONDS,
         )
     except Exception as exc:
         logger.warning(
@@ -355,7 +363,7 @@ def _build_walkthrough_render(
         **render_result,
         "renderer_version": "coach_video_renderer_v1",
         "artifact_type": "walkthrough_mp4",
-        "url": f"/renders/{os.path.basename(output_path)}",
+        "url": f"/renders/{os.path.basename(resolved_path)}",
     }
 
 
@@ -363,8 +371,6 @@ def _build_walkthrough_render(
 # Serve Visual Evidence
 # ------------------------------------------------------------
 VISUALS_DIR = "/tmp/actionlab_frames"
-RENDERS_DIR = RENDER_DIR
-
 if os.path.isdir(VISUALS_DIR):
     app.mount("/visuals", StaticFiles(directory=VISUALS_DIR), name="visuals")
     logger.info(f"Mounted visual evidence directory: {VISUALS_DIR}")
