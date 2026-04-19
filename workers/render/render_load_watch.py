@@ -180,7 +180,13 @@ def _front_leg_joints(hand: Optional[str]) -> Tuple[int, int, int]:
 
 
 def _region(region_key: str, center: Tuple[int, int], weight: float, body_mid: Tuple[int, int]) -> Dict[str, Any]:
-    return {"region_key": region_key, "label": _REGION_LABELS[region_key], "center": center, "direction": _direction(center, body_mid), "weight": max(0.2, min(1.0, weight))}
+    return {
+        "region_key": region_key,
+        "label": _REGION_LABELS[region_key],
+        "center": center,
+        "direction": _direction(center, body_mid),
+        "weight": max(0.0, min(1.0, weight)),
+    }
 
 
 def _load_hotspot_regions(*, tracks: Dict[int, Dict[str, Any]], frame_idx: int, hand: Optional[str], risk_id: Optional[str], risk_by_id: Optional[Dict[str, Dict[str, Any]]] = None) -> List[Dict[str, Any]]:

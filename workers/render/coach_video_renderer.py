@@ -1289,16 +1289,59 @@ def _draw_hotspot_marker(
     overlay = frame.copy()
     pulse = 0.5 - 0.5 * np.cos(float(pulse_phase) * np.pi * 2.0)
     pulse_weight = max(0.0, min(1.0, weight))
-    base = max(7, scale // 50)
-    inner_ring = int(round(base * (1.7 + pulse_weight * 0.35)))
-    mid_ring = int(round(base * (2.45 + pulse_weight * 0.45 + pulse * 0.35)))
-    outer_ring = int(round(base * (3.15 + pulse_weight * 0.55 + pulse * 0.65)))
-    halo_alpha = 0.18 + pulse * 0.12 + pulse_weight * 0.05
-    cv2.circle(overlay, center, outer_ring, HOTSPOT_SOFT, -1, cv2.LINE_AA)
-    cv2.circle(overlay, center, mid_ring, HOTSPOT_RING, max(2, scale // 280), cv2.LINE_AA)
-    cv2.circle(overlay, center, inner_ring, HOTSPOT_RING, max(2, scale // 280), cv2.LINE_AA)
+    base = max(5, scale // 66)
+    ring_step = max(5, scale // 55)
+    inner_ring = int(round(base + ring_step * (0.65 + pulse_weight * 0.15)))
+    mid_ring = int(round(base + ring_step * (1.45 + pulse_weight * 0.22 + pulse * 0.30)))
+    outer_ring = int(round(base + ring_step * (2.35 + pulse_weight * 0.28 + pulse * 0.65)))
+    ring_thickness = max(2, scale // 320)
+    halo_alpha = 0.12 + pulse * 0.05 + pulse_weight * 0.03
+    cv2.circle(overlay, center, outer_ring, HOTSPOT_SOFT, ring_thickness, cv2.LINE_AA)
+    cv2.circle(overlay, center, mid_ring, HOTSPOT_RING, ring_thickness, cv2.LINE_AA)
+    cv2.circle(overlay, center, inner_ring, HOTSPOT_RING, ring_thickness, cv2.LINE_AA)
+    cv2.circle(overlay, center, base + 1, HOTSPOT_SOFT, -1, cv2.LINE_AA)
     cv2.circle(overlay, center, base, HOTSPOT_CORE, -1, cv2.LINE_AA)
-    cv2.addWeighted(overlay, min(0.42, halo_alpha), frame, 1.0 - min(0.42, halo_alpha), 0.0, frame)
+    cv2.addWeighted(overlay, min(0.24, halo_alpha), frame, 1.0 - min(0.24, halo_alpha), 0.0, frame)
+
+
+def _draw_hotspot_label(
+    frame: np.ndarray,
+    *,
+    center: Tuple[int, int],
+    label: str,
+    direction: Tuple[float, float],
+    scale: int,
+) -> None:
+    if not label:
+        return
+    width = frame.shape[1]
+    height = frame.shape[0]
+    dx, dy = direction
+    if abs(dx) < 0.12 and abs(dy) < 0.12:
+        dx, dy = 1.0, -0.25
+
+    offset = max(18, scale // 18)
+    text_x = int(round(center[0] + dx * offset))
+    text_y = int(round(center[1] + dy * offset))
+    text_x = max(10, min(width - 86, text_x))
+    text_y = max(18, min(height - 10, text_y))
+
+    anchor = (
+        int(round(center[0] + dx * max(8, scale // 45))),
+        int(round(center[1] + dy * max(8, scale // 45))),
+    )
+    target = (text_x, text_y - 5)
+    cv2.line(frame, anchor, target, MUTED_TEXT, 1, cv2.LINE_AA)
+    cv2.putText(
+        frame,
+        label,
+        (text_x, text_y),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        max(0.28, scale / 2100.0),
+        (246, 248, 252),
+        1,
+        cv2.LINE_AA,
+    )
 
 
 def _load_watch_support_text(load_watch_text: str) -> str:
@@ -1350,9 +1393,36 @@ def _draw_load_watch_phase(
     )
     if not regions:
         return
+    ranked_regions = sorted(
+        (
+            region
+            for region in regions
+            if float(region.get("weight") or 0.0) >= 0.34
+        ),
+        key=lambda region: float(region.get("weight") or 0.0),
+        reverse=True,
+    )
+    if not ranked_regions:
+        ranked_regions = sorted(
+            regions,
+            key=lambda region: float(region.get("weight") or 0.0),
+            reverse=True,
+        )[:1]
+    elif len(ranked_regions) > 1:
+        lead = float(ranked_regions[0].get("weight") or 0.0)
+        ranked_regions = [
+            region
+            for idx, region in enumerate(ranked_regions)
+            if idx == 0
+            or (
+                idx == 1
+                and float(region.get("weight") or 0.0) >= max(0.50, lead * 0.72)
+            )
+        ][:2]
+
     scale = min(frame.shape[0], frame.shape[1])
     _draw_load_watch_card(frame, load_watch_text=load_watch_text)
-    for region in regions:
+    for region in ranked_regions:
         center = region.get("center")
         if not isinstance(center, tuple) or len(center) != 2:
             continue
@@ -1362,6 +1432,13 @@ def _draw_load_watch_phase(
             scale=scale,
             weight=float(region.get("weight") or 0.8),
             pulse_phase=pulse_phase,
+        )
+        _draw_hotspot_label(
+            frame,
+            center=(int(center[0]), int(center[1])),
+            label=str(region.get("label") or ""),
+            direction=tuple(region.get("direction") or (1.0, -0.25)),
+            scale=scale,
         )
 
 
