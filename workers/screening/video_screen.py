@@ -7,6 +7,7 @@ import cv2
 import numpy as np
 
 from app.workers.events.delivery_guard import detect_delivery_candidates
+from app.workers.windowing.delivery_window import detect_delivery_window
 
 POSE_MIN_VIS = 0.20
 MAX_SCREEN_DURATION_SEC = 15.0
@@ -318,6 +319,7 @@ def run_preanalysis_screen(
     hand: str,
 ) -> Dict[str, Any]:
     duration_sec = _duration_seconds(video)
+    delivery_window = detect_delivery_window(video)
     delivery_guard = detect_delivery_candidates(
         pose_frames=pose_frames,
         hand=hand,
@@ -411,6 +413,7 @@ def run_preanalysis_screen(
         "warnings": warnings,
         "checks": {
             "duration": duration_check,
+            "delivery_window": delivery_window,
             "delivery": delivery_check,
             "primary_subject": primary_subject,
         },
