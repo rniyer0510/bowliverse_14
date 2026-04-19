@@ -12,6 +12,7 @@ from app.io.loader import load_video
 from app.workers.screening.video_screen import run_preanalysis_screen
 from app.workers.speed.release_speed import estimate_release_speed
 from app.workers.render.coach_video_renderer import render_skeleton_video, RENDER_DIR
+from app.workers.render.render_storage import cleanup_old_renders, render_retention_days
 
 # Events
 from app.workers.events.release_uah import detect_release_uah
@@ -67,6 +68,18 @@ if AUTO_CREATE_SCHEMA:
 
 logger = get_logger(__name__)
 clinician_engine = ClinicianInterpreter()
+
+_render_cleanup = cleanup_old_renders(
+    RENDER_DIR,
+    retention_days=render_retention_days(),
+)
+logger.info(
+    "[render_storage] active_dir=%s cleanup_scanned=%s cleanup_removed=%s retention_days=%s",
+    RENDER_DIR,
+    _render_cleanup.get("scanned", 0),
+    _render_cleanup.get("removed", 0),
+    render_retention_days(),
+)
 
 
 def _compact_header(value: str, limit: int = 120) -> str:
@@ -328,6 +341,15 @@ def _build_walkthrough_render(
             "available": False,
             "reason": render_result.get("reason") or "render_unavailable",
         }
+
+    resolved_path = str(render_result.get("path") or output_path)
+    if not os.path.exists(resolved_path):
+        logger.warning(
+            "[analyze:walkthrough_missing_after_render] run_id=%s expected_path=%s",
+            run_id,
+            resolved_path,
+        )
+        return {"available": False, "reason": "render_artifact_missing"}
 
     return {
         **render_result,

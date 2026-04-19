@@ -12,6 +12,7 @@ import numpy as np
 from scipy.ndimage import gaussian_filter1d
 
 from app.common.logger import get_logger
+from .render_storage import get_render_dir
 from .render_load_watch import (
     _load_hotspot_regions,
     _load_watch_label,
@@ -23,15 +24,7 @@ from .render_load_watch import (
 
 logger = get_logger(__name__)
 
-DEFAULT_RENDER_DIR = os.path.abspath(
-    os.path.join(os.path.dirname(__file__), "..", "..", "storage", "renders")
-)
-RENDER_DIR = os.getenv("ACTIONLAB_RENDER_DIR", DEFAULT_RENDER_DIR)
-try:
-    os.makedirs(RENDER_DIR, exist_ok=True)
-except OSError:
-    RENDER_DIR = "/tmp/actionlab_renders"
-    os.makedirs(RENDER_DIR, exist_ok=True)
+RENDER_DIR = get_render_dir()
 
 MIN_VISIBILITY = 0.35
 SKELETON_COLOR = (240, 225, 70)
