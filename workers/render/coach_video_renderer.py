@@ -1573,21 +1573,6 @@ def render_skeleton_video(
                         report_story=report_story,
                         events=events,
                     )
-                    _draw_speed_chip(
-                        paused_frame,
-                        speed=estimated_release_speed,
-                    )
-                    speed_visible = _speed_display_text(estimated_release_speed) is not None
-                    _draw_action_chip(
-                        paused_frame,
-                        action=action,
-                        below_speed=speed_visible,
-                    )
-                    _draw_legality_chip(
-                        paused_frame,
-                        elbow=elbow,
-                        stack_index=2 if speed_visible else 1,
-                    )
                     if release_hotspot_risk:
                         hotspot_payload = {
                             "risk_id": release_hotspot_risk,
