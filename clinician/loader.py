@@ -5,6 +5,10 @@ from typing import Any, Dict
 
 _YAML_CACHE: Dict[str, Any] = {}
 
+
+def clear_yaml_cache() -> None:
+    _YAML_CACHE.clear()
+
 def load_yaml(filename: str) -> Any:
     """
     Loads a YAML file from app/clinician/yaml with simple in-process caching.

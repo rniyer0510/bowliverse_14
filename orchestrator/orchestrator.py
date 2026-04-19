@@ -58,14 +58,15 @@ app = FastAPI()
 from app.persistence.models import Base
 from app.persistence.session import engine
 
-env_name = os.getenv("ACTIONLAB_ENV", "").lower()
-default_auto_create = "false" if env_name in {"prod", "production"} else "true"
 AUTO_CREATE_SCHEMA = (
-    os.getenv("ACTIONLAB_AUTO_CREATE_SCHEMA", default_auto_create).lower() == "true"
+    os.getenv("ACTIONLAB_AUTO_CREATE_SCHEMA", "false").lower() == "true"
 )
 if AUTO_CREATE_SCHEMA:
+    logger = get_logger(__name__)
+    logger.warning(
+        "[schema] ACTIONLAB_AUTO_CREATE_SCHEMA=true; using create_all for local/bootstrap only",
+    )
     Base.metadata.create_all(bind=engine)
-
 logger = get_logger(__name__)
 clinician_engine = ClinicianInterpreter()
 RENDERS_DIR = RENDER_DIR
@@ -94,11 +95,21 @@ def _compact_header(value: str, limit: int = 120) -> str:
     return f"{text[: limit - 3]}..."
 
 
+def _request_header(request: Request, name: str) -> str:
+    headers = getattr(request, "headers", None)
+    if headers is None:
+        return ""
+    try:
+        return str(headers.get(name) or "")
+    except Exception:
+        return ""
+
+
 def _platform_hint(request: Request) -> str:
-    explicit = (request.headers.get("x-client-platform") or "").strip().lower()
+    explicit = _request_header(request, "x-client-platform").strip().lower()
     if explicit:
         return explicit
-    user_agent = (request.headers.get("user-agent") or "").lower()
+    user_agent = _request_header(request, "user-agent").lower()
     if "iphone" in user_agent or "ios" in user_agent:
         return "ios"
     if "android" in user_agent:
@@ -396,7 +407,7 @@ def analyze(
     bowler_type: str = Form(None),
     age_group: str = Form(None),
     season: int = Form(None),
-    actor: str = Form(None),  # ignored for identity
+    actor: str = Form(None),  # legacy compatibility field; auth identity is authoritative
     current_account=Depends(get_current_account),
 ):
     """
@@ -411,12 +422,12 @@ def analyze(
         f"[analyze:start] request_id={request_id} run_id={run_id} "
         f"account_id={current_account.account_id} player_id={player_id} "
         f"platform={_platform_hint(request)} "
-        f"content_type={file.content_type or '-'} "
-        f"filename={file.filename or '-'} "
-        f"user_agent={_compact_header(request.headers.get('user-agent') or '-')}"
+        f"content_type={getattr(file, 'content_type', None) or '-'} "
+        f"filename={getattr(file, 'filename', None) or '-'} "
+        f"user_agent={_compact_header(_request_header(request, 'user-agent') or '-')}"
     )
 
-    content_type = (file.content_type or "").lower()
+    content_type = (getattr(file, "content_type", None) or "").lower()
     # Keep this permissive for low-end/older devices that often send wrong MIME.
     # Block only clearly non-binary content types.
     if content_type.startswith("text/") or content_type in {
