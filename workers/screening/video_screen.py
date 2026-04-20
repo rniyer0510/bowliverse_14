@@ -355,7 +355,17 @@ def run_preanalysis_screen(
         )
 
     raw_delivery_count = int(delivery_window.get("delivery_count") or 0)
-    if raw_delivery_count > 0:
+    guard_delivery_count = int(delivery_guard.get("delivery_count") or 0)
+    if guard_delivery_count > 0:
+        delivery_check = {
+            "passed": guard_delivery_count <= 1,
+            "delivery_count": guard_delivery_count,
+            "method": delivery_guard.get("method"),
+            "candidate_frames": delivery_guard.get("candidate_frames") or [],
+            "raw_delivery_count": raw_delivery_count,
+            "raw_candidate_frames": delivery_window.get("peak_frames") or [],
+        }
+    elif raw_delivery_count > 0:
         delivery_check = {
             "passed": raw_delivery_count <= 1,
             "delivery_count": raw_delivery_count,

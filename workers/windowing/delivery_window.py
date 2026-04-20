@@ -1,18 +1,26 @@
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Any, Dict, List, Optional, Tuple
 
 import cv2
 import numpy as np
 from scipy.signal import find_peaks
 
-TARGET_SCAN_FPS = 15.0
+TARGET_SAMPLE_MS = 66.0
 MIN_SAMPLES = 12
 PAD_BEFORE_SEC = 1.1
 PAD_AFTER_SEC = 0.7
 MIN_PEAK_SCORE = 2.5
 LOW_MOTION_REASON = "low_motion_signal"
 MULTI_DELIVERY_GAP_SEC = 0.85
+MOTION_DIFF_THRESHOLD = 16
+MIN_COMPONENT_PIXELS = 24
+LATE_BIAS_FLOOR = 0.78
+LATE_BIAS_GAIN = 0.42
+
+
+def _sample_step_for_fps(fps: float) -> int:
+    return max(1, int(round((float(fps or 0.0) * TARGET_SAMPLE_MS) / 1000.0)))
 
 
 def _moving_average(values: np.ndarray, width: int = 5) -> np.ndarray:
@@ -22,36 +30,108 @@ def _moving_average(values: np.ndarray, width: int = 5) -> np.ndarray:
     return np.convolve(values, kernel, mode="same")
 
 
-def _motion_peak_frames(
+def _window_from_hint(
+    *,
+    total_frames: int,
+    fps: float,
+    hint_frame: Optional[int],
+) -> Tuple[int, int]:
+    if total_frames <= 0:
+        return 0, 0
+    if hint_frame is None:
+        width = min(
+            total_frames,
+            max(
+                24,
+                int(round(max(2.6 * fps, total_frames * 0.38))),
+            ),
+        )
+        start = max(0, total_frames - width)
+        end = total_frames - 1
+        return start, end
+
+    center = max(0, min(total_frames - 1, int(hint_frame)))
+    start = max(0, center - int(round(PAD_BEFORE_SEC * fps)))
+    end = min(total_frames - 1, center + int(round(PAD_AFTER_SEC * fps)))
+    return start, max(start, end)
+
+
+def _motion_box_score(
+    current_small: np.ndarray,
+    prev_small: Optional[np.ndarray],
+) -> Tuple[float, Optional[Tuple[int, int, int, int]]]:
+    if prev_small is None:
+        return 0.0, None
+
+    diff = cv2.absdiff(current_small, prev_small)
+    _, mask = cv2.threshold(diff, MOTION_DIFF_THRESHOLD, 255, cv2.THRESH_BINARY)
+    active_pixels = int(np.count_nonzero(mask))
+    if active_pixels < MIN_COMPONENT_PIXELS:
+        return float(np.mean(diff)) * 0.20, None
+
+    mask = cv2.medianBlur(mask, 3)
+    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    if not contours:
+        return float(np.mean(diff)) * 0.35, None
+
+    contour = max(contours, key=cv2.contourArea)
+    x, y, w, h = cv2.boundingRect(contour)
+    area = float(max(1, w * h))
+    area_frac = area / float(diff.size)
+    roi = diff[y : y + h, x : x + w]
+    if roi.size == 0:
+        return float(np.mean(diff)) * 0.35, None
+
+    roi_strength = float(np.percentile(roi, 88))
+    component_gain = 0.55 + min(1.45, np.sqrt(max(area_frac, 1e-6)) * 8.0)
+    score = roi_strength * component_gain
+    return score, (int(x), int(y), int(w), int(h))
+
+
+def _peak_candidate_indices(
     *,
     signal: np.ndarray,
-    sample_frames: list[int],
     baseline: float,
-) -> list[int]:
-    if signal.size == 0 or not sample_frames:
+) -> List[int]:
+    if signal.size == 0:
         return []
 
-    min_height = max(MIN_PEAK_SCORE, baseline * 1.8)
-    min_distance = max(4, int(round(TARGET_SCAN_FPS * MULTI_DELIVERY_GAP_SEC)))
-    prominence = max(0.8, (float(np.max(signal)) - baseline) * 0.18)
-    peaks, props = find_peaks(
+    min_height = max(MIN_PEAK_SCORE * 0.55, baseline * 1.22)
+    min_distance = max(4, int(round((1000.0 / TARGET_SAMPLE_MS) * MULTI_DELIVERY_GAP_SEC)))
+    prominence = max(0.35, (float(np.max(signal)) - baseline) * 0.12)
+    peaks, _ = find_peaks(
         signal,
         distance=min_distance,
         prominence=prominence,
     )
     if len(peaks) == 0:
         return []
+    return [int(idx) for idx in peaks if float(signal[int(idx)]) >= min_height]
 
-    heights = props.get("peak_heights")
-    if heights is None:
-        heights = signal[peaks]
 
-    accepted: list[int] = []
-    for idx, height in zip(peaks, heights):
-        if float(height) < min_height:
-            continue
-        accepted.append(int(sample_frames[int(idx)]))
-    return accepted
+def _select_peak_index(
+    *,
+    signal: np.ndarray,
+    sample_frames: List[int],
+    candidate_indices: List[int],
+    total_frames: int,
+) -> Optional[int]:
+    if signal.size == 0 or not sample_frames:
+        return None
+
+    ranked_indices = candidate_indices or [int(np.argmax(signal))]
+    best_idx: Optional[int] = None
+    best_score = float("-inf")
+    frame_denom = max(1.0, float(max(0, total_frames - 1)))
+    for idx in ranked_indices:
+        idx = int(idx)
+        frame_ratio = float(sample_frames[idx]) / frame_denom
+        late_bias = LATE_BIAS_FLOOR + (frame_ratio * LATE_BIAS_GAIN)
+        score = float(signal[idx]) * late_bias
+        if score > best_score:
+            best_score = score
+            best_idx = idx
+    return best_idx
 
 
 def detect_delivery_window(video: Dict[str, Any]) -> Dict[str, Any]:
@@ -61,14 +141,15 @@ def detect_delivery_window(video: Dict[str, Any]) -> Dict[str, Any]:
     if not video_path or total_frames <= 0 or fps <= 0.0:
         return {"available": False, "reason": "missing_video_metadata"}
 
-    step = max(1, int(round(fps / TARGET_SCAN_FPS)))
+    step = _sample_step_for_fps(fps)
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
         return {"available": False, "reason": "video_unavailable"}
 
-    sample_frames = []
-    scores = []
-    prev = None
+    sample_frames: List[int] = []
+    scores: List[float] = []
+    motion_boxes: List[Optional[Tuple[int, int, int, int]]] = []
+    prev: Optional[np.ndarray] = None
     frame_idx = 0
 
     try:
@@ -87,9 +168,10 @@ def detect_delivery_window(video: Dict[str, Any]) -> Dict[str, Any]:
 
             gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
             small = cv2.resize(gray, (96, 54))
-            score = 0.0 if prev is None else float(np.mean(cv2.absdiff(small, prev)))
+            score, motion_box = _motion_box_score(small, prev)
             sample_frames.append(frame_idx)
             scores.append(score)
+            motion_boxes.append(motion_box)
             prev = small
             frame_idx += 1
     finally:
@@ -99,25 +181,43 @@ def detect_delivery_window(video: Dict[str, Any]) -> Dict[str, Any]:
         return {"available": False, "reason": "insufficient_samples"}
 
     signal = _moving_average(np.asarray(scores, dtype=float))
-    peak_idx = int(np.argmax(signal))
-    peak = float(signal[peak_idx])
     baseline = float(np.median(signal))
-    peak_frames = _motion_peak_frames(
+    candidate_indices = _peak_candidate_indices(signal=signal, baseline=baseline)
+    selected_idx = _select_peak_index(
         signal=signal,
         sample_frames=sample_frames,
-        baseline=baseline,
+        candidate_indices=candidate_indices,
+        total_frames=total_frames,
     )
-    if peak < MIN_PEAK_SCORE or peak <= max(MIN_PEAK_SCORE, baseline * 1.8):
+    if selected_idx is None:
+        return {"available": False, "reason": LOW_MOTION_REASON, "delivery_count": 0, "peak_frames": []}
+
+    peak = float(signal[selected_idx])
+    peak_frames = [int(sample_frames[idx]) for idx in candidate_indices]
+    release_hint = int(sample_frames[selected_idx])
+    analysis_start, analysis_end = _window_from_hint(
+        total_frames=total_frames,
+        fps=fps,
+        hint_frame=release_hint,
+    )
+
+    if peak < (MIN_PEAK_SCORE * 0.75) or peak <= max(MIN_PEAK_SCORE * 0.75, baseline * 1.35):
         return {
             "available": False,
             "reason": LOW_MOTION_REASON,
-            "delivery_count": max(1, len(peak_frames)) if peak_frames else 0,
+            "sample_step": step,
+            "sample_count": len(sample_frames),
+            "delivery_count": len(peak_frames),
             "peak_frames": peak_frames,
+            "candidate_peak_frames": peak_frames or [release_hint],
+            "release_hint": release_hint,
+            "analysis_start": analysis_start,
+            "analysis_end": analysis_end,
         }
 
-    cutoff = baseline + (peak - baseline) * 0.35
-    left = peak_idx
-    right = peak_idx
+    cutoff = baseline + (peak - baseline) * 0.32
+    left = selected_idx
+    right = selected_idx
     while left > 0 and signal[left - 1] >= cutoff:
         left -= 1
     while right < len(signal) - 1 and signal[right + 1] >= cutoff:
@@ -129,19 +229,21 @@ def detect_delivery_window(video: Dict[str, Any]) -> Dict[str, Any]:
     analysis_end = min(total_frames - 1, coarse_end + int(round(PAD_AFTER_SEC * fps)))
     width = max(1, analysis_end - analysis_start + 1)
     contrast = max(0.0, peak - baseline) / max(peak, 1.0)
-    confidence = 0.45 + min(0.45, contrast * 0.6)
+    confidence = 0.42 + min(0.48, contrast * 0.72)
     if width < int(round(1.2 * fps)) or width > int(round(5.5 * fps)):
-        confidence = max(0.25, confidence - 0.15)
+        confidence = max(0.28, confidence - 0.12)
 
     return {
         "available": True,
-        "method": "coarse_motion_scan",
+        "method": "subject_local_motion_scan",
         "confidence": round(confidence, 3),
         "sample_step": step,
         "sample_count": len(sample_frames),
         "delivery_count": max(1, len(peak_frames)),
-        "peak_frames": peak_frames or [int(sample_frames[peak_idx])],
-        "release_hint": int(sample_frames[peak_idx]),
+        "peak_frames": peak_frames or [release_hint],
+        "candidate_peak_frames": peak_frames or [release_hint],
+        "release_hint": release_hint,
+        "selected_motion_box": motion_boxes[selected_idx] if 0 <= selected_idx < len(motion_boxes) else None,
         "coarse_start": coarse_start,
         "coarse_end": coarse_end,
         "analysis_start": analysis_start,

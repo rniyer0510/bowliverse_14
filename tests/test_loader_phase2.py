@@ -114,7 +114,13 @@ class LoaderPhase2Tests(unittest.TestCase):
             return_value=(fake_cap, dict(video)),
         ), patch(
             "app.io.loader.detect_delivery_window",
-            return_value={"available": False, "reason": "low_motion_signal"},
+            return_value={
+                "available": False,
+                "reason": "low_motion_signal",
+                "release_hint": 3,
+                "analysis_start": 0,
+                "analysis_end": 3,
+            },
         ), patch(
             "app.io.loader._create_pose_tracker",
             return_value=_FakeTracker(),
@@ -123,4 +129,37 @@ class LoaderPhase2Tests(unittest.TestCase):
 
         self.assertEqual(loaded_video["pose_window"]["start"], 0)
         self.assertEqual(loaded_video["pose_window"]["end"], 3)
+        self.assertEqual(loaded_video["pose_window"]["source"], "late_window_fallback")
         self.assertTrue(all(isinstance(item["landmarks"], list) for item in pose_frames))
+
+    def test_load_video_uses_late_clip_fallback_without_release_hint(self):
+        frames = [np.zeros((24, 24, 3), dtype=np.uint8) for _ in range(120)]
+        fake_cap = _FakeCap(frames)
+        video = {
+            "path": "/tmp/fake.mp4",
+            "fps": 30.0,
+            "total_frames": 120,
+            "width": 24,
+            "height": 24,
+        }
+
+        with patch(
+            "app.io.loader._save_upload_to_temp_path",
+            return_value="/tmp/fake.mp4",
+        ), patch(
+            "app.io.loader._read_video_metadata",
+            return_value=(fake_cap, dict(video)),
+        ), patch(
+            "app.io.loader.detect_delivery_window",
+            return_value={"available": False, "reason": "low_motion_signal"},
+        ), patch(
+            "app.io.loader._create_pose_tracker",
+            return_value=_FakeTracker(),
+        ):
+            loaded_video, pose_frames, _ = load_video(SimpleNamespace(file=None))
+
+        self.assertEqual(loaded_video["pose_window"]["source"], "late_window_fallback")
+        self.assertGreaterEqual(loaded_video["pose_window"]["start"], 40)
+        self.assertEqual(loaded_video["pose_window"]["end"], 119)
+        self.assertIsNone(pose_frames[loaded_video["pose_window"]["start"] - 1]["landmarks"])
+        self.assertIsInstance(pose_frames[loaded_video["pose_window"]["start"]]["landmarks"], list)

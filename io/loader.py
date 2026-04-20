@@ -27,6 +27,50 @@ _mp_pose = mp.solutions.pose
 
 MIN_WINDOW_CONFIDENCE = 0.30
 MIN_WINDOW_SECONDS = 1.6
+LATE_FALLBACK_MIN_SECONDS = 2.6
+LATE_FALLBACK_CLIP_RATIO = 0.38
+
+
+def _conservative_late_window(video: Dict[str, Any], delivery_window: Dict[str, Any]) -> Dict[str, Any]:
+    total_frames = int(video.get("total_frames") or 0)
+    fps = float(video.get("fps") or 0.0)
+    if total_frames <= 0 or fps <= 0.0:
+        return {
+            "start": 0,
+            "end": max(0, total_frames - 1),
+            "source": "full_clip_fallback",
+            "reason": str(delivery_window.get("reason") or "window_unavailable"),
+        }
+
+    hint = delivery_window.get("release_hint")
+    try:
+        hint_frame = int(hint) if hint is not None else None
+    except Exception:
+        hint_frame = None
+
+    if hint_frame is not None:
+        start = int(delivery_window.get("analysis_start") or 0)
+        end = int(delivery_window.get("analysis_end") or (total_frames - 1))
+        start = max(0, min(total_frames - 1, start))
+        end = max(start, min(total_frames - 1, end))
+    else:
+        width = min(
+            total_frames,
+            max(
+                24,
+                int(round(max(LATE_FALLBACK_MIN_SECONDS * fps, total_frames * LATE_FALLBACK_CLIP_RATIO))),
+            ),
+        )
+        start = max(0, total_frames - width)
+        end = total_frames - 1
+
+    return {
+        "start": start,
+        "end": end,
+        "source": "late_window_fallback",
+        "reason": str(delivery_window.get("reason") or "window_unavailable"),
+        "confidence": round(float(delivery_window.get("confidence") or 0.0), 3),
+    }
 
 
 def _create_pose_tracker():
@@ -78,8 +122,7 @@ def _resolve_pose_window(video: Dict[str, Any], delivery_window: Dict[str, Any])
         return full_window
 
     if not delivery_window.get("available"):
-        full_window["reason"] = str(delivery_window.get("reason") or "window_unavailable")
-        return full_window
+        return _conservative_late_window(video, delivery_window)
 
     confidence = float(delivery_window.get("confidence") or 0.0)
     start = int(delivery_window.get("analysis_start") or 0)
@@ -89,12 +132,13 @@ def _resolve_pose_window(video: Dict[str, Any], delivery_window: Dict[str, Any])
     width = end - start + 1
     min_frames = max(12, int(round(MIN_WINDOW_SECONDS * fps)))
     if confidence < MIN_WINDOW_CONFIDENCE or width < min_frames:
-        full_window["reason"] = (
+        delivery_window = dict(delivery_window)
+        delivery_window["reason"] = (
             "low_window_confidence"
             if confidence < MIN_WINDOW_CONFIDENCE
             else "window_too_short"
         )
-        return full_window
+        return _conservative_late_window(video, delivery_window)
 
     return {
         "start": start,
