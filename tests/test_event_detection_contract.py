@@ -1,14 +1,6 @@
 import unittest
 
-import numpy as np
-
-from app.workers.events.ffc_bfc import (
-    _apply_ffc_timing_guard,
-    _hold_frames,
-    _interp_nans_limited,
-    _pelvis_activity_onset,
-    detect_ffc_bfc,
-)
+from app.workers.events.ffc_bfc import detect_ffc_bfc
 from app.workers.events.release_uah import detect_release_uah, _nb_elbow_peak_is_plausible
 
 
@@ -66,48 +58,6 @@ def _frame(idx: int):
 
 
 class EventDetectionContractTest(unittest.TestCase):
-    def test_ffc_bfc_helper_enforces_min_hold_of_five_frames(self):
-        self.assertEqual(_hold_frames(30.0), 5)
-        self.assertEqual(_hold_frames(60.0), 5)
-        self.assertEqual(_hold_frames(120.0), 6)
-
-    def test_pelvis_activity_onset_prefers_stronger_later_segment(self):
-        R = np.array([0.1, 0.9, 0.8, 0.2, 0.1, 1.2, 1.1, 0.3], dtype=float)
-        vis_ok = np.array([True] * len(R), dtype=bool)
-
-        onset = _pelvis_activity_onset(
-            R=R,
-            vis_ok=vis_ok,
-            win_start=0,
-            win_end=len(R) - 1,
-            threshold=0.7,
-        )
-
-        self.assertEqual(onset, 5)
-
-    def test_limited_interp_preserves_long_occlusion_gap(self):
-        series = np.array([1.0, np.nan, np.nan, np.nan, 5.0], dtype=float)
-
-        out = _interp_nans_limited(series, max_gap=2)
-
-        self.assertTrue(np.isnan(out[1]))
-        self.assertTrue(np.isnan(out[2]))
-        self.assertTrue(np.isnan(out[3]))
-
-    def test_ffc_timing_guard_marks_overearly_contact_as_untrusted(self):
-        guarded = _apply_ffc_timing_guard(
-            {
-                "ffc": {"frame": 444, "confidence": 0.78, "method": "pelvis_then_geometry"},
-                "bfc": {"frame": 438, "confidence": 0.72},
-            },
-            release_frame=492,
-            fps=59.93,
-        )
-
-        self.assertEqual(guarded["ffc"]["timing_flag"], "early_relative_to_release")
-        self.assertEqual(guarded["ffc"]["release_gap_frames"], 48)
-        self.assertLessEqual(float(guarded["ffc"]["confidence"]), 0.20)
-
     def test_early_non_bowling_elbow_peak_is_not_treated_as_plausible_release_anchor(self):
         self.assertFalse(
             _nb_elbow_peak_is_plausible(
