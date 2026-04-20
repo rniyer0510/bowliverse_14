@@ -55,7 +55,10 @@ class RiskVisualGateTests(unittest.TestCase):
             risk,
             pose_frames=[_front_frame() for _ in range(5)],
             video={"path": "/tmp/fake.mp4", "fps": 30},
-            events={"ffc": {"frame": 2}},
+            events={
+                "ffc": {"frame": 2, "confidence": 0.9},
+                "release": {"frame": 4, "method": "velocity_drop_20pct"},
+            },
             run_id="run-1",
             rear_view_only=True,
         )
@@ -88,7 +91,10 @@ class RiskVisualGateTests(unittest.TestCase):
                 risk,
                 pose_frames=cropped_frames,
                 video={"path": "/tmp/fake.mp4", "fps": 30},
-                events={"ffc": {"frame": 2}},
+                events={
+                    "ffc": {"frame": 2, "confidence": 0.9},
+                    "release": {"frame": 4, "method": "velocity_drop_20pct"},
+                },
                 run_id="run-1",
                 rear_view_only=False,
             )
@@ -114,7 +120,10 @@ class RiskVisualGateTests(unittest.TestCase):
                 risk,
                 pose_frames=[_front_frame() for _ in range(5)],
                 video={"path": "/tmp/fake.mp4", "fps": 30},
-                events={"ffc": {"frame": 2}},
+                events={
+                    "ffc": {"frame": 2, "confidence": 0.9},
+                    "release": {"frame": 4, "method": "velocity_drop_20pct"},
+                },
                 run_id="run-1",
                 rear_view_only=False,
             )
@@ -141,7 +150,11 @@ class RiskVisualGateTests(unittest.TestCase):
                 pose_frames=[_front_frame() for _ in range(6)],
                 video={"path": "/tmp/fake.mp4", "fps": 30},
                 events={
-                    "ffc": {"frame": 2, "method": "pelvis_then_geometry_relaxed"},
+                    "ffc": {
+                        "frame": 2,
+                        "method": "pelvis_then_geometry_relaxed",
+                        "confidence": 0.9,
+                    },
                     "uah": {"frame": 4, "method": "shoulder_peak", "confidence": 0.72},
                     "release": {"frame": 6, "method": "velocity_drop_20pct"},
                 },
@@ -171,7 +184,11 @@ class RiskVisualGateTests(unittest.TestCase):
                 pose_frames=[_front_frame() for _ in range(6)],
                 video={"path": "/tmp/fake.mp4", "fps": 30},
                 events={
-                    "ffc": {"frame": 2, "method": "pelvis_then_geometry_relaxed"},
+                    "ffc": {
+                        "frame": 2,
+                        "method": "pelvis_then_geometry_relaxed",
+                        "confidence": 0.9,
+                    },
                     "uah": {
                         "frame": 4,
                         "method": "release_minus_one_fallback",
@@ -186,6 +203,28 @@ class RiskVisualGateTests(unittest.TestCase):
         draw_mock.assert_called_once()
         self.assertEqual(draw_mock.call_args.kwargs["frame_idx"], 3)
         self.assertEqual(out["visual"], visual_payload)
+
+    def test_ffc_dependent_visual_is_suppressed_when_ffc_is_flagged_early(self):
+        risk = {"risk_id": "knee_brace_failure", "signal_strength": 0.72}
+
+        out = risk_worker._attach_visual(
+            risk,
+            pose_frames=[_front_frame() for _ in range(6)],
+            video={"path": "/tmp/fake.mp4", "fps": 60},
+            events={
+                "ffc": {
+                    "frame": 2,
+                    "confidence": 0.2,
+                    "timing_flag": "early_relative_to_release",
+                },
+                "release": {"frame": 5, "method": "velocity_drop_20pct"},
+            },
+            run_id="run-1",
+            rear_view_only=False,
+        )
+
+        self.assertNotIn("visual", out)
+        self.assertEqual(out["visual_unavailable_reason"], risk_worker.EVENT_CHAIN_GUIDANCE_MESSAGE)
 
 
 if __name__ == "__main__":

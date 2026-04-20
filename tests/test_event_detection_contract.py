@@ -3,7 +3,9 @@ import unittest
 import numpy as np
 
 from app.workers.events.ffc_bfc import (
+    _apply_ffc_timing_guard,
     _hold_frames,
+    _interp_nans_limited,
     _pelvis_activity_onset,
     detect_ffc_bfc,
 )
@@ -82,6 +84,29 @@ class EventDetectionContractTest(unittest.TestCase):
         )
 
         self.assertEqual(onset, 5)
+
+    def test_limited_interp_preserves_long_occlusion_gap(self):
+        series = np.array([1.0, np.nan, np.nan, np.nan, 5.0], dtype=float)
+
+        out = _interp_nans_limited(series, max_gap=2)
+
+        self.assertTrue(np.isnan(out[1]))
+        self.assertTrue(np.isnan(out[2]))
+        self.assertTrue(np.isnan(out[3]))
+
+    def test_ffc_timing_guard_marks_overearly_contact_as_untrusted(self):
+        guarded = _apply_ffc_timing_guard(
+            {
+                "ffc": {"frame": 444, "confidence": 0.78, "method": "pelvis_then_geometry"},
+                "bfc": {"frame": 438, "confidence": 0.72},
+            },
+            release_frame=492,
+            fps=59.93,
+        )
+
+        self.assertEqual(guarded["ffc"]["timing_flag"], "early_relative_to_release")
+        self.assertEqual(guarded["ffc"]["release_gap_frames"], 48)
+        self.assertLessEqual(float(guarded["ffc"]["confidence"]), 0.20)
 
     def test_early_non_bowling_elbow_peak_is_not_treated_as_plausible_release_anchor(self):
         self.assertFalse(

@@ -294,6 +294,33 @@ class CoachVideoRendererTest(unittest.TestCase):
 
         self.assertEqual(text, "Front knee / leg chain\nLower back / side trunk")
 
+    def test_summary_load_watch_skips_leg_family_when_ffc_story_is_weak(self):
+        text = _summary_load_watch_text(
+            {
+                "knee_brace_failure": {
+                    "risk_id": "knee_brace_failure",
+                    "signal_strength": 0.95,
+                    "confidence": 0.95,
+                },
+                "lateral_trunk_lean": {
+                    "risk_id": "lateral_trunk_lean",
+                    "signal_strength": 0.7,
+                    "confidence": 0.9,
+                },
+            },
+            events={
+                "ffc": {
+                    "frame": 2,
+                    "confidence": 0.2,
+                    "timing_flag": "early_relative_to_release",
+                },
+                "event_chain": {"quality": 0.1},
+                "release": {"frame": 4, "confidence": 0.9},
+            },
+        )
+
+        self.assertEqual(text, "Lower back / side trunk")
+
     def test_summary_symptom_prefers_release_story_when_present(self):
         text = _summary_symptom_text(
             {

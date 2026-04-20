@@ -564,7 +564,8 @@ def _phase_cut_points(
     last = max(start + 3, stop - 1)
     span = max(4, stop - start)
     bfc = _safe_int(((events or {}).get("bfc") or {}).get("frame"))
-    ffc = _safe_int(((events or {}).get("ffc") or {}).get("frame"))
+    ffc_conf = _event_confidence(events, "ffc")
+    ffc = _safe_int(((events or {}).get("ffc") or {}).get("frame")) if ffc_conf >= MIN_FFC_STORY_CONFIDENCE else None
     uah = _safe_int(((events or {}).get("uah") or {}).get("frame"))
     release = _safe_int(((events or {}).get("release") or {}).get("frame"))
     phase_release = uah if uah is not None and uah >= (ffc if ffc is not None else start) else release

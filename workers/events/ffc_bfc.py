@@ -29,6 +29,9 @@ LFI, RFI = 31, 32
 
 MIN_VIS = 0.25
 EPS = 1e-9
+MAX_FFC_TO_RELEASE_SEC = 0.55
+MAX_FOOT_INTERP_SEC = 0.05
+MIN_TRUSTED_FFC_CONFIDENCE = 0.35
 
 
 # ------------------------------------------------------------
@@ -54,6 +57,39 @@ def _interp_nans(x: np.ndarray) -> np.ndarray:
         return np.full_like(x, np.nan)
     x[~good] = np.interp(idx[~good], idx[good], x[good])
     return x
+
+
+def _interp_nans_limited(x: np.ndarray, max_gap: int) -> np.ndarray:
+    x = x.astype(float)
+    idx = np.arange(len(x))
+    good = np.isfinite(x)
+    if good.sum() < 2:
+        return np.full_like(x, np.nan)
+
+    x_interp = x.copy()
+    x_interp[~good] = np.interp(idx[~good], idx[good], x[good])
+
+    if max_gap <= 0:
+        return x_interp
+
+    bad_idx = np.where(~good)[0]
+    if bad_idx.size == 0:
+        return x_interp
+
+    run_start = int(bad_idx[0])
+    prev = int(bad_idx[0])
+    for current in bad_idx[1:]:
+        current = int(current)
+        if current == prev + 1:
+            prev = current
+            continue
+        if (prev - run_start + 1) > max_gap:
+            x_interp[run_start:prev + 1] = np.nan
+        run_start = current
+        prev = current
+    if (prev - run_start + 1) > max_gap:
+        x_interp[run_start:prev + 1] = np.nan
+    return x_interp
 
 
 def _moving_average(x: np.ndarray, k: int) -> np.ndarray:
@@ -171,7 +207,12 @@ def _pelvis_xy(lm: list):
     return _midpoint(_xy(lm, LH), _xy(lm, RH))
 
 
-def _series_y(pose_frames: List[Dict], idx: int) -> np.ndarray:
+def _series_y(
+    pose_frames: List[Dict],
+    idx: int,
+    *,
+    max_interp_gap: Optional[int] = None,
+) -> np.ndarray:
     y = np.full(len(pose_frames), np.nan, dtype=float)
     for i, fr in enumerate(pose_frames):
         lm = fr.get("landmarks") or []
@@ -180,7 +221,43 @@ def _series_y(pose_frames: List[Dict], idx: int) -> np.ndarray:
         p = _xy(lm, idx)
         if p is not None and np.isfinite(p[1]):
             y[i] = p[1]
+    if max_interp_gap is not None:
+        return _interp_nans_limited(y, max_gap=max_interp_gap)
     return _interp_nans(y)
+
+
+def _ffc_search_start(pelvis_on: int, release_frame: int, fps: float) -> int:
+    max_gap_frames = max(10, int(round(MAX_FFC_TO_RELEASE_SEC * fps)))
+    return max(int(pelvis_on), int(release_frame) - max_gap_frames)
+
+
+def _apply_ffc_timing_guard(
+    result: Dict[str, Dict],
+    *,
+    release_frame: int,
+    fps: float,
+) -> Dict[str, Dict]:
+    ffc = result.get("ffc")
+    if not isinstance(ffc, dict):
+        return result
+    frame = _as_int(ffc.get("frame"))
+    if frame is None:
+        return result
+    max_gap_frames = max(10, int(round(MAX_FFC_TO_RELEASE_SEC * fps)))
+    gap = int(release_frame) - int(frame)
+    if gap <= max_gap_frames:
+        return result
+
+    guarded = dict(result)
+    guarded_ffc = dict(ffc)
+    guarded_ffc["confidence"] = min(
+        float(guarded_ffc.get("confidence") or 0.0),
+        0.20,
+    )
+    guarded_ffc["timing_flag"] = "early_relative_to_release"
+    guarded_ffc["release_gap_frames"] = gap
+    guarded["ffc"] = guarded_ffc
+    return guarded
 
 
 # ------------------------------------------------------------
@@ -385,10 +462,11 @@ def detect_ffc_bfc(
     # ------------------------------------------------------------
     # Geometry forward lock (RELAXED): front grounded + back grounded OR recently grounded
     # ------------------------------------------------------------
-    y_LA  = _series_y(pose_frames, LA)
-    y_RA  = _series_y(pose_frames, RA)
-    y_LFI = _series_y(pose_frames, LFI)
-    y_RFI = _series_y(pose_frames, RFI)
+    foot_interp_gap = max(3, int(round(MAX_FOOT_INTERP_SEC * fps_f)))
+    y_LA  = _series_y(pose_frames, LA, max_interp_gap=foot_interp_gap)
+    y_RA  = _series_y(pose_frames, RA, max_interp_gap=foot_interp_gap)
+    y_LFI = _series_y(pose_frames, LFI, max_interp_gap=foot_interp_gap)
+    y_RFI = _series_y(pose_frames, RFI, max_interp_gap=foot_interp_gap)
 
     # If ankle data is missing, fall back conservatively to pelvis_on (low conf)
     if (not np.any(np.isfinite(y_LA)) and not np.any(np.isfinite(y_RA))) or (not np.any(np.isfinite(y_LFI)) and not np.any(np.isfinite(y_RFI))):
@@ -408,7 +486,9 @@ def detect_ffc_bfc(
     ffc = None
     ffc_candidates: List[Dict] = []
 
-    for i in range(pelvis_on, win_end - hold):
+    search_start = _clamp(_ffc_search_start(pelvis_on, rel, fps_f), win_start, win_end)
+
+    for i in range(search_start, win_end - hold):
         left_score = _foot_ground_score(y_LA, y_LFI, i, hold, win_start, win_end, dt)
         right_score = _foot_ground_score(y_RA, y_RFI, i, hold, win_start, win_end, dt)
         Lg = left_score >= 2
@@ -438,7 +518,7 @@ def detect_ffc_bfc(
     # ------------------------------------------------------------
     if ffc is None:
         # 1) Relax further: any single grounded foot after pelvis_on
-        for i in range(pelvis_on, win_end - hold):
+        for i in range(search_start, win_end - hold):
             if _is_grounded(y_LA, y_LFI, i, hold, win_start, win_end, dt) or _is_grounded(y_RA, y_RFI, i, hold, win_start, win_end, dt):
                 ffc = i
                 candidate = build_candidate(
@@ -452,7 +532,7 @@ def detect_ffc_bfc(
                 logger.warning(f"[FFC/BFC][FALLBACK] single_foot frame={ffc}")
                 bfc = _clamp(ffc - max(3, hold), win_start, ffc)
                 logger.info(f"[FFC/BFC][RESULT] CHOSEN_FFC_FRAME={ffc}")
-                return {
+                return _apply_ffc_timing_guard({
                     "ffc": {
                         "frame": int(ffc),
                         "confidence": 0.22,
@@ -465,7 +545,7 @@ def detect_ffc_bfc(
                         "confidence": 0.22,
                         "method": "single_foot_fallback",
                     },
-                }
+                }, release_frame=rel, fps=fps_f)
 
         # 2) Ultimate fallback: 3/4 into pelvis->release window (must obey win_end fence)
         ffc = pelvis_on + int(0.75 * (win_end - pelvis_on))
@@ -482,7 +562,7 @@ def detect_ffc_bfc(
 
         bfc = _clamp(ffc - max(3, hold), win_start, ffc)
         logger.info(f"[FFC/BFC][RESULT] CHOSEN_FFC_FRAME={ffc}")
-        return {
+        return _apply_ffc_timing_guard({
             "ffc": {
                 "frame": int(ffc),
                 "confidence": 0.15,
@@ -491,7 +571,7 @@ def detect_ffc_bfc(
                 "window": [int(win_start), int(win_end)],
             },
             "bfc": {"frame": int(bfc), "confidence": 0.15, "method": "ultimate_fallback"},
-        }
+        }, release_frame=rel, fps=fps_f)
 
     # ------------------------------------------------------------
     # Result
@@ -501,7 +581,7 @@ def detect_ffc_bfc(
     bfc = _clamp(ffc - max(3, hold), win_start, ffc)
     ffc_confidence = 0.62
     bfc_confidence = 0.35
-    return {
+    return _apply_ffc_timing_guard({
         "ffc": {
             "frame": int(ffc),
             "confidence": ffc_confidence,
@@ -510,4 +590,4 @@ def detect_ffc_bfc(
             "window": [int(win_start), int(win_end)],
         },
         "bfc": {"frame": int(bfc), "confidence": bfc_confidence, "method": "context_pre_ffc"},
-    }
+    }, release_frame=rel, fps=fps_f)
