@@ -1,4 +1,5 @@
 from fastapi import FastAPI, UploadFile, File, Form, Request, HTTPException, Depends, BackgroundTasks
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from datetime import datetime
 import os
@@ -12,7 +13,13 @@ from app.io.loader import load_video
 from app.workers.screening.video_screen import run_preanalysis_screen
 from app.workers.speed.release_speed import estimate_release_speed
 from app.workers.render.coach_video_renderer import render_skeleton_video, RENDER_DIR
-from app.workers.render.render_storage import cleanup_old_renders, render_retention_days
+from app.workers.render.render_storage import (
+    cleanup_old_renders,
+    download_render_artifact,
+    normalize_render_filename,
+    render_retention_days,
+    upload_render_artifact,
+)
 
 # Events
 from app.workers.events.release_uah import detect_release_uah
@@ -370,11 +377,21 @@ def _build_walkthrough_render(
         )
         return {"available": False, "reason": "render_artifact_missing"}
 
+    artifact_name = os.path.basename(resolved_path)
+    upload_result = upload_render_artifact(
+        resolved_path,
+        artifact_name=artifact_name,
+    )
+
     return {
         **render_result,
         "renderer_version": "coach_video_renderer_v1",
         "artifact_type": "walkthrough_mp4",
-        "url": f"/renders/{os.path.basename(resolved_path)}",
+        "storage_backend": upload_result.get("storage_backend") or "local",
+        "storage_uploaded": bool(upload_result.get("uploaded")),
+        "storage_bucket": upload_result.get("bucket"),
+        "storage_object": upload_result.get("object_name"),
+        "url": f"/renders/{artifact_name}",
     }
 
 
@@ -388,11 +405,22 @@ if os.path.isdir(VISUALS_DIR):
 else:
     logger.warning(f"Visual evidence directory not found: {VISUALS_DIR}")
 
-if os.path.isdir(RENDERS_DIR):
-    app.mount("/renders", StaticFiles(directory=RENDERS_DIR), name="renders")
-    logger.info(f"Mounted walkthrough render directory: {RENDERS_DIR}")
-else:
-    logger.warning(f"Walkthrough render directory not found: {RENDERS_DIR}")
+
+@app.get("/renders/{filename}")
+def get_walkthrough_render(filename: str):
+    safe_name = normalize_render_filename(filename)
+    if not safe_name or safe_name != filename:
+        raise HTTPException(status_code=404, detail="Render not found")
+
+    local_path = os.path.join(RENDERS_DIR, safe_name)
+    if os.path.exists(local_path):
+        return FileResponse(local_path, media_type="video/mp4")
+
+    remote_bytes = download_render_artifact(safe_name)
+    if remote_bytes is not None:
+        return Response(content=remote_bytes, media_type="video/mp4")
+
+    raise HTTPException(status_code=404, detail="Render not found")
 
 
 # ------------------------------------------------------------
