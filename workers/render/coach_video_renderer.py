@@ -37,9 +37,9 @@ PANEL_EDGE = (62, 73, 88)
 ACTIVE_FILL = (74, 194, 242)
 ACTIVE_EDGE = (105, 222, 255)
 INACTIVE_FILL = (44, 52, 62)
-HOTSPOT_CORE = (48, 58, 235)
-HOTSPOT_RING = (0, 132, 255)
-HOTSPOT_SOFT = (90, 190, 255)
+HOTSPOT_CORE = (0, 114, 255)
+HOTSPOT_RING = (0, 154, 255)
+HOTSPOT_SOFT = (0, 176, 255)
 
 LEFT_SHOULDER = 11
 RIGHT_SHOULDER = 12
@@ -1523,69 +1523,20 @@ def _draw_hotspot_marker(
     overlay = frame.copy()
     pulse = 0.5 - 0.5 * np.cos(float(pulse_phase) * np.pi * 2.0)
     pulse_weight = max(0.0, min(1.0, weight))
-    base = max(5, scale // 66)
-    ring_step = max(5, scale // 55)
-    inner_ring = int(round(base + ring_step * (0.65 + pulse_weight * 0.15)))
-    mid_ring = int(round(base + ring_step * (1.45 + pulse_weight * 0.22 + pulse * 0.30)))
-    outer_ring = int(round(base + ring_step * (2.35 + pulse_weight * 0.28 + pulse * 0.65)))
-    ring_thickness = max(2, scale // 320)
-    halo_alpha = 0.12 + pulse * 0.05 + pulse_weight * 0.03
-    cv2.circle(overlay, center, outer_ring, HOTSPOT_SOFT, ring_thickness, cv2.LINE_AA)
+    base = max(8, scale // 52)
+    ring_step = max(6, scale // 42)
+    inner_ring = int(round(base + ring_step * (0.55 + pulse_weight * 0.10)))
+    mid_ring = int(round(base + ring_step * (1.28 + pulse_weight * 0.20 + pulse * 0.18)))
+    outer_ring = int(round(base + ring_step * (2.00 + pulse_weight * 0.24 + pulse * 0.32)))
+    ring_thickness = max(3, scale // 220)
+    halo_alpha = 0.20 + pulse * 0.05 + pulse_weight * 0.05
+    cv2.circle(overlay, center, outer_ring, HOTSPOT_SOFT, -1, cv2.LINE_AA)
+    cv2.circle(overlay, center, outer_ring, HOTSPOT_RING, ring_thickness, cv2.LINE_AA)
     cv2.circle(overlay, center, mid_ring, HOTSPOT_RING, ring_thickness, cv2.LINE_AA)
-    cv2.circle(overlay, center, inner_ring, HOTSPOT_RING, ring_thickness, cv2.LINE_AA)
-    cv2.circle(overlay, center, base + 1, HOTSPOT_SOFT, -1, cv2.LINE_AA)
+    cv2.circle(overlay, center, inner_ring, HOTSPOT_RING, max(2, ring_thickness - 1), cv2.LINE_AA)
+    cv2.circle(overlay, center, base + 2, HOTSPOT_SOFT, -1, cv2.LINE_AA)
     cv2.circle(overlay, center, base, HOTSPOT_CORE, -1, cv2.LINE_AA)
-    cv2.addWeighted(overlay, min(0.24, halo_alpha), frame, 1.0 - min(0.24, halo_alpha), 0.0, frame)
-
-
-def _draw_hotspot_label(
-    frame: np.ndarray,
-    *,
-    center: Tuple[int, int],
-    label: str,
-    direction: Tuple[float, float],
-    scale: int,
-) -> None:
-    if not label:
-        return
-    width = frame.shape[1]
-    height = frame.shape[0]
-    font_scale = max(0.34, scale / 1500.0)
-    thickness = 1
-    (text_w, text_h), baseline = cv2.getTextSize(label, TEXT_FONT, font_scale, thickness)
-    pad_x = max(8, scale // 60)
-    pad_y = max(6, scale // 84)
-    dx, dy = direction
-    offset_x = int(round((scale * 0.12) * (1.0 if dx >= 0.0 else -1.0)))
-    offset_y = int(round((scale * 0.05) * dy))
-    x0 = center[0] + offset_x
-    if dx < 0.0:
-        x0 -= text_w + pad_x * 2
-    x0 = max(12, min(width - text_w - pad_x * 2 - 12, x0))
-    y0 = center[1] + offset_y - text_h // 2 - pad_y
-    y0 = max(12, min(height - text_h - baseline - pad_y * 2 - 12, y0))
-    x1 = x0 + text_w + pad_x * 2
-    y1 = y0 + text_h + baseline + pad_y * 2
-    _overlay_panel(
-        frame,
-        x0=x0,
-        y0=y0,
-        x1=x1,
-        y1=y1,
-        fill_color=PANEL_BG,
-        edge_color=HOTSPOT_RING,
-        alpha=0.70,
-    )
-    cv2.putText(
-        frame,
-        label,
-        (x0 + pad_x, y0 + pad_y + text_h),
-        TEXT_FONT,
-        font_scale,
-        TEXT_COLOR,
-        thickness,
-        cv2.LINE_AA,
-    )
+    cv2.addWeighted(overlay, min(0.36, halo_alpha), frame, 1.0 - min(0.36, halo_alpha), 0.0, frame)
 
 
 def _load_watch_support_text(load_watch_text: str) -> str:
@@ -1715,13 +1666,6 @@ def _draw_load_watch_phase(
             scale=scale,
             weight=float(region.get("weight") or 0.8),
             pulse_phase=pulse_phase,
-        )
-        _draw_hotspot_label(
-            frame,
-            center=(int(center[0]), int(center[1])),
-            label=str(region.get("label") or ""),
-            direction=tuple(region.get("direction") or (1.0, -0.25)),
-            scale=scale,
         )
 
 
