@@ -48,6 +48,59 @@ def _front_frame(*, head_y=0.08, left_x=0.40, right_x=0.60, foot_y=0.93):
 
 
 class RiskVisualGateTests(unittest.TestCase):
+    def test_run_risk_worker_handles_untrusted_ffc_without_name_error(self):
+        pose_frames = [_front_frame() for _ in range(6)]
+        video = {"path": "/tmp/fake.mp4", "fps": 60}
+        events = {
+            "ffc": {
+                "frame": 2,
+                "confidence": 0.2,
+                "timing_flag": "early_relative_to_release",
+            },
+            "bfc": {"frame": 1, "confidence": 0.4},
+            "uah": {"frame": 4, "confidence": 0.8},
+            "release": {"frame": 5, "confidence": 0.8, "method": "velocity_drop_20pct"},
+        }
+
+        with patch(
+            "app.workers.risk.risk_worker.compute_front_foot_braking_shock",
+            return_value={"signal_strength": 0.2, "confidence": 0.5},
+        ) as braking_mock, patch(
+            "app.workers.risk.risk_worker.compute_knee_brace_failure",
+            return_value={"signal_strength": 0.2, "confidence": 0.5},
+        ) as knee_mock, patch(
+            "app.workers.risk.risk_worker.compute_trunk_rotation_snap",
+            return_value={"signal_strength": 0.2, "confidence": 0.5},
+        ), patch(
+            "app.workers.risk.risk_worker.compute_hip_shoulder_mismatch",
+            return_value={"signal_strength": 0.2, "confidence": 0.5},
+        ), patch(
+            "app.workers.risk.risk_worker.compute_lateral_trunk_lean",
+            return_value={"signal_strength": 0.2, "confidence": 0.5},
+        ), patch(
+            "app.workers.risk.risk_worker.compute_foot_line_deviation",
+            return_value={"signal_strength": 0.2, "confidence": 0.5},
+        ) as foot_line_mock, patch(
+            "app.workers.risk.risk_worker.attach_deviation_and_impact",
+            side_effect=lambda risk, **_: risk,
+        ), patch(
+            "app.workers.risk.risk_worker._attach_visual",
+            side_effect=lambda risk, **_: risk,
+        ):
+            out = risk_worker.run_risk_worker(
+                pose_frames=pose_frames,
+                video=video,
+                events=events,
+                action={},
+                run_id="run-1",
+            )
+
+        self.assertEqual(len(out), 6)
+        self.assertIsNone(braking_mock.call_args.args[1])
+        self.assertIsNone(knee_mock.call_args.args[1])
+        self.assertIsNone(foot_line_mock.call_args.args[1])
+        self.assertIsNone(foot_line_mock.call_args.args[2])
+
     def test_rear_view_keeps_visual_suppressed_with_guidance(self):
         risk = {"risk_id": "front_foot_braking_shock", "signal_strength": 0.7}
 

@@ -475,6 +475,9 @@ def run_risk_worker(
     bfc = _event_frame(events, "bfc")
     uah = _event_frame(events, "uah")
     rel = _event_frame(events, "release")
+    trusted_ffc = _has_trusted_ffc(events)
+    landing_ffc = ffc if trusted_ffc else None
+    landing_bfc = bfc if trusted_ffc else None
 
     rear_view_only = _is_rear_view_capture(pose_frames)
 
