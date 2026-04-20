@@ -65,6 +65,60 @@ class ElbowLegalityFallbackTests(unittest.TestCase):
         self.assertIsNone(result["extension_deg"])
         self.assertEqual(result["reason"], "flow_irregular_fallback")
 
+    def test_flow_fallback_is_consistent_across_fps(self):
+        signal_30 = [
+            {"frame": 10 + i, "angle_deg": 100.0 + (14.0 * i), "valid": True}
+            for i in range(6)
+        ]
+        signal_60 = [
+            {"frame": 20 + i, "angle_deg": 100.0 + (7.0 * i), "valid": True}
+            for i in range(11)
+        ]
+        events_30 = {"ffc": {"frame": 10}, "release": {"frame": 15}}
+        events_60 = {"ffc": {"frame": 20}, "release": {"frame": 30}}
+
+        result_30 = evaluate_elbow_legality(
+            elbow_signal=signal_30,
+            events=events_30,
+            fps=30.0,
+        )
+        result_60 = evaluate_elbow_legality(
+            elbow_signal=signal_60,
+            events=events_60,
+            fps=60.0,
+        )
+
+        self.assertEqual(result_30["verdict"], "ILLEGAL")
+        self.assertEqual(result_30["reason"], "flow_irregular_fallback")
+        self.assertEqual(result_60["verdict"], result_30["verdict"])
+        self.assertEqual(result_60["reason"], result_30["reason"])
+
+    def test_gap_aware_baseline_preserves_physical_velocity(self):
+        elbow_signal = [
+            {"frame": 10, "angle_deg": 100.0, "valid": True},
+            {"frame": 14, "angle_deg": 110.0, "valid": True},
+            {"frame": 18, "angle_deg": 120.0, "valid": True},
+            {"frame": 22, "angle_deg": 130.0, "valid": True},
+            {"frame": 26, "angle_deg": 140.0, "valid": True},
+            {"frame": 30, "angle_deg": 150.0, "valid": True},
+        ]
+        events = {
+            "ffc": {"frame": 8},
+            "uah": {"frame": 10},
+            "release": {"frame": 32},
+        }
+
+        result = evaluate_elbow_legality(
+            elbow_signal=elbow_signal,
+            events=events,
+            fps=30.0,
+        )
+
+        self.assertEqual(result["debug"]["window_mode"], "uah_to_release")
+        self.assertEqual(result["verdict"], "LEGAL")
+        self.assertAlmostEqual(result["baseline_angle_deg"], 130.0, places=2)
+        self.assertAlmostEqual(result["extension_deg"], 15.0, places=2)
+
     def test_release_anchored_window_measures_extension_when_uah_is_too_late(self):
         elbow_signal = [
             {"frame": 10, "angle_deg": 100.0, "valid": True},
@@ -135,7 +189,7 @@ class ElbowLegalityFallbackTests(unittest.TestCase):
         self.assertEqual(result["verdict"], "LEGAL")
         self.assertEqual(result["reason"], "weak_window_but_clear_margin")
 
-    def test_weak_legal_window_near_threshold_becomes_suspect(self):
+    def test_gap_aware_measurement_can_clear_a_previously_near_threshold_window(self):
         elbow_signal = [
             {"frame": 19, "angle_deg": 110.0, "valid": True},
             {"frame": 20, "angle_deg": 112.0, "valid": True},
@@ -157,8 +211,8 @@ class ElbowLegalityFallbackTests(unittest.TestCase):
             hand="R",
         )
 
-        self.assertEqual(result["verdict"], "SUSPECT")
-        self.assertEqual(result["reason"], "weak_window_conflicted")
+        self.assertEqual(result["verdict"], "LEGAL")
+        self.assertEqual(result["reason"], "weak_window_but_clear_margin")
 
     def test_low_visibility_rescue_degrades_to_suspect_when_only_grace_window_supports_it(self):
         pose_frames = self._low_vis_pose_frames(8)
