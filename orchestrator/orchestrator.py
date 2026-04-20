@@ -286,6 +286,7 @@ def _walkthrough_render_window(
     *,
     events: dict,
     total_frames: int,
+    pose_window: Optional[dict] = None,
 ) -> Tuple[int, Optional[int]]:
     bfc_frame = (events.get("bfc") or {}).get("frame")
     ffc_frame = (events.get("ffc") or {}).get("frame")
@@ -297,6 +298,15 @@ def _walkthrough_render_window(
         if isinstance(frame, int) and frame >= 0
     ]
     if not anchors:
+        if isinstance(pose_window, dict):
+            pose_start = int(pose_window.get("start") or 0)
+            pose_end_inclusive = int(pose_window.get("end") or -1)
+            if pose_end_inclusive >= pose_start:
+                pose_end_exclusive = pose_end_inclusive + 1
+                start = max(0, min(total_frames, pose_start)) if total_frames else max(0, pose_start)
+                end = min(total_frames, pose_end_exclusive) if total_frames else pose_end_exclusive
+                if end > start:
+                    return start, end
         fallback_end = min(total_frames, 180) if total_frames else 180
         return 0, fallback_end
 
@@ -328,6 +338,7 @@ def _build_walkthrough_render(
     start_frame, end_frame = _walkthrough_render_window(
         events=events,
         total_frames=total_frames,
+        pose_window=video.get("pose_window"),
     )
     output_path = os.path.join(RENDERS_DIR, f"{run_id}_walkthrough.mp4")
 
