@@ -14,6 +14,7 @@ SECURITY:
 """
 
 from collections import Counter
+import os
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel, Field
 from typing import Any, Dict, List, Optional
@@ -274,7 +275,23 @@ def _extract_visual_walkthrough(result_json: Optional[Dict[str, Any]]) -> Option
     if not isinstance(result_json, dict):
         return None
     walkthrough = result_json.get("visual_walkthrough")
-    return walkthrough if isinstance(walkthrough, dict) else None
+    if not isinstance(walkthrough, dict):
+        return None
+
+    normalized = dict(walkthrough)
+    raw_url = str(normalized.get("url") or "").strip()
+    relative_url = str(normalized.get("relative_url") or raw_url or "").strip()
+    if not relative_url:
+        return normalized
+    if relative_url.startswith("http://") or relative_url.startswith("https://"):
+        return normalized
+    if not relative_url.startswith("/"):
+        relative_url = f"/{relative_url}"
+
+    base_url = (os.getenv("ACTIONLAB_PUBLIC_BASE_URL") or "").strip().rstrip("/")
+    normalized["relative_url"] = relative_url
+    normalized["url"] = f"{base_url}{relative_url}" if base_url else relative_url
+    return normalized
 
 
 def _analysis_is_baseline_eligible(result_json: Optional[Dict[str, Any]]) -> bool:

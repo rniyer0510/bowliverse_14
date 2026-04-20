@@ -98,7 +98,11 @@ class WalkthroughRenderRouteTest(unittest.TestCase):
                     "bucket": "test-bucket",
                     "object_name": "walkthrough-renders/run-1_walkthrough.mp4",
                 },
-            ) as upload_render:
+            ) as upload_render, mock.patch.dict(
+                os.environ,
+                {"ACTIONLAB_PUBLIC_BASE_URL": "https://api.actionlabcricket.in"},
+                clear=False,
+            ):
                 result = self.module._build_walkthrough_render(
                     run_id="run-1",
                     video={"path": video_path, "total_frames": 20},
@@ -113,7 +117,11 @@ class WalkthroughRenderRouteTest(unittest.TestCase):
                 )
 
             self.assertTrue(result["available"])
-            self.assertEqual(result["url"], "/renders/run-1_walkthrough.mp4")
+            self.assertEqual(result["relative_url"], "/renders/run-1_walkthrough.mp4")
+            self.assertEqual(
+                result["url"],
+                "https://api.actionlabcricket.in/renders/run-1_walkthrough.mp4",
+            )
             self.assertEqual(result["storage_backend"], "gcs")
             self.assertTrue(result["storage_uploaded"])
             self.assertEqual(result["storage_bucket"], "test-bucket")
