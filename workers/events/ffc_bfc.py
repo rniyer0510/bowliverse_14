@@ -15,7 +15,7 @@ import math
 import numpy as np
 
 from app.common.logger import get_logger
-from app.workers.events.event_confidence import build_candidate, chain_quality, compact_candidates
+from app.workers.events.event_confidence import build_candidate, compact_candidates
 
 logger = get_logger(__name__)
 
@@ -408,14 +408,6 @@ def detect_ffc_bfc(
                     ffc_candidates.append(candidate)
                 logger.warning(f"[FFC/BFC][FALLBACK] single_foot frame={ffc}")
                 bfc = _clamp(ffc - max(3, hold), win_start, ffc)
-                chain = chain_quality(
-                    bfc_frame=bfc,
-                    ffc_frame=ffc,
-                    uah_frame=None,
-                    release_frame=rel,
-                    bfc_confidence=0.22,
-                    ffc_confidence=0.22,
-                )
                 logger.info(f"[FFC/BFC][RESULT] CHOSEN_FFC_FRAME={ffc}")
                 return {
                     "ffc": {
@@ -430,7 +422,6 @@ def detect_ffc_bfc(
                         "confidence": 0.22,
                         "method": "single_foot_fallback",
                     },
-                    "event_chain": chain,
                 }
 
         # 2) Ultimate fallback: 3/4 into pelvis->release window (must obey win_end fence)
@@ -447,14 +438,6 @@ def detect_ffc_bfc(
         logger.warning(f"[FFC/BFC][FALLBACK] ultimate_3quarter frame={ffc}")
 
         bfc = _clamp(ffc - max(3, hold), win_start, ffc)
-        chain = chain_quality(
-            bfc_frame=bfc,
-            ffc_frame=ffc,
-            uah_frame=None,
-            release_frame=rel,
-            bfc_confidence=0.15,
-            ffc_confidence=0.15,
-        )
         logger.info(f"[FFC/BFC][RESULT] CHOSEN_FFC_FRAME={ffc}")
         return {
             "ffc": {
@@ -465,7 +448,6 @@ def detect_ffc_bfc(
                 "window": [int(win_start), int(win_end)],
             },
             "bfc": {"frame": int(bfc), "confidence": 0.15, "method": "ultimate_fallback"},
-            "event_chain": chain,
         }
 
     # ------------------------------------------------------------
@@ -476,15 +458,6 @@ def detect_ffc_bfc(
     bfc = _clamp(ffc - max(3, hold), win_start, ffc)
     ffc_confidence = 0.62
     bfc_confidence = 0.35
-    chain = chain_quality(
-        bfc_frame=bfc,
-        ffc_frame=ffc,
-        uah_frame=None,
-        release_frame=rel,
-        bfc_confidence=bfc_confidence,
-        ffc_confidence=ffc_confidence,
-    )
-
     return {
         "ffc": {
             "frame": int(ffc),
@@ -494,5 +467,4 @@ def detect_ffc_bfc(
             "window": [int(win_start), int(win_end)],
         },
         "bfc": {"frame": int(bfc), "confidence": bfc_confidence, "method": "context_pre_ffc"},
-        "event_chain": chain,
     }

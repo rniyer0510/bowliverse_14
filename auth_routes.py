@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 from datetime import datetime
 
-from app.persistence.session import get_db
+from app.persistence.session import SessionLocal, get_db
 from app.persistence.models import (
     User,
     Account,
@@ -59,7 +59,6 @@ def normalize_handedness(value: str):
 
 def _record_login_audit(
     *,
-    db: Session,
     username: str,
     request: Request,
     success: bool,
@@ -79,17 +78,20 @@ def _record_login_audit(
         failure_reason=failure_reason,
     )
 
+    audit_db = SessionLocal()
     try:
-        db.add(audit)
-        db.commit()
+        audit_db.add(audit)
+        audit_db.commit()
     except Exception as exc:
-        db.rollback()
+        audit_db.rollback()
         logger.warning(
             "[login:audit_failed] username=%s success=%s error=%s",
             username,
             success,
             exc,
         )
+    finally:
+        audit_db.close()
 
 # ------------------------------------------------------------
 # Register
@@ -194,7 +196,6 @@ def login(
 
     if not username or not password:
         _record_login_audit(
-            db=db,
             username=username,
             request=request,
             success=False,
@@ -206,7 +207,6 @@ def login(
 
     if not user or not verify_password(password, user.password_hash):
         _record_login_audit(
-            db=db,
             username=username,
             request=request,
             success=False,
@@ -215,7 +215,6 @@ def login(
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
     _record_login_audit(
-        db=db,
         username=username,
         request=request,
         success=True,
