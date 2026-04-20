@@ -9,6 +9,7 @@ import numpy as np
 from app.workers.render import coach_video_renderer
 from app.workers.render.coach_video_renderer import (
     _format_action_label,
+    _select_hotspot_frame_idx,
     render_skeleton_video,
     _render_timeline_events,
     _summary_issue_lines,
@@ -93,6 +94,37 @@ class CoachVideoRendererTest(unittest.TestCase):
             _preferred_ffc_cue_risk_id(risk_by_id, report_story=None, events=events),
             "knee_brace_failure",
         )
+
+    def test_select_hotspot_frame_idx_prefers_visible_leg_stack_near_anchor(self):
+        pose_frames = [_pose_frame(i, shift=0.0) for i in range(8)]
+        for idx in (23, 25, 27):
+            pose_frames[2]["landmarks"][idx]["visibility"] = 0.0
+        tracks = coach_video_renderer._build_smoothed_tracks(
+            pose_frames,
+            width=160,
+            height=120,
+            fps=24.0,
+        )
+
+        selected = _select_hotspot_frame_idx(
+            tracks=tracks,
+            hand="R",
+            risk_id="knee_brace_failure",
+            risk_by_id={
+                "knee_brace_failure": {
+                    "risk_id": "knee_brace_failure",
+                    "signal_strength": 0.9,
+                    "confidence": 0.9,
+                }
+            },
+            phase_key="ffc",
+            anchor_frame=2,
+            start=0,
+            stop=len(pose_frames),
+        )
+
+        self.assertNotEqual(selected, 2)
+        self.assertIn(selected, {1, 3, 4})
 
     def test_render_skeleton_video_builds_tracks_for_full_pose_sequence(self):
         with tempfile.TemporaryDirectory() as tmpdir:

@@ -1725,6 +1725,70 @@ def _draw_load_watch_phase(
         )
 
 
+def _hotspot_search_window(
+    *,
+    phase_key: str,
+    anchor_frame: int,
+    start: int,
+    stop: int,
+) -> range:
+    if phase_key == "ffc":
+        lo = max(start, anchor_frame - 4)
+        hi = min(stop - 1, anchor_frame + 4)
+    elif phase_key == "release":
+        lo = max(start, anchor_frame - 3)
+        hi = min(stop - 1, anchor_frame + 2)
+    else:
+        lo = max(start, anchor_frame - 2)
+        hi = min(stop - 1, anchor_frame + 2)
+    return range(lo, hi + 1)
+
+
+def _select_hotspot_frame_idx(
+    *,
+    tracks: Dict[int, Dict[str, Any]],
+    hand: Optional[str],
+    risk_id: Optional[str],
+    risk_by_id: Dict[str, Dict[str, Any]],
+    phase_key: str,
+    anchor_frame: int,
+    start: int,
+    stop: int,
+) -> int:
+    if not risk_id:
+        return int(anchor_frame)
+
+    best_frame = int(anchor_frame)
+    best_score = float("-inf")
+    for candidate in _hotspot_search_window(
+        phase_key=phase_key,
+        anchor_frame=int(anchor_frame),
+        start=start,
+        stop=stop,
+    ):
+        regions = _load_hotspot_regions(
+            tracks=tracks,
+            frame_idx=int(candidate),
+            hand=hand,
+            risk_id=risk_id,
+            risk_by_id=risk_by_id,
+        )
+        if not regions:
+            continue
+        weights = [float(region.get("weight") or 0.0) for region in regions]
+        strong_regions = sum(1 for weight in weights if weight >= 0.34)
+        score = (
+            sum(weights)
+            + strong_regions * 0.18
+            + len(regions) * 0.05
+            - abs(int(candidate) - int(anchor_frame)) * 0.04
+        )
+        if score > best_score:
+            best_score = score
+            best_frame = int(candidate)
+    return best_frame
+
+
 def _pause_anchor_frames(
     *,
     start: int,
@@ -1916,13 +1980,25 @@ def render_skeleton_video(
                 for _ in range(cue_hold):
                     writer.write(paused_frame)
                     frames_rendered += 1
+                hotspot_frame_idx = frame_idx
+                if hotspot_payload:
+                    hotspot_frame_idx = _select_hotspot_frame_idx(
+                        tracks=tracks,
+                        hand=hand,
+                        risk_id=str((hotspot_payload or {}).get("risk_id") or ""),
+                        risk_by_id=risk_by_id,
+                        phase_key=pause_key,
+                        anchor_frame=frame_idx,
+                        start=start,
+                        stop=stop,
+                    )
                 for hotspot_idx in range(hotspot_hold):
                     hotspot_frame = frame.copy()
                     pulse_phase = 0.0 if hotspot_hold <= 1 else float(hotspot_idx) / float(hotspot_hold - 1)
                     _draw_load_watch_phase(
                         hotspot_frame,
                         tracks=tracks,
-                        frame_idx=frame_idx,
+                        frame_idx=hotspot_frame_idx,
                         hand=hand,
                         risk_id=str((hotspot_payload or {}).get("risk_id") or ""),
                         risk_by_id=risk_by_id,
