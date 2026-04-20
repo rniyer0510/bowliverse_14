@@ -48,7 +48,7 @@ def _front_frame(*, head_y=0.08, left_x=0.40, right_x=0.60, foot_y=0.93):
 
 
 class RiskVisualGateTests(unittest.TestCase):
-    def test_run_risk_worker_handles_untrusted_ffc_without_name_error(self):
+    def test_run_risk_worker_handles_low_confidence_ffc_without_crashing(self):
         pose_frames = [_front_frame() for _ in range(6)]
         video = {"path": "/tmp/fake.mp4", "fps": 60}
         events = {
@@ -96,10 +96,10 @@ class RiskVisualGateTests(unittest.TestCase):
             )
 
         self.assertEqual(len(out), 6)
-        self.assertIsNone(braking_mock.call_args.args[1])
-        self.assertIsNone(knee_mock.call_args.args[1])
-        self.assertIsNone(foot_line_mock.call_args.args[1])
-        self.assertIsNone(foot_line_mock.call_args.args[2])
+        self.assertEqual(braking_mock.call_args.args[1], 2)
+        self.assertEqual(knee_mock.call_args.args[1], 2)
+        self.assertEqual(foot_line_mock.call_args.args[1], 1)
+        self.assertEqual(foot_line_mock.call_args.args[2], 2)
 
     def test_rear_view_keeps_visual_suppressed_with_guidance(self):
         risk = {"risk_id": "front_foot_braking_shock", "signal_strength": 0.7}
@@ -257,27 +257,38 @@ class RiskVisualGateTests(unittest.TestCase):
         self.assertEqual(draw_mock.call_args.kwargs["frame_idx"], 3)
         self.assertEqual(out["visual"], visual_payload)
 
-    def test_ffc_dependent_visual_is_suppressed_when_ffc_is_flagged_early(self):
+    def test_ffc_dependent_visual_can_still_render_with_flagged_ffc(self):
         risk = {"risk_id": "knee_brace_failure", "signal_strength": 0.72}
+        visual_payload = {
+            "frame": 2,
+            "anchor": "event",
+            "visual_confidence": "HIGH",
+            "image_url": "http://example.test/visual.png",
+        }
 
-        out = risk_worker._attach_visual(
-            risk,
-            pose_frames=[_front_frame() for _ in range(6)],
-            video={"path": "/tmp/fake.mp4", "fps": 60},
-            events={
-                "ffc": {
-                    "frame": 2,
-                    "confidence": 0.2,
-                    "timing_flag": "early_relative_to_release",
+        with patch(
+            "app.workers.risk.risk_worker.draw_and_save_visual",
+            return_value=visual_payload,
+        ) as draw_mock:
+            out = risk_worker._attach_visual(
+                risk,
+                pose_frames=[_front_frame() for _ in range(6)],
+                video={"path": "/tmp/fake.mp4", "fps": 60},
+                events={
+                    "ffc": {
+                        "frame": 2,
+                        "confidence": 0.2,
+                        "timing_flag": "early_relative_to_release",
+                    },
+                    "release": {"frame": 5, "method": "velocity_drop_20pct"},
                 },
-                "release": {"frame": 5, "method": "velocity_drop_20pct"},
-            },
-            run_id="run-1",
-            rear_view_only=False,
-        )
+                run_id="run-1",
+                rear_view_only=False,
+            )
 
-        self.assertNotIn("visual", out)
-        self.assertEqual(out["visual_unavailable_reason"], risk_worker.EVENT_CHAIN_GUIDANCE_MESSAGE)
+        draw_mock.assert_called_once()
+        self.assertEqual(draw_mock.call_args.kwargs["frame_idx"], 2)
+        self.assertEqual(out["visual"], visual_payload)
 
 
 if __name__ == "__main__":

@@ -111,20 +111,6 @@ def _event_value(events: Dict[str, Any], key: str, field: str, default: Any = No
     return obj.get(field, default)
 
 
-def _has_trusted_ffc(events: Dict[str, Any]) -> bool:
-    ffc = events.get("ffc") or {}
-    frame = _event_frame(events, "ffc")
-    if frame is None:
-        return False
-    try:
-        confidence = float(ffc.get("confidence") or 0.0)
-    except Exception:
-        confidence = 0.0
-    if confidence < 0.35:
-        return False
-    return str(ffc.get("timing_flag") or "") != "early_relative_to_release"
-
-
 def _load_level_from_band(band: Optional[int]) -> Optional[str]:
     """
     Maps deviation band to footer-friendly load level.
@@ -218,27 +204,24 @@ def _pick_visual_anchor_frame(
     bfc = _event_frame(events, "bfc")
     uah = _event_frame(events, "uah")
     rel = _event_frame(events, "release")
-    trusted_ffc = _has_trusted_ffc(events)
-    landing_ffc = ffc if trusted_ffc else None
-    landing_bfc = bfc if trusted_ffc else None
 
     if risk_id in ("front_foot_braking_shock", "knee_brace_failure"):
-        return landing_ffc
+        return ffc
 
     if risk_id in ("trunk_rotation_snap", "hip_shoulder_mismatch"):
         return uah if uah is not None else rel
 
     if risk_id == "lateral_trunk_lean":
-        return rel if rel is not None else landing_ffc
+        return rel if rel is not None else ffc
 
     if risk_id == "foot_line_deviation":
         if _has_reliable_uah(events) and uah is not None:
             return uah
-        if landing_ffc is not None:
-            return landing_ffc + 1
+        if ffc is not None:
+            return ffc + 1
         return rel
 
-    return rel or landing_ffc or landing_bfc or uah
+    return rel or ffc or bfc or uah
 
 
 def _has_weak_uah(events: Dict[str, Any]) -> bool:
@@ -272,13 +255,7 @@ def _should_suppress_visual_for_event_chain(
 
     weak_release = release_method in {"peak_plus_offset", "window_start"}
     weak_uah = _has_weak_uah(events)
-    ffc_conf = float(_event_value(events, "ffc", "confidence", 0.0) or 0.0)
-    ffc_timing_flag = str(_event_value(events, "ffc", "timing_flag", "") or "")
-    weak_ffc = (
-        ffc_method in {"ultimate_fallback", "no_foot_data_fallback"}
-        or ffc_conf < 0.35
-        or ffc_timing_flag == "early_relative_to_release"
-    )
+    weak_ffc = ffc_method in {"ultimate_fallback", "no_foot_data_fallback"}
     weak_foot_line_ffc = weak_ffc or ffc_method == "single_foot_fallback"
 
     if risk_id in ("trunk_rotation_snap", "hip_shoulder_mismatch"):
@@ -288,10 +265,10 @@ def _should_suppress_visual_for_event_chain(
         return weak_release and (weak_uah or weak_ffc)
 
     if risk_id in ("front_foot_braking_shock", "knee_brace_failure"):
-        return weak_ffc
+        return weak_release and weak_ffc
 
     if risk_id == "foot_line_deviation":
-        return weak_foot_line_ffc
+        return weak_release and weak_foot_line_ffc
 
     return False
 
@@ -475,22 +452,19 @@ def run_risk_worker(
     bfc = _event_frame(events, "bfc")
     uah = _event_frame(events, "uah")
     rel = _event_frame(events, "release")
-    trusted_ffc = _has_trusted_ffc(events)
-    landing_ffc = ffc if trusted_ffc else None
-    landing_bfc = bfc if trusted_ffc else None
 
     rear_view_only = _is_rear_view_capture(pose_frames)
 
     raw = [
         _emit(
             compute_front_foot_braking_shock(
-                pose_frames, landing_ffc, fps, {}, action=action
+                pose_frames, ffc, fps, {}, action=action
             ),
             "front_foot_braking_shock",
         ),
         _emit(
             compute_knee_brace_failure(
-                pose_frames, landing_ffc, fps, {}
+                pose_frames, ffc, fps, {}
             ),
             "knee_brace_failure",
         ),
@@ -514,7 +488,7 @@ def run_risk_worker(
         ),
         _emit(
             compute_foot_line_deviation(
-                pose_frames, landing_bfc, landing_ffc, fps, {}, action=action
+                pose_frames, bfc, ffc, fps, {}, action=action
             ),
             "foot_line_deviation",
         ),
