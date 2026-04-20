@@ -331,20 +331,32 @@ class AnalysisResultRaw(Base):
 # Phase 1 Auth - User Model
 # ------------------------------------------------------------
 
-import uuid
-from sqlalchemy import Column, String, DateTime, ForeignKey
-from sqlalchemy.dialects.postgresql import UUID
-from datetime import datetime
-
 class User(Base):
     __tablename__ = "user"
 
-    user_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    username = Column(String, unique=True, nullable=False, index=True)
-    password_hash = Column(String, nullable=False)
-    role = Column(String, nullable=False)
-    account_id = Column(UUID(as_uuid=True), ForeignKey("account.account_id"), nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    username: Mapped[str] = mapped_column(
+        String,
+        unique=True,
+        nullable=False,
+        index=True,
+    )
+    password_hash: Mapped[str] = mapped_column(String, nullable=False)
+    role: Mapped[str] = mapped_column(String, nullable=False)
+    account_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("account.account_id"),
+        nullable=False,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True),
+        default=datetime.utcnow,
+        nullable=False,
+    )
 
 
 class LoginAudit(Base):

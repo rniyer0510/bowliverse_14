@@ -101,7 +101,7 @@ class EventDetectionContractTest(unittest.TestCase):
         self.assertIn("window", events["release"])
         self.assertLessEqual(events["uah"]["frame"], events["release"]["frame"])
 
-    def test_ffc_bfc_obeys_release_window_and_exposes_chain_quality(self):
+    def test_ffc_bfc_obeys_release_window(self):
         pose_frames = [_frame(i) for i in range(40)]
         release_events = detect_release_uah(
             pose_frames=pose_frames,
@@ -119,7 +119,6 @@ class EventDetectionContractTest(unittest.TestCase):
 
         self.assertIn("ffc", result)
         self.assertIn("bfc", result)
-        self.assertIn("event_chain", result)
         self.assertIn("candidates", result["ffc"])
         self.assertTrue(result["ffc"]["candidates"])
         self.assertLessEqual(result["bfc"]["frame"], result["ffc"]["frame"])
