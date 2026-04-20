@@ -50,7 +50,7 @@ def _pose_frame(frame_idx: int, shift: float):
 
 
 class CoachVideoRendererTest(unittest.TestCase):
-    def test_render_skeleton_video_builds_tracks_only_for_render_window(self):
+    def test_render_skeleton_video_builds_tracks_for_full_pose_sequence(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             video_path = os.path.join(tmpdir, "input.mp4")
             output_path = os.path.join(tmpdir, "output.mp4")
@@ -89,8 +89,8 @@ class CoachVideoRendererTest(unittest.TestCase):
 
             self.assertTrue(result["available"])
             self.assertEqual(build_tracks.call_count, 1)
-            self.assertEqual(build_tracks.call_args.kwargs["start_frame"], 2)
-            self.assertEqual(build_tracks.call_args.kwargs["end_frame"], 6)
+            self.assertNotIn("start_frame", build_tracks.call_args.kwargs)
+            self.assertNotIn("end_frame", build_tracks.call_args.kwargs)
 
     def test_render_skeleton_video_outputs_nonempty_mp4_with_phase_overlay(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -294,7 +294,7 @@ class CoachVideoRendererTest(unittest.TestCase):
 
         self.assertEqual(text, "Front knee / leg chain\nLower back / side trunk")
 
-    def test_summary_load_watch_skips_leg_family_when_ffc_story_is_weak(self):
+    def test_summary_load_watch_keeps_leg_family_when_ffc_story_is_weak(self):
         text = _summary_load_watch_text(
             {
                 "knee_brace_failure": {
@@ -319,7 +319,7 @@ class CoachVideoRendererTest(unittest.TestCase):
             },
         )
 
-        self.assertEqual(text, "Lower back / side trunk")
+        self.assertEqual(text, "Front knee / leg chain\nLower back / side trunk")
 
     def test_summary_symptom_prefers_release_story_when_present(self):
         text = _summary_symptom_text(

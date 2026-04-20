@@ -4,7 +4,6 @@ import os
 import shutil
 import subprocess
 import tempfile
-import time
 import uuid
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
@@ -444,24 +443,17 @@ def _build_smoothed_tracks(
     width: int,
     height: int,
     fps: float,
-    start_frame: int = 0,
-    end_frame: Optional[int] = None,
 ) -> Dict[int, Dict[str, Any]]:
-    total_frames = len(pose_frames)
-    start = max(0, min(total_frames, int(start_frame or 0)))
-    stop = total_frames if end_frame is None else max(start, min(total_frames, int(end_frame)))
-    window_frames = pose_frames[start:stop]
     sigma = max(1.0, float(fps or 30.0) * 0.03)
     tracks: Dict[int, Dict[str, Any]] = {}
     for joint_idx in TRACKED_JOINTS:
         raw_points = [
             _point_from_landmarks((frame or {}).get("landmarks"), joint_idx, width=width, height=height)
-            for frame in window_frames
+            for frame in pose_frames
         ]
         xs = _smooth_series([point[0] if point else None for point in raw_points], sigma=sigma)
         ys = _smooth_series([point[1] if point else None for point in raw_points], sigma=sigma)
         tracks[joint_idx] = {
-            "frame_offset": start,
             "raw": raw_points,
             "xs": xs,
             "ys": ys,
@@ -475,17 +467,13 @@ def _track_point(
     frame_idx: int,
 ) -> Optional[Tuple[int, int]]:
     track = tracks.get(joint_idx) or {}
-    offset = int(track.get("frame_offset") or 0)
-    local_idx = frame_idx - offset
-    if local_idx < 0:
-        return None
     xs = track.get("xs")
     ys = track.get("ys")
     raw = track.get("raw") or []
-    if xs is not None and ys is not None and local_idx < len(xs) and local_idx < len(ys):
-        return (int(round(float(xs[local_idx]))), int(round(float(ys[local_idx]))))
-    if local_idx < len(raw) and raw[local_idx] is not None:
-        point = raw[local_idx]
+    if xs is not None and ys is not None and frame_idx < len(xs) and frame_idx < len(ys):
+        return (int(round(float(xs[frame_idx]))), int(round(float(ys[frame_idx]))))
+    if frame_idx < len(raw) and raw[frame_idx] is not None:
+        point = raw[frame_idx]
         return (int(round(point[0])), int(round(point[1])))
     return None
 
@@ -564,8 +552,7 @@ def _phase_cut_points(
     last = max(start + 3, stop - 1)
     span = max(4, stop - start)
     bfc = _safe_int(((events or {}).get("bfc") or {}).get("frame"))
-    ffc_conf = _event_confidence(events, "ffc")
-    ffc = _safe_int(((events or {}).get("ffc") or {}).get("frame")) if ffc_conf >= MIN_FFC_STORY_CONFIDENCE else None
+    ffc = _safe_int(((events or {}).get("ffc") or {}).get("frame"))
     uah = _safe_int(((events or {}).get("uah") or {}).get("frame"))
     release = _safe_int(((events or {}).get("release") or {}).get("frame"))
     phase_release = uah if uah is not None and uah >= (ffc if ffc is not None else start) else release
@@ -1492,19 +1479,8 @@ def render_skeleton_video(
         cap.release()
         return {"available": False, "reason": "writer_open_failed"}
 
-    render_started = time.perf_counter()
-    track_build_ms = 0.0
     try:
-        track_build_started = time.perf_counter()
-        tracks = _build_smoothed_tracks(
-            pose_frames,
-            width=width,
-            height=height,
-            fps=fps,
-            start_frame=start,
-            end_frame=stop,
-        )
-        track_build_ms = (time.perf_counter() - track_build_started) * 1000.0
+        tracks = _build_smoothed_tracks(pose_frames, width=width, height=height, fps=fps)
         pause_frames = max(0, int(round(float(pause_seconds or 0.0) * fps)))
         pause_anchors = _pause_anchor_frames(start=start, stop=stop, events=events)
         ffc_frame = _safe_int(((events or {}).get("ffc") or {}).get("frame"))
@@ -1670,14 +1646,10 @@ def render_skeleton_video(
     final_path, encoding = _finalize_render_video(intermediate_path, out_path)
 
     logger.info(
-        "[coach_video_renderer] Rendered skeleton video path=%s frames=%s fps=%.2f track_window=[%s,%s) track_build_ms=%.1f total_ms=%.1f",
+        "[coach_video_renderer] Rendered skeleton video path=%s frames=%s fps=%.2f",
         final_path,
         frames_rendered,
         fps,
-        start,
-        stop,
-        track_build_ms,
-        (time.perf_counter() - render_started) * 1000.0,
     )
     return {
         "available": True,

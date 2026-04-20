@@ -133,17 +133,8 @@ def _summary_symptom_text(risk_by_id: Dict[str, Dict[str, Any]], *, events: Opti
 
 
 def _summary_load_watch_text(risk_by_id: Dict[str, Dict[str, Any]], *, events: Optional[Dict[str, Any]] = None, report_story: Optional[Dict[str, Any]] = None) -> str:
-    allow_ffc_story = _supports_ffc_story(events)
     primary_risk_id = _story_risk_for_phase(report_story, phase_key="ffc", events=events) or _story_risk_for_phase(report_story, phase_key="release", events=events)
-    ranked = sorted(
-        (
-            (rid, risk)
-            for rid, risk in risk_by_id.items()
-            if allow_ffc_story or rid not in _LEG_RISKS
-        ),
-        key=lambda item: _risk_weight(item[1]),
-        reverse=True,
-    )
+    ranked = sorted(risk_by_id.items(), key=lambda item: _risk_weight(item[1]), reverse=True)
     primary_risk_id = primary_risk_id or (ranked[0][0] if ranked else None)
     primary_label = _load_watch_label(primary_risk_id)
     if not primary_label:
