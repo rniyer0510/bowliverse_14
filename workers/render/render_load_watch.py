@@ -15,6 +15,7 @@ _REGION_LABELS = {
     "groin": "Groin",
     "knee": "Knee",
     "shin": "Shin",
+    "upper_trunk": "Upper trunk",
     "side_trunk": "Side trunk",
     "lumbar": "Lumbar",
 }
@@ -236,6 +237,7 @@ def _load_hotspot_regions(*, tracks: Dict[int, Dict[str, Any]], frame_idx: int, 
         release_left = str(hand or "R").upper().startswith("L")
         side_shoulder = left_shoulder if release_left else right_shoulder
         side_hip = left_hip if release_left else right_hip
+        upper_trunk = _mix(side_shoulder, side_hip, 0.26)
         side_trunk = _mix(side_shoulder, side_hip, 0.5)
         lumbar = _mix(left_hip, right_hip, 0.5)
         lean = _risk_weight(risk_by_id.get("lateral_trunk_lean"))
@@ -243,22 +245,28 @@ def _load_hotspot_regions(*, tracks: Dict[int, Dict[str, Any]], frame_idx: int, 
         rotation = _risk_weight(risk_by_id.get("trunk_rotation_snap"))
         pattern = str((((risk_by_id.get("hip_shoulder_mismatch") or {}).get("debug")) or {}).get("sequence_pattern") or "").lower()
         if risk_id == "lateral_trunk_lean":
+            upper_w = _clamp01(max(lean * 0.36, mismatch * 0.30))
             side_w = _clamp01(max(lean, mismatch * 0.42, rotation * 0.18))
             lumbar_w = _clamp01(max(lean * 0.42, rotation * 0.34, mismatch * 0.28))
         elif risk_id == "trunk_rotation_snap":
+            upper_w = _clamp01(max(rotation * 0.28, mismatch * 0.26))
             side_w = _clamp01(max(rotation * 0.34, mismatch * 0.22, lean * 0.20))
             lumbar_w = _clamp01(max(rotation, mismatch * 0.58, lean * 0.32))
         else:
             if pattern == "shoulders_lead":
+                upper_w = _clamp01(max(mismatch, lean * 0.30))
                 side_w = _clamp01(max(mismatch, lean * 0.34))
                 lumbar_w = _clamp01(max(mismatch * 0.42, rotation * 0.38))
             elif pattern == "hips_lead":
+                upper_w = _clamp01(max(mismatch * 0.34, lean * 0.24))
                 side_w = _clamp01(max(mismatch * 0.36, lean * 0.28))
                 lumbar_w = _clamp01(max(mismatch, rotation * 0.56))
             else:
+                upper_w = _clamp01(max(mismatch * 0.82, lean * 0.28))
                 side_w = _clamp01(max(mismatch * 0.68, lean * 0.34))
                 lumbar_w = _clamp01(max(mismatch * 0.74, rotation * 0.44))
         return [
+            _region("upper_trunk", upper_trunk, upper_w, body_mid),
             _region("side_trunk", side_trunk, side_w, body_mid),
             _region("lumbar", lumbar, lumbar_w, body_mid),
         ]

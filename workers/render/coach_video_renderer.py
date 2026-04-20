@@ -27,19 +27,20 @@ logger = get_logger(__name__)
 RENDER_DIR = get_render_dir()
 
 MIN_VISIBILITY = 0.35
-SKELETON_COLOR = (240, 225, 70)
-SKELETON_SHADOW = (32, 28, 18)
-JOINT_OUTER = (255, 255, 255)
+SKELETON_COLOR = (246, 232, 78)
+SKELETON_SHADOW = (20, 18, 14)
+JOINT_OUTER = (252, 252, 252)
 TEXT_COLOR = (246, 248, 252)
-MUTED_TEXT = (204, 212, 222)
-PANEL_BG = (24, 28, 34)
-PANEL_EDGE = (62, 73, 88)
+MUTED_TEXT = (214, 220, 228)
+PANEL_BG = (18, 21, 26)
+PANEL_EDGE = (74, 86, 102)
 ACTIVE_FILL = (74, 194, 242)
 ACTIVE_EDGE = (105, 222, 255)
 INACTIVE_FILL = (44, 52, 62)
-HOTSPOT_CORE = (0, 114, 255)
-HOTSPOT_RING = (0, 154, 255)
-HOTSPOT_SOFT = (0, 176, 255)
+HOTSPOT_CORE = (0, 140, 255)
+HOTSPOT_RING = (0, 122, 255)
+HOTSPOT_SOFT = (0, 166, 255)
+HOTSPOT_DOT = (0, 0, 170)
 
 LEFT_SHOULDER = 11
 RIGHT_SHOULDER = 12
@@ -577,17 +578,17 @@ def _frame_point(
 
 
 def _draw_joint(frame: np.ndarray, point: Tuple[int, int], scale: int) -> None:
-    outer = max(3, scale // 180)
+    outer = max(3, scale // 210)
     inner = max(2, outer - 1)
-    cv2.circle(frame, point, outer + 2, SKELETON_SHADOW, -1, cv2.LINE_AA)
+    cv2.circle(frame, point, outer + 1, SKELETON_SHADOW, -1, cv2.LINE_AA)
     cv2.circle(frame, point, outer, JOINT_OUTER, -1, cv2.LINE_AA)
     cv2.circle(frame, point, inner, SKELETON_COLOR, -1, cv2.LINE_AA)
 
 
 def _draw_skeleton(frame: np.ndarray, tracks: Dict[int, Dict[str, Any]], frame_idx: int) -> None:
     scale = min(frame.shape[0], frame.shape[1])
-    shadow_thickness = max(5, scale // 110)
-    line_thickness = max(3, scale // 180)
+    shadow_thickness = max(4, scale // 140)
+    line_thickness = max(2, scale // 220)
     for start_idx, end_idx in SKELETON_EDGES:
         start = _track_point(tracks, start_idx, frame_idx)
         end = _track_point(tracks, end_idx, frame_idx)
@@ -611,7 +612,7 @@ def _overlay_panel(
     y1: int,
     fill_color: Tuple[int, int, int],
     edge_color: Tuple[int, int, int],
-    alpha: float = 0.78,
+    alpha: float = 0.82,
 ) -> None:
     x0 = max(0, min(frame.shape[1] - 1, x0))
     x1 = max(0, min(frame.shape[1], x1))
@@ -622,7 +623,8 @@ def _overlay_panel(
     overlay = frame.copy()
     cv2.rectangle(overlay, (x0, y0), (x1, y1), fill_color, -1, cv2.LINE_AA)
     cv2.addWeighted(overlay, alpha, frame, 1.0 - alpha, 0.0, frame)
-    cv2.rectangle(frame, (x0, y0), (x1, y1), edge_color, 2, cv2.LINE_AA)
+    edge_thickness = 2 if min(frame.shape[0], frame.shape[1]) >= 520 else 1
+    cv2.rectangle(frame, (x0, y0), (x1, y1), edge_color, edge_thickness, cv2.LINE_AA)
 
 
 def _phase_cut_points(
@@ -1520,23 +1522,160 @@ def _draw_hotspot_marker(
     weight: float,
     pulse_phase: float,
 ) -> None:
-    overlay = frame.copy()
     pulse = 0.5 - 0.5 * np.cos(float(pulse_phase) * np.pi * 2.0)
     pulse_weight = max(0.0, min(1.0, weight))
-    base = max(8, scale // 52)
-    ring_step = max(6, scale // 42)
-    inner_ring = int(round(base + ring_step * (0.55 + pulse_weight * 0.10)))
-    mid_ring = int(round(base + ring_step * (1.28 + pulse_weight * 0.20 + pulse * 0.18)))
-    outer_ring = int(round(base + ring_step * (2.00 + pulse_weight * 0.24 + pulse * 0.32)))
-    ring_thickness = max(3, scale // 220)
-    halo_alpha = 0.20 + pulse * 0.05 + pulse_weight * 0.05
-    cv2.circle(overlay, center, outer_ring, HOTSPOT_SOFT, -1, cv2.LINE_AA)
-    cv2.circle(overlay, center, outer_ring, HOTSPOT_RING, ring_thickness, cv2.LINE_AA)
-    cv2.circle(overlay, center, mid_ring, HOTSPOT_RING, ring_thickness, cv2.LINE_AA)
-    cv2.circle(overlay, center, inner_ring, HOTSPOT_RING, max(2, ring_thickness - 1), cv2.LINE_AA)
-    cv2.circle(overlay, center, base + 2, HOTSPOT_SOFT, -1, cv2.LINE_AA)
-    cv2.circle(overlay, center, base, HOTSPOT_CORE, -1, cv2.LINE_AA)
-    cv2.addWeighted(overlay, min(0.36, halo_alpha), frame, 1.0 - min(0.36, halo_alpha), 0.0, frame)
+    base = max(5, scale // 84)
+    ring_step = max(4, scale // 72)
+    inner_ring = int(round(base + ring_step * (0.86 + pulse_weight * 0.08)))
+    outer_ring = int(round(base + ring_step * (1.92 + pulse_weight * 0.16 + pulse * 0.10)))
+    ring_thickness = max(2, scale // 260)
+    cv2.circle(frame, center, outer_ring, HOTSPOT_RING, ring_thickness + 1, cv2.LINE_AA)
+    cv2.circle(frame, center, inner_ring, HOTSPOT_RING, ring_thickness, cv2.LINE_AA)
+    cv2.circle(frame, center, base, HOTSPOT_DOT, -1, cv2.LINE_AA)
+
+
+def _draw_hotspot_pointer_line(
+    frame: np.ndarray,
+    *,
+    center: Tuple[int, int],
+    direction: Tuple[float, float],
+    scale: int,
+) -> None:
+    dx, dy = direction
+    mag = max(1e-6, float(np.hypot(dx, dy)))
+    ndx = dx / mag
+    ndy = dy / mag
+    length = max(26, scale // 7)
+    start = (
+        int(round(center[0] - ndx * length)),
+        int(round(center[1] - ndy * length)),
+    )
+    end = (
+        int(round(center[0] - ndx * max(8, scale // 32))),
+        int(round(center[1] - ndy * max(8, scale // 32))),
+    )
+    thickness = max(2, scale // 200)
+    cv2.line(frame, start, end, HOTSPOT_RING, thickness + 3, cv2.LINE_AA)
+    cv2.line(frame, start, end, HOTSPOT_SOFT, thickness + 1, cv2.LINE_AA)
+
+
+def _draw_hotspot_compact_label(
+    frame: np.ndarray,
+    *,
+    center: Tuple[int, int],
+    direction: Tuple[float, float],
+    label: str,
+    scale: int,
+    occupied_rects: Optional[List[Tuple[int, int, int, int]]] = None,
+) -> Optional[Tuple[int, int, int, int]]:
+    if not label:
+        return None
+    width = frame.shape[1]
+    height = frame.shape[0]
+    font_scale = max(0.28, scale / 1820.0)
+    thickness = 1
+    (text_w, text_h), baseline = cv2.getTextSize(label, TEXT_FONT, font_scale, thickness)
+    pad_x = max(7, scale // 80)
+    pad_y = max(4, scale // 100)
+    dx, dy = direction
+    candidates = [
+        (center[0] + int(scale * 0.10), center[1] - int(scale * 0.05)),
+        (center[0] - int(scale * 0.10) - text_w - pad_x * 2, center[1] - int(scale * 0.05)),
+        (center[0] + int(scale * 0.10), center[1] + int(scale * 0.05)),
+        (center[0] - int(scale * 0.10) - text_w - pad_x * 2, center[1] + int(scale * 0.05)),
+        (center[0] - text_w // 2 - pad_x, center[1] - int(scale * 0.11)),
+        (center[0] - text_w // 2 - pad_x, center[1] + int(scale * 0.08)),
+    ]
+    best = None
+    best_score = float("-inf")
+    occupied_rects = occupied_rects or []
+    for cand_x0, cand_y0_base in candidates:
+        cand_x0 = int(cand_x0)
+        cand_y0 = int(cand_y0_base - text_h // 2 - pad_y)
+        cand_x0 = max(12, min(width - text_w - pad_x * 2 - 12, cand_x0))
+        cand_y0 = max(12, min(height - text_h - baseline - pad_y * 2 - 12, cand_y0))
+        x_center = cand_x0 + (text_w + pad_x * 2) / 2.0
+        y_center = cand_y0 + (text_h + baseline + pad_y * 2) / 2.0
+        vec_x = x_center - center[0]
+        vec_y = y_center - center[1]
+        dist_score = min(1.0, float(np.hypot(vec_x, vec_y)) / max(1.0, scale * 0.16))
+        dir_score = 0.0
+        if abs(dx) >= abs(dy):
+            dir_score = 1.0 if (dx >= 0 and vec_x >= 0) or (dx < 0 and vec_x <= 0) else 0.0
+        else:
+            dir_score = 1.0 if (dy >= 0 and vec_y >= 0) or (dy < 0 and vec_y <= 0) else 0.0
+        top_panel_penalty = 0.0
+        if cand_y0 < int(height * 0.24) and cand_x0 < int(width * 0.72):
+            top_panel_penalty = 1.0
+        overlap_penalty = 0.0
+        cand_rect = (
+            cand_x0,
+            cand_y0,
+            cand_x0 + text_w + pad_x * 2,
+            cand_y0 + text_h + baseline + pad_y * 2,
+        )
+        for other_x0, other_y0, other_x1, other_y1 in occupied_rects:
+            if not (
+                cand_rect[2] <= other_x0
+                or cand_rect[0] >= other_x1
+                or cand_rect[3] <= other_y0
+                or cand_rect[1] >= other_y1
+            ):
+                overlap_penalty += 2.5
+        score = dir_score * 1.4 + dist_score * 0.6 - top_panel_penalty * 2.0 - overlap_penalty
+        if score > best_score:
+            best_score = score
+            best = (cand_x0, cand_y0)
+    x0, y0 = best if best is not None else (12, 12)
+    x1 = x0 + text_w + pad_x * 2
+    y1 = y0 + text_h + baseline + pad_y * 2
+    _overlay_panel(
+        frame,
+        x0=x0,
+        y0=y0,
+        x1=x1,
+        y1=y1,
+        fill_color=PANEL_BG,
+        edge_color=HOTSPOT_RING,
+        alpha=0.72,
+    )
+    cv2.putText(
+        frame,
+        label,
+        (x0 + pad_x, y0 + pad_y + text_h),
+        TEXT_FONT,
+        font_scale,
+        TEXT_COLOR,
+        thickness,
+        cv2.LINE_AA,
+    )
+    return (x0, y0, x1, y1)
+
+
+def _preferred_hotspot_region_key(risk_id: Optional[str]) -> Optional[str]:
+    mapping = {
+        "knee_brace_failure": "knee",
+        "foot_line_deviation": "shin",
+        "front_foot_braking_shock": "knee",
+        "lateral_trunk_lean": "side_trunk",
+        "hip_shoulder_mismatch": "side_trunk",
+        "trunk_rotation_snap": "lumbar",
+    }
+    return mapping.get(str(risk_id or "").strip())
+
+
+def _stacked_hotspot_region_keys(risk_id: Optional[str]) -> List[str]:
+    risk_id = str(risk_id or "").strip()
+    if risk_id in FFC_DEPENDENT_RISKS:
+        return ["groin", "knee", "shin"]
+    if risk_id in {
+        "lateral_trunk_lean",
+        "hip_shoulder_mismatch",
+        "trunk_rotation_snap",
+    }:
+        return ["upper_trunk", "side_trunk", "lumbar"]
+    preferred = _preferred_hotspot_region_key(risk_id)
+    return [preferred] if preferred else []
 
 
 def _load_watch_support_text(load_watch_text: str) -> str:
@@ -1613,6 +1752,7 @@ def _draw_load_watch_phase(
     risk_by_id: Dict[str, Dict[str, Any]],
     load_watch_text: str,
     pulse_phase: float,
+    stage: str = "rings",
 ) -> None:
     if not risk_id:
         return
@@ -1656,17 +1796,64 @@ def _draw_load_watch_phase(
 
     scale = min(frame.shape[0], frame.shape[1])
     _draw_load_watch_card(frame, load_watch_text=load_watch_text)
-    for region in ranked_regions:
-        center = region.get("center")
-        if not isinstance(center, tuple) or len(center) != 2:
-            continue
-        _draw_hotspot_marker(
-            frame,
-            center=(int(center[0]), int(center[1])),
-            scale=scale,
-            weight=float(region.get("weight") or 0.8),
-            pulse_phase=pulse_phase,
+    stacked_keys = _stacked_hotspot_region_keys(risk_id)
+    stacked_regions: List[Dict[str, Any]] = []
+    for region_key in stacked_keys:
+        match = next(
+            (region for region in ranked_regions if str(region.get("region_key") or "") == region_key),
+            None,
         )
+        if isinstance(match, dict):
+            stacked_regions.append(match)
+    if not stacked_regions and ranked_regions:
+        stacked_regions = [ranked_regions[0]]
+    primary_region = stacked_regions[0] if stacked_regions else None
+    if not isinstance(primary_region, dict):
+        return
+    center = primary_region.get("center")
+    if not isinstance(center, tuple) or len(center) != 2:
+        return
+    direction = tuple(primary_region.get("direction") or (1.0, -0.25))
+    label = str(primary_region.get("label") or "")
+    center_xy = (int(center[0]), int(center[1]))
+    if stage == "line":
+        _draw_hotspot_pointer_line(
+            frame,
+            center=center_xy,
+            direction=direction,
+            scale=scale,
+        )
+        return
+    if stage in {"rings", "label"}:
+        for region in stacked_regions:
+            stacked_center = region.get("center")
+            if not isinstance(stacked_center, tuple) or len(stacked_center) != 2:
+                continue
+            _draw_hotspot_marker(
+                frame,
+                center=(int(stacked_center[0]), int(stacked_center[1])),
+                scale=scale,
+                weight=float(region.get("weight") or 0.8),
+                pulse_phase=pulse_phase,
+            )
+    if stage == "label":
+        occupied_rects: List[Tuple[int, int, int, int]] = []
+        for region in stacked_regions:
+            stacked_center = region.get("center")
+            if not isinstance(stacked_center, tuple) or len(stacked_center) != 2:
+                continue
+            stacked_direction = tuple(region.get("direction") or direction)
+            stacked_label = str(region.get("label") or "")
+            rect = _draw_hotspot_compact_label(
+                frame,
+                center=(int(stacked_center[0]), int(stacked_center[1])),
+                direction=stacked_direction,
+                label=stacked_label,
+                scale=scale,
+                occupied_rects=occupied_rects,
+            )
+            if rect is not None:
+                occupied_rects.append(rect)
 
 
 def _hotspot_search_window(
@@ -1939,6 +2126,16 @@ def render_skeleton_video(
                 for hotspot_idx in range(hotspot_hold):
                     hotspot_frame = frame.copy()
                     pulse_phase = 0.0 if hotspot_hold <= 1 else float(hotspot_idx) / float(hotspot_hold - 1)
+                    if hotspot_hold <= 2:
+                        stage = "label"
+                    else:
+                        stage_ratio = float(hotspot_idx) / float(max(1, hotspot_hold))
+                        if stage_ratio < 0.16:
+                            stage = "line"
+                        elif stage_ratio < 0.84:
+                            stage = "rings"
+                        else:
+                            stage = "label"
                     _draw_load_watch_phase(
                         hotspot_frame,
                         tracks=tracks,
@@ -1948,6 +2145,7 @@ def render_skeleton_video(
                         risk_by_id=risk_by_id,
                         load_watch_text=str((hotspot_payload or {}).get("load_watch_text") or ""),
                         pulse_phase=pulse_phase,
+                        stage=stage,
                     )
                     writer.write(hotspot_frame)
                     frames_rendered += 1
