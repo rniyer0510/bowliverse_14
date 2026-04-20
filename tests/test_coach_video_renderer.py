@@ -9,6 +9,8 @@ import numpy as np
 from app.workers.render import coach_video_renderer
 from app.workers.render.coach_video_renderer import (
     _format_action_label,
+    _draw_load_watch_phase,
+    _preferred_hotspot_region_key,
     _select_hotspot_frame_idx,
     render_skeleton_video,
     _render_timeline_events,
@@ -125,6 +127,38 @@ class CoachVideoRendererTest(unittest.TestCase):
 
         self.assertNotEqual(selected, 2)
         self.assertIn(selected, {1, 3, 4})
+
+    def test_draw_load_watch_phase_accepts_all_hotspot_stages(self):
+        pose_frames = [_pose_frame(i, shift=0.0) for i in range(5)]
+        tracks = coach_video_renderer._build_smoothed_tracks(
+            pose_frames,
+            width=160,
+            height=120,
+            fps=24.0,
+        )
+        frame = np.zeros((120, 160, 3), dtype=np.uint8)
+        for stage in ("line", "rings", "label"):
+            _draw_load_watch_phase(
+                frame.copy(),
+                tracks=tracks,
+                frame_idx=2,
+                hand="R",
+                risk_id="knee_brace_failure",
+                risk_by_id={
+                    "knee_brace_failure": {
+                        "risk_id": "knee_brace_failure",
+                        "signal_strength": 0.9,
+                        "confidence": 0.9,
+                    }
+                },
+                load_watch_text="Front knee / leg chain",
+                pulse_phase=0.5,
+                stage=stage,
+            )
+
+    def test_preferred_hotspot_region_key_uses_curated_region_by_risk(self):
+        self.assertEqual(_preferred_hotspot_region_key("knee_brace_failure"), "knee")
+        self.assertEqual(_preferred_hotspot_region_key("lateral_trunk_lean"), "side_trunk")
 
     def test_render_skeleton_video_builds_tracks_for_full_pose_sequence(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -447,7 +481,7 @@ class CoachVideoRendererTest(unittest.TestCase):
         )
         self.assertEqual(
             [region["region_key"] for region in trunk_regions],
-            ["side_trunk", "lumbar"],
+            ["upper_trunk", "side_trunk", "lumbar"],
         )
 
 
