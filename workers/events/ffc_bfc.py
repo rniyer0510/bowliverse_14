@@ -15,7 +15,7 @@ import math
 import numpy as np
 
 from app.common.logger import get_logger
-from app.workers.events.event_confidence import build_candidate, compact_candidates
+from app.workers.events.event_confidence import build_candidate, chain_quality, compact_candidates
 
 logger = get_logger(__name__)
 
@@ -66,10 +66,6 @@ def _moving_average(x: np.ndarray, k: int) -> np.ndarray:
     return np.convolve(x, w, mode="same")
 
 
-def _hold_frames(fps: float) -> int:
-    return max(5, int(round(0.05 * fps)))
-
-
 def _robust_percentile(x: np.ndarray, p: float) -> float:
     x = np.asarray(x, dtype=float)
     x = x[np.isfinite(x)]
@@ -85,46 +81,6 @@ def _robust_mad(x: np.ndarray) -> float:
         return 1e9
     med = float(np.median(x))
     return float(np.median(np.abs(x - med)) + 1e-9)
-
-
-def _pelvis_activity_onset(
-    R: np.ndarray,
-    vis_ok: np.ndarray,
-    win_start: int,
-    win_end: int,
-    threshold: float,
-) -> Optional[int]:
-    best_segment = None
-    current_start = None
-    current_peak = float("-inf")
-    current_peak_idx = None
-
-    for i in range(win_start, win_end + 1):
-        active = bool(vis_ok[i]) and float(R[i]) > threshold
-        if active:
-            if current_start is None:
-                current_start = i
-                current_peak = float(R[i])
-                current_peak_idx = i
-            elif float(R[i]) >= current_peak:
-                current_peak = float(R[i])
-                current_peak_idx = i
-            continue
-
-        if current_start is not None:
-            segment = (current_peak, current_peak_idx or current_start, current_start)
-            if best_segment is None or segment[:2] > best_segment[:2]:
-                best_segment = segment
-            current_start = None
-            current_peak = float("-inf")
-            current_peak_idx = None
-
-    if current_start is not None:
-        segment = (current_peak, current_peak_idx or current_start, current_start)
-        if best_segment is None or segment[:2] > best_segment[:2]:
-            best_segment = segment
-
-    return None if best_segment is None else int(best_segment[2])
 
 
 def _vis(lm: list, idx: int) -> float:
@@ -313,7 +269,7 @@ def detect_ffc_bfc(
     # Window upstream of release
     # ------------------------------------------------------------
     lookback = int(round(0.9 * fps_f))       # ~900 ms
-    hold = _hold_frames(fps_f)  # ~50 ms, but never below 5 frames
+    hold = max(3, int(round(0.05 * fps_f)))  # ~50 ms
     smooth_k = max(3, int(round(0.02 * fps_f)))
 
     win_start = _clamp(rel - lookback, 0, n - 1)
@@ -368,13 +324,14 @@ def detect_ffc_bfc(
     # Pelvis activity onset (kinematics)
     # ------------------------------------------------------------
     R_on = _robust_percentile(R[win_start:win_end + 1], 70)
-    pelvis_on = _pelvis_activity_onset(
-        R=R,
-        vis_ok=vis_ok,
-        win_start=win_start,
-        win_end=win_end,
-        threshold=R_on,
-    )
+    pelvis_on = None
+
+    # Backward scan: find last region where R exceeds threshold and hips readable
+    for i in range(win_end, win_start, -1):
+        if vis_ok[i] and R[i] > R_on:
+            pelvis_on = i
+        elif pelvis_on is not None:
+            break
 
     if pelvis_on is None:
         logger.warning("[FFC/BFC] Pelvis never activated; using win_start")
@@ -451,6 +408,14 @@ def detect_ffc_bfc(
                     ffc_candidates.append(candidate)
                 logger.warning(f"[FFC/BFC][FALLBACK] single_foot frame={ffc}")
                 bfc = _clamp(ffc - max(3, hold), win_start, ffc)
+                chain = chain_quality(
+                    bfc_frame=bfc,
+                    ffc_frame=ffc,
+                    uah_frame=None,
+                    release_frame=rel,
+                    bfc_confidence=0.22,
+                    ffc_confidence=0.22,
+                )
                 logger.info(f"[FFC/BFC][RESULT] CHOSEN_FFC_FRAME={ffc}")
                 return {
                     "ffc": {
@@ -465,6 +430,7 @@ def detect_ffc_bfc(
                         "confidence": 0.22,
                         "method": "single_foot_fallback",
                     },
+                    "event_chain": chain,
                 }
 
         # 2) Ultimate fallback: 3/4 into pelvis->release window (must obey win_end fence)
@@ -481,6 +447,14 @@ def detect_ffc_bfc(
         logger.warning(f"[FFC/BFC][FALLBACK] ultimate_3quarter frame={ffc}")
 
         bfc = _clamp(ffc - max(3, hold), win_start, ffc)
+        chain = chain_quality(
+            bfc_frame=bfc,
+            ffc_frame=ffc,
+            uah_frame=None,
+            release_frame=rel,
+            bfc_confidence=0.15,
+            ffc_confidence=0.15,
+        )
         logger.info(f"[FFC/BFC][RESULT] CHOSEN_FFC_FRAME={ffc}")
         return {
             "ffc": {
@@ -491,6 +465,7 @@ def detect_ffc_bfc(
                 "window": [int(win_start), int(win_end)],
             },
             "bfc": {"frame": int(bfc), "confidence": 0.15, "method": "ultimate_fallback"},
+            "event_chain": chain,
         }
 
     # ------------------------------------------------------------
@@ -501,6 +476,15 @@ def detect_ffc_bfc(
     bfc = _clamp(ffc - max(3, hold), win_start, ffc)
     ffc_confidence = 0.62
     bfc_confidence = 0.35
+    chain = chain_quality(
+        bfc_frame=bfc,
+        ffc_frame=ffc,
+        uah_frame=None,
+        release_frame=rel,
+        bfc_confidence=bfc_confidence,
+        ffc_confidence=ffc_confidence,
+    )
+
     return {
         "ffc": {
             "frame": int(ffc),
@@ -510,4 +494,5 @@ def detect_ffc_bfc(
             "window": [int(win_start), int(win_end)],
         },
         "bfc": {"frame": int(bfc), "confidence": bfc_confidence, "method": "context_pre_ffc"},
+        "event_chain": chain,
     }
