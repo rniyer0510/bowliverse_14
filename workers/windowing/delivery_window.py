@@ -134,6 +134,53 @@ def _select_peak_index(
     return best_idx
 
 
+def _filter_reported_peak_indices(
+    *,
+    signal: np.ndarray,
+    sample_frames: List[int],
+    candidate_indices: List[int],
+    selected_idx: Optional[int],
+    total_frames: int,
+) -> List[int]:
+    if not candidate_indices:
+        return []
+    if selected_idx is None or selected_idx not in candidate_indices:
+        return candidate_indices
+
+    selected_frame = int(sample_frames[selected_idx])
+    selected_value = float(signal[selected_idx])
+    if selected_value <= 1e-6 or total_frames <= 0:
+        return candidate_indices
+
+    late_anchor_start = int(round(total_frames * 0.65))
+    early_cutoff = int(round(total_frames * 0.45))
+    keep_threshold = selected_value * 0.72
+
+    filtered: List[int] = []
+    for idx in candidate_indices:
+        idx = int(idx)
+        if idx == selected_idx:
+            filtered.append(idx)
+            continue
+
+        frame = int(sample_frames[idx])
+        value = float(signal[idx])
+        remove_as_weak_early_burst = (
+            selected_frame >= late_anchor_start
+            and frame < late_anchor_start
+            and value < keep_threshold
+        )
+        remove_as_minor_early_noise = (
+            frame < early_cutoff
+            and value < (selected_value * 0.80)
+        )
+        if remove_as_weak_early_burst or remove_as_minor_early_noise:
+            continue
+        filtered.append(idx)
+
+    return filtered or [selected_idx]
+
+
 def detect_delivery_window(video: Dict[str, Any]) -> Dict[str, Any]:
     video_path = str(video.get("path") or "")
     total_frames = int(video.get("total_frames") or 0)
@@ -193,7 +240,15 @@ def detect_delivery_window(video: Dict[str, Any]) -> Dict[str, Any]:
         return {"available": False, "reason": LOW_MOTION_REASON, "delivery_count": 0, "peak_frames": []}
 
     peak = float(signal[selected_idx])
-    peak_frames = [int(sample_frames[idx]) for idx in candidate_indices]
+    raw_peak_frames = [int(sample_frames[idx]) for idx in candidate_indices]
+    reported_peak_indices = _filter_reported_peak_indices(
+        signal=signal,
+        sample_frames=sample_frames,
+        candidate_indices=candidate_indices,
+        selected_idx=selected_idx,
+        total_frames=total_frames,
+    )
+    peak_frames = [int(sample_frames[idx]) for idx in reported_peak_indices]
     release_hint = int(sample_frames[selected_idx])
     analysis_start, analysis_end = _window_from_hint(
         total_frames=total_frames,
@@ -210,6 +265,7 @@ def detect_delivery_window(video: Dict[str, Any]) -> Dict[str, Any]:
             "delivery_count": len(peak_frames),
             "peak_frames": peak_frames,
             "candidate_peak_frames": peak_frames or [release_hint],
+            "raw_candidate_peak_frames": raw_peak_frames or [release_hint],
             "release_hint": release_hint,
             "analysis_start": analysis_start,
             "analysis_end": analysis_end,
@@ -242,6 +298,7 @@ def detect_delivery_window(video: Dict[str, Any]) -> Dict[str, Any]:
         "delivery_count": max(1, len(peak_frames)),
         "peak_frames": peak_frames or [release_hint],
         "candidate_peak_frames": peak_frames or [release_hint],
+        "raw_candidate_peak_frames": raw_peak_frames or [release_hint],
         "release_hint": release_hint,
         "selected_motion_box": motion_boxes[selected_idx] if 0 <= selected_idx < len(motion_boxes) else None,
         "coarse_start": coarse_start,
