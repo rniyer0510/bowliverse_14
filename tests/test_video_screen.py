@@ -127,6 +127,44 @@ class VideoScreenTests(unittest.TestCase):
         self.assertTrue(result["passed"])
         self.assertEqual(result["warnings"][0]["code"], "primary_subject_competition_seen")
 
+    def test_screening_prefers_raw_window_delivery_count_when_available(self):
+        with patch(
+            "app.workers.screening.video_screen.detect_delivery_candidates",
+            return_value={
+                "delivery_count": 1,
+                "method": "wrist_velocity",
+                "candidate_frames": [70],
+            },
+        ), patch(
+            "app.workers.screening.video_screen.assess_primary_subject",
+            return_value={
+                "passed": True,
+                "status": "pass",
+                "frames_with_competing_primary": [],
+                "frames_with_minor_people": [],
+            },
+        ):
+            result = run_preanalysis_screen(
+                video={
+                    "fps": 30.0,
+                    "total_frames": 240,
+                    "path": "/tmp/fake.mp4",
+                    "coarse_delivery_window": {
+                        "available": True,
+                        "method": "coarse_motion_scan",
+                        "delivery_count": 2,
+                        "peak_frames": [60, 170],
+                    },
+                },
+                pose_frames=[],
+                hand="R",
+            )
+
+        self.assertFalse(result["passed"])
+        self.assertEqual(result["blocking_issues"][0]["code"], "multiple_deliveries")
+        self.assertEqual(result["checks"]["delivery"]["delivery_count"], 2)
+        self.assertEqual(result["checks"]["delivery"]["candidate_frames"], [60, 170])
+
 
 if __name__ == "__main__":
     unittest.main()

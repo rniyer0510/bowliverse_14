@@ -125,6 +125,7 @@ def detect_release_uah(
     frames = []
     wrist_xyz, shoulder_xyz, elbow_xyz, pelvis_xyz = [], [], [], []
     nb_elbow_xyz = []  # Non-bowling elbow
+    tracked_frame_count = 0
 
     # ------------------------------------------------------------
     # Collect landmarks
@@ -132,6 +133,8 @@ def detect_release_uah(
     for it in pose_frames:
         frames.append(int(it.get("frame", len(frames))))
         lm = it.get("landmarks") or []
+        if isinstance(lm, list) and lm:
+            tracked_frame_count += 1
 
         def _vis(i):
             if i >= len(lm) or lm[i].get("visibility", 0) < MIN_VIS:
@@ -193,7 +196,8 @@ def detect_release_uah(
     vmax = float(max(1e-6, np.max(np.abs(wrist_fwd_s))))
     
     # Check wrist visibility - if low (camera behind bowler), we'll relax geometric constraints
-    wrist_visibility_ratio = wrist_visible_count / max(1, n - 1)
+    effective_frame_count = max(1, tracked_frame_count - 1)
+    wrist_visibility_ratio = wrist_visible_count / float(effective_frame_count)
     low_wrist_visibility = wrist_visibility_ratio < 0.3  # Less than 30% frames have wrist
     
     # ------------------------------------------------------------

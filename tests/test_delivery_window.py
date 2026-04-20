@@ -44,6 +44,41 @@ class DeliveryWindowTests(unittest.TestCase):
         self.assertGreaterEqual(result["release_hint"], 80)
         self.assertLessEqual(result["analysis_start"], result["release_hint"])
         self.assertGreaterEqual(result["analysis_end"], result["release_hint"])
+        self.assertEqual(result["delivery_count"], 1)
+        self.assertEqual(len(result["peak_frames"]), 1)
+
+    def test_reports_multiple_motion_bursts(self):
+        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4")
+        tmp.close()
+        path = tmp.name
+
+        writer = cv2.VideoWriter(
+            path,
+            cv2.VideoWriter_fourcc(*"mp4v"),
+            30.0,
+            (160, 120),
+        )
+        for idx in range(240):
+            frame = np.zeros((120, 160, 3), dtype=np.uint8)
+            if 50 <= idx <= 80:
+                x = 30 + ((idx - 50) * 3)
+                cv2.rectangle(frame, (x, 28), (x + 16, 96), (255, 255, 255), -1)
+            if 150 <= idx <= 182:
+                x = 20 + ((idx - 150) * 4)
+                cv2.rectangle(frame, (x, 24), (x + 20, 98), (255, 255, 255), -1)
+            writer.write(frame)
+        writer.release()
+
+        try:
+            result = detect_delivery_window(
+                {"path": path, "fps": 30.0, "total_frames": 240}
+            )
+        finally:
+            os.remove(path)
+
+        self.assertTrue(result["available"])
+        self.assertGreaterEqual(result["delivery_count"], 2)
+        self.assertGreaterEqual(len(result["peak_frames"]), 2)
 
 
 if __name__ == "__main__":

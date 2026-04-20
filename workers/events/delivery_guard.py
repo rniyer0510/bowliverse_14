@@ -123,6 +123,7 @@ def detect_delivery_candidates(
     nb_elbow_y = []
     wrist_visible = 0
     nb_elbow_visible = 0
+    tracked_indices: List[int] = []
 
     for item in pose_frames or []:
         landmarks = (item or {}).get("landmarks") or []
@@ -164,6 +165,9 @@ def detect_delivery_candidates(
         else:
             nb_elbow_y.append(np.nan)
 
+        if isinstance(landmarks, list) and landmarks:
+            tracked_indices.append(len(wrist_xyz) - 1)
+
     n = len(wrist_xyz)
     if n < 10:
         return {
@@ -171,6 +175,13 @@ def detect_delivery_candidates(
             "method": "insufficient_frames",
             "candidate_frames": [],
         }
+
+    tracked_frame_count = len(tracked_indices)
+    tracked_span = (
+        (tracked_indices[-1] - tracked_indices[0] + 1)
+        if tracked_indices
+        else n
+    )
 
     pelvis_vels = []
     for i in range(1, n):
@@ -208,10 +219,10 @@ def detect_delivery_candidates(
     wrist_peaks = _filter_delivery_candidates(
         wrist_peaks,
         wrist_signal,
-        total_frames=n,
+        total_frames=tracked_span,
     )
 
-    wrist_visibility_ratio = wrist_visible / float(max(1, n))
+    wrist_visibility_ratio = wrist_visible / float(max(1, tracked_frame_count))
     if len(wrist_peaks) >= 2 and wrist_visibility_ratio >= 0.30:
         return {
             "delivery_count": len(wrist_peaks),
@@ -235,7 +246,7 @@ def detect_delivery_candidates(
         nb_peaks = _filter_delivery_candidates(
             nb_peaks,
             nb_signal,
-            total_frames=n,
+            total_frames=tracked_span,
         )
         if len(nb_peaks) >= 2:
             return {

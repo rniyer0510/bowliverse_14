@@ -4,6 +4,7 @@ from typing import Any, Dict
 
 import cv2
 import numpy as np
+from scipy.signal import find_peaks
 
 TARGET_SCAN_FPS = 15.0
 MIN_SAMPLES = 12
@@ -11,6 +12,7 @@ PAD_BEFORE_SEC = 1.1
 PAD_AFTER_SEC = 0.7
 MIN_PEAK_SCORE = 2.5
 LOW_MOTION_REASON = "low_motion_signal"
+MULTI_DELIVERY_GAP_SEC = 0.85
 
 
 def _moving_average(values: np.ndarray, width: int = 5) -> np.ndarray:
@@ -18,6 +20,38 @@ def _moving_average(values: np.ndarray, width: int = 5) -> np.ndarray:
         return values
     kernel = np.ones(width, dtype=float) / float(width)
     return np.convolve(values, kernel, mode="same")
+
+
+def _motion_peak_frames(
+    *,
+    signal: np.ndarray,
+    sample_frames: list[int],
+    baseline: float,
+) -> list[int]:
+    if signal.size == 0 or not sample_frames:
+        return []
+
+    min_height = max(MIN_PEAK_SCORE, baseline * 1.8)
+    min_distance = max(4, int(round(TARGET_SCAN_FPS * MULTI_DELIVERY_GAP_SEC)))
+    prominence = max(0.8, (float(np.max(signal)) - baseline) * 0.18)
+    peaks, props = find_peaks(
+        signal,
+        distance=min_distance,
+        prominence=prominence,
+    )
+    if len(peaks) == 0:
+        return []
+
+    heights = props.get("peak_heights")
+    if heights is None:
+        heights = signal[peaks]
+
+    accepted: list[int] = []
+    for idx, height in zip(peaks, heights):
+        if float(height) < min_height:
+            continue
+        accepted.append(int(sample_frames[int(idx)]))
+    return accepted
 
 
 def detect_delivery_window(video: Dict[str, Any]) -> Dict[str, Any]:
@@ -68,8 +102,18 @@ def detect_delivery_window(video: Dict[str, Any]) -> Dict[str, Any]:
     peak_idx = int(np.argmax(signal))
     peak = float(signal[peak_idx])
     baseline = float(np.median(signal))
+    peak_frames = _motion_peak_frames(
+        signal=signal,
+        sample_frames=sample_frames,
+        baseline=baseline,
+    )
     if peak < MIN_PEAK_SCORE or peak <= max(MIN_PEAK_SCORE, baseline * 1.8):
-        return {"available": False, "reason": LOW_MOTION_REASON}
+        return {
+            "available": False,
+            "reason": LOW_MOTION_REASON,
+            "delivery_count": max(1, len(peak_frames)) if peak_frames else 0,
+            "peak_frames": peak_frames,
+        }
 
     cutoff = baseline + (peak - baseline) * 0.35
     left = peak_idx
@@ -95,6 +139,8 @@ def detect_delivery_window(video: Dict[str, Any]) -> Dict[str, Any]:
         "confidence": round(confidence, 3),
         "sample_step": step,
         "sample_count": len(sample_frames),
+        "delivery_count": max(1, len(peak_frames)),
+        "peak_frames": peak_frames or [int(sample_frames[peak_idx])],
         "release_hint": int(sample_frames[peak_idx]),
         "coarse_start": coarse_start,
         "coarse_end": coarse_end,
