@@ -147,6 +147,11 @@ def _flow_jerk_limit_deg_per_sec2() -> float:
     return FLOW_MAX_JERK * FPS_NORMALIZATION_REF * FPS_NORMALIZATION_REF
 
 
+def _release_trim_frames(fps: Optional[float]) -> int:
+    fps_f = _effective_fps(fps)
+    return max(RELEASE_TRIM_FRAMES, int(round(0.05 * fps_f)))
+
+
 def _mad_filter_rows(
     rows: List[tuple[int, float]],
     z: float = 6.0,
@@ -576,6 +581,15 @@ def _review_weak_primary_window(
             "debug": reviewed_debug,
         }
 
+    if reviewed.get("verdict") == "BORDERLINE":
+        return {
+            "verdict": "SUSPECT",
+            "confidence": 0.45,
+            "reason": "weak_window_borderline",
+            "extension_deg": extension,
+            "debug": reviewed_debug,
+        }
+
     reviewed["confidence"] = min(float(reviewed.get("confidence") or 0.0), 0.60)
     reviewed["reason"] = "weak_window_unconfirmed"
     return reviewed
@@ -603,7 +617,7 @@ def _compute_elbow_legality(
             primary_debug={"uah": uah, "release": release},
         )
 
-    release_used = release - RELEASE_TRIM_FRAMES
+    release_used = release - _release_trim_frames(fps)
     if release_used < 0:
         return _flow_based_legality(
             elbow_signal,

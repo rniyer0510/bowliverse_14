@@ -66,6 +66,10 @@ def _moving_average(x: np.ndarray, k: int) -> np.ndarray:
     return np.convolve(x, w, mode="same")
 
 
+def _hold_frames(fps: float) -> int:
+    return max(5, int(round(0.05 * fps)))
+
+
 def _robust_percentile(x: np.ndarray, p: float) -> float:
     x = np.asarray(x, dtype=float)
     x = x[np.isfinite(x)]
@@ -81,6 +85,46 @@ def _robust_mad(x: np.ndarray) -> float:
         return 1e9
     med = float(np.median(x))
     return float(np.median(np.abs(x - med)) + 1e-9)
+
+
+def _pelvis_activity_onset(
+    R: np.ndarray,
+    vis_ok: np.ndarray,
+    win_start: int,
+    win_end: int,
+    threshold: float,
+) -> Optional[int]:
+    best_segment = None
+    current_start = None
+    current_peak = float("-inf")
+    current_peak_idx = None
+
+    for i in range(win_start, win_end + 1):
+        active = bool(vis_ok[i]) and float(R[i]) > threshold
+        if active:
+            if current_start is None:
+                current_start = i
+                current_peak = float(R[i])
+                current_peak_idx = i
+            elif float(R[i]) >= current_peak:
+                current_peak = float(R[i])
+                current_peak_idx = i
+            continue
+
+        if current_start is not None:
+            segment = (current_peak, current_peak_idx or current_start, current_start)
+            if best_segment is None or segment[:2] > best_segment[:2]:
+                best_segment = segment
+            current_start = None
+            current_peak = float("-inf")
+            current_peak_idx = None
+
+    if current_start is not None:
+        segment = (current_peak, current_peak_idx or current_start, current_start)
+        if best_segment is None or segment[:2] > best_segment[:2]:
+            best_segment = segment
+
+    return None if best_segment is None else int(best_segment[2])
 
 
 def _vis(lm: list, idx: int) -> float:
@@ -269,7 +313,7 @@ def detect_ffc_bfc(
     # Window upstream of release
     # ------------------------------------------------------------
     lookback = int(round(0.9 * fps_f))       # ~900 ms
-    hold = max(3, int(round(0.05 * fps_f)))  # ~50 ms
+    hold = _hold_frames(fps_f)  # ~50 ms, but never below 5 frames
     smooth_k = max(3, int(round(0.02 * fps_f)))
 
     win_start = _clamp(rel - lookback, 0, n - 1)
@@ -324,14 +368,13 @@ def detect_ffc_bfc(
     # Pelvis activity onset (kinematics)
     # ------------------------------------------------------------
     R_on = _robust_percentile(R[win_start:win_end + 1], 70)
-    pelvis_on = None
-
-    # Backward scan: find last region where R exceeds threshold and hips readable
-    for i in range(win_end, win_start, -1):
-        if vis_ok[i] and R[i] > R_on:
-            pelvis_on = i
-        elif pelvis_on is not None:
-            break
+    pelvis_on = _pelvis_activity_onset(
+        R=R,
+        vis_ok=vis_ok,
+        win_start=win_start,
+        win_end=win_end,
+        threshold=R_on,
+    )
 
     if pelvis_on is None:
         logger.warning("[FFC/BFC] Pelvis never activated; using win_start")
