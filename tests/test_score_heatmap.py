@@ -1,5 +1,7 @@
+import os
 import unittest
 from datetime import datetime
+from unittest import mock
 
 from app.persistence.read_api import (
     _build_action_change_summary,
@@ -339,7 +341,27 @@ class ScoreHeatmapTests(unittest.TestCase):
         }
         result_json = self._result_json(walkthrough=walkthrough)
 
-        self.assertEqual(_extract_visual_walkthrough(result_json), walkthrough)
+        self.assertEqual(
+            _extract_visual_walkthrough(result_json),
+            {**walkthrough, "relative_url": "/renders/run-1_walkthrough.mp4"},
+        )
+
+    def test_extract_visual_walkthrough_normalizes_relative_url_with_public_base(self):
+        walkthrough = {
+            "available": True,
+            "url": "/renders/run-1_walkthrough.mp4",
+            "renderer_version": "coach_video_renderer_v1",
+        }
+        result_json = self._result_json(walkthrough=walkthrough)
+
+        with mock.patch.dict(os.environ, {"ACTIONLAB_PUBLIC_BASE_URL": "https://api.actionlabcricket.in"}, clear=False):
+            extracted = _extract_visual_walkthrough(result_json)
+
+        self.assertEqual(extracted["relative_url"], "/renders/run-1_walkthrough.mp4")
+        self.assertEqual(
+            extracted["url"],
+            "https://api.actionlabcricket.in/renders/run-1_walkthrough.mp4",
+        )
 
     def test_build_player_baseline_state_marks_refresh_candidate_on_sustained_action_shift(self):
         baseline_state = _build_player_baseline_state(

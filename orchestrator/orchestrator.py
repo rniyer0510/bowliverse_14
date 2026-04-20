@@ -124,6 +124,20 @@ def _platform_hint(request: Request) -> str:
     return "unknown"
 
 
+def _public_asset_url(path: str) -> str:
+    asset_path = str(path or "").strip()
+    if not asset_path:
+        return asset_path
+    if asset_path.startswith("http://") or asset_path.startswith("https://"):
+        return asset_path
+    if not asset_path.startswith("/"):
+        asset_path = f"/{asset_path}"
+    base_url = (os.getenv("ACTIONLAB_PUBLIC_BASE_URL") or "").strip().rstrip("/")
+    if not base_url:
+        return asset_path
+    return f"{base_url}{asset_path}"
+
+
 @app.middleware("http")
 async def request_logging_middleware(request: Request, call_next):
     request_id = request.headers.get("x-request-id") or str(uuid.uuid4())
@@ -411,7 +425,8 @@ def _build_walkthrough_render(
         "storage_uploaded": bool(upload_result.get("uploaded")),
         "storage_bucket": upload_result.get("bucket"),
         "storage_object": upload_result.get("object_name"),
-        "url": f"/renders/{artifact_name}",
+        "relative_url": f"/renders/{artifact_name}",
+        "url": _public_asset_url(f"/renders/{artifact_name}"),
     }
 
 
