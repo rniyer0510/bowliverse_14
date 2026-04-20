@@ -7,6 +7,7 @@ import cv2
 import numpy as np
 
 from app.workers.events.delivery_guard import detect_delivery_candidates
+from app.workers.windowing.delivery_window import detect_delivery_window
 
 POSE_MIN_VIS = 0.20
 MAX_SCREEN_DURATION_SEC = 15.0
@@ -318,6 +319,11 @@ def run_preanalysis_screen(
     hand: str,
 ) -> Dict[str, Any]:
     duration_sec = _duration_seconds(video)
+    delivery_window = (
+        video.get("coarse_delivery_window")
+        if isinstance(video.get("coarse_delivery_window"), dict)
+        else detect_delivery_window(video)
+    )
     delivery_guard = detect_delivery_candidates(
         pose_frames=pose_frames,
         hand=hand,
@@ -348,12 +354,31 @@ def run_preanalysis_screen(
             }
         )
 
-    delivery_check = {
-        "passed": int(delivery_guard.get("delivery_count") or 0) <= 1,
-        "delivery_count": int(delivery_guard.get("delivery_count") or 0),
-        "method": delivery_guard.get("method"),
-        "candidate_frames": delivery_guard.get("candidate_frames") or [],
-    }
+    raw_delivery_count = int(delivery_window.get("delivery_count") or 0)
+    guard_delivery_count = int(delivery_guard.get("delivery_count") or 0)
+    if guard_delivery_count > 0:
+        delivery_check = {
+            "passed": guard_delivery_count <= 1,
+            "delivery_count": guard_delivery_count,
+            "method": delivery_guard.get("method"),
+            "candidate_frames": delivery_guard.get("candidate_frames") or [],
+            "raw_delivery_count": raw_delivery_count,
+            "raw_candidate_frames": delivery_window.get("peak_frames") or [],
+        }
+    elif raw_delivery_count > 0:
+        delivery_check = {
+            "passed": raw_delivery_count <= 1,
+            "delivery_count": raw_delivery_count,
+            "method": str(delivery_window.get("method") or "coarse_motion_scan"),
+            "candidate_frames": delivery_window.get("peak_frames") or [],
+        }
+    else:
+        delivery_check = {
+            "passed": int(delivery_guard.get("delivery_count") or 0) <= 1,
+            "delivery_count": int(delivery_guard.get("delivery_count") or 0),
+            "method": delivery_guard.get("method"),
+            "candidate_frames": delivery_guard.get("candidate_frames") or [],
+        }
     if not delivery_check["passed"]:
         blocking_issues.append(
             {
@@ -411,6 +436,7 @@ def run_preanalysis_screen(
         "warnings": warnings,
         "checks": {
             "duration": duration_check,
+            "delivery_window": delivery_window,
             "delivery": delivery_check,
             "primary_subject": primary_subject,
         },
