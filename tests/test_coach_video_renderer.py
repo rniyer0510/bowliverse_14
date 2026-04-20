@@ -7,7 +7,11 @@ import cv2
 import numpy as np
 
 from app.workers.render import coach_video_renderer
-from app.workers.render.coach_video_renderer import render_skeleton_video, _summary_issue_lines
+from app.workers.render.coach_video_renderer import (
+    render_skeleton_video,
+    _render_timeline_events,
+    _summary_issue_lines,
+)
 from app.workers.render.render_load_watch import (
     _load_hotspot_regions,
     _summary_load_watch_text,
@@ -50,6 +54,23 @@ def _pose_frame(frame_idx: int, shift: float):
 
 
 class CoachVideoRendererTest(unittest.TestCase):
+    def test_render_timeline_events_falls_back_from_weak_ffc_near_release(self):
+        render_events = _render_timeline_events(
+            start=400,
+            stop=520,
+            events={
+                "bfc": {"frame": 488, "confidence": 0.15, "method": "ultimate_fallback"},
+                "ffc": {"frame": 490, "confidence": 0.15, "method": "ultimate_fallback"},
+                "release": {"frame": 492, "confidence": 0.75, "method": "velocity_drop_20pct"},
+            },
+        )
+
+        self.assertEqual((render_events["bfc"] or {}).get("method"), "render_phase_fallback")
+        self.assertEqual((render_events["ffc"] or {}).get("method"), "render_phase_fallback")
+        self.assertLess(int((render_events["bfc"] or {}).get("frame")), int((render_events["ffc"] or {}).get("frame")))
+        self.assertLess(int((render_events["ffc"] or {}).get("frame")), 492)
+        self.assertGreaterEqual(int((render_events["ffc"] or {}).get("frame")), 460)
+
     def test_render_skeleton_video_builds_tracks_for_full_pose_sequence(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             video_path = os.path.join(tmpdir, "input.mp4")

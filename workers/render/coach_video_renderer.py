@@ -122,6 +122,14 @@ FFC_DEPENDENT_RISKS = {
     "front_foot_braking_shock",
 }
 
+WEAK_PHASE_METHODS = {
+    "ultimate_fallback",
+    "single_foot_fallback",
+    "no_foot_data_fallback",
+    "degenerate_window",
+    "insufficient_landmarks",
+}
+
 MIN_FFC_STORY_CONFIDENCE = 0.35
 MIN_EVENT_CHAIN_QUALITY = 0.20
 
@@ -551,10 +559,11 @@ def _phase_cut_points(
 ) -> Tuple[int, int, int]:
     last = max(start + 3, stop - 1)
     span = max(4, stop - start)
-    bfc = _safe_int(((events or {}).get("bfc") or {}).get("frame"))
-    ffc = _safe_int(((events or {}).get("ffc") or {}).get("frame"))
-    uah = _safe_int(((events or {}).get("uah") or {}).get("frame"))
-    release = _safe_int(((events or {}).get("release") or {}).get("frame"))
+    render_events = _render_timeline_events(start=start, stop=stop, events=events)
+    bfc = _safe_int(((render_events or {}).get("bfc") or {}).get("frame"))
+    ffc = _safe_int(((render_events or {}).get("ffc") or {}).get("frame"))
+    uah = _safe_int(((render_events or {}).get("uah") or {}).get("frame"))
+    release = _safe_int(((render_events or {}).get("release") or {}).get("frame"))
     phase_release = uah if uah is not None and uah >= (ffc if ffc is not None else start) else release
 
     cp1 = bfc if bfc is not None else start + int(round(span * 0.32))
@@ -565,6 +574,102 @@ def _phase_cut_points(
     cp2 = max(cp1 + 1, min(last - 1, cp2))
     cp3 = max(cp2 + 1, min(last, cp3))
     return cp1, cp2, cp3
+
+
+def _event_confidence(events: Optional[Dict[str, Any]], key: str) -> float:
+    event = (events or {}).get(key) or {}
+    value = event.get("confidence")
+    if isinstance(value, (int, float)):
+        return float(value)
+    return 1.0 if _safe_int(event.get("frame")) is not None else 0.0
+
+
+def _event_method(events: Optional[Dict[str, Any]], key: str) -> str:
+    event = (events or {}).get(key) or {}
+    return str(event.get("method") or "").strip().lower()
+
+
+def _render_timeline_events(
+    *,
+    start: int,
+    stop: int,
+    events: Optional[Dict[str, Any]],
+) -> Dict[str, Any]:
+    timeline = dict(events or {})
+    span = max(4, stop - start)
+    last = max(start + 3, stop - 1)
+
+    raw_bfc = _safe_int(((events or {}).get("bfc") or {}).get("frame"))
+    raw_ffc = _safe_int(((events or {}).get("ffc") or {}).get("frame"))
+    raw_uah = _safe_int(((events or {}).get("uah") or {}).get("frame"))
+    raw_release = _safe_int(((events or {}).get("release") or {}).get("frame"))
+    phase_release = raw_uah if raw_uah is not None and raw_uah >= (raw_ffc if raw_ffc is not None else start) else raw_release
+    fallback_bfc = start + int(round(span * 0.32))
+    fallback_ffc = start + int(round(span * 0.58))
+    fallback_release = phase_release if phase_release is not None else start + int(round(span * 0.82))
+
+    weak_ffc = (
+        raw_ffc is None
+        or raw_ffc < start + 2
+        or raw_ffc >= stop - 1
+        or _event_confidence(events, "ffc") < 0.30
+        or _event_method(events, "ffc") in WEAK_PHASE_METHODS
+    )
+    if not weak_ffc and raw_release is not None and raw_ffc >= raw_release - 1:
+        weak_ffc = True
+
+    candidate_ffc = fallback_ffc if weak_ffc else raw_ffc
+    weak_bfc = (
+        raw_bfc is None
+        or raw_bfc < start + 1
+        or raw_bfc >= stop - 2
+        or _event_confidence(events, "bfc") < 0.20
+        or _event_method(events, "bfc") in WEAK_PHASE_METHODS
+        or (candidate_ffc is not None and raw_bfc >= candidate_ffc)
+    )
+
+    bfc_frame = raw_bfc if not weak_bfc else fallback_bfc
+    ffc_frame = raw_ffc if not weak_ffc else fallback_ffc
+    release_frame = raw_release if raw_release is not None else fallback_release
+
+    bfc_frame = max(start + 1, min(last - 2, int(bfc_frame)))
+    ffc_frame = max(bfc_frame + 1, min(last - 1, int(ffc_frame)))
+    release_frame = max(ffc_frame + 1, min(last, int(release_frame)))
+
+    if weak_bfc:
+        event = dict((timeline.get("bfc") or {}))
+        event.update(
+            {
+                "frame": int(bfc_frame),
+                "confidence": max(_event_confidence(events, "bfc"), 0.30),
+                "method": "render_phase_fallback",
+            }
+        )
+        timeline["bfc"] = event
+
+    if weak_ffc:
+        event = dict((timeline.get("ffc") or {}))
+        event.update(
+            {
+                "frame": int(ffc_frame),
+                "confidence": max(_event_confidence(events, "ffc"), 0.40),
+                "method": "render_phase_fallback",
+            }
+        )
+        timeline["ffc"] = event
+
+    if raw_release is None:
+        event = dict((timeline.get("release") or {}))
+        event.update(
+            {
+                "frame": int(release_frame),
+                "confidence": max(_event_confidence(events, "release"), 0.50),
+                "method": "render_phase_fallback",
+            }
+        )
+        timeline["release"] = event
+
+    return timeline
 
 
 def _phase_index_for_frame(
@@ -1415,9 +1520,10 @@ def _pause_anchor_frames(
     stop: int,
     events: Optional[Dict[str, Any]],
 ) -> Dict[int, str]:
+    render_events = _render_timeline_events(start=start, stop=stop, events=events)
     anchors: Dict[int, str] = {}
     for key in ("bfc", "ffc", "release"):
-        frame_value = _safe_int(((events or {}).get(key) or {}).get("frame"))
+        frame_value = _safe_int(((render_events or {}).get(key) or {}).get("frame"))
         if frame_value is None:
             continue
         if start <= frame_value < stop:
@@ -1482,9 +1588,10 @@ def render_skeleton_video(
     try:
         tracks = _build_smoothed_tracks(pose_frames, width=width, height=height, fps=fps)
         pause_frames = max(0, int(round(float(pause_seconds or 0.0) * fps)))
-        pause_anchors = _pause_anchor_frames(start=start, stop=stop, events=events)
-        ffc_frame = _safe_int(((events or {}).get("ffc") or {}).get("frame"))
-        release_frame = _safe_int(((events or {}).get("release") or {}).get("frame"))
+        render_events = _render_timeline_events(start=start, stop=stop, events=events)
+        pause_anchors = _pause_anchor_frames(start=start, stop=stop, events=render_events)
+        ffc_frame = _safe_int(((render_events or {}).get("ffc") or {}).get("frame"))
+        release_frame = _safe_int(((render_events or {}).get("release") or {}).get("frame"))
         slow_motion_extra_frames = max(
             0, int(round(float(slow_motion_factor or 1.0))) - 1
         )
@@ -1507,7 +1614,7 @@ def render_skeleton_video(
             if not ok or frame is None:
                 break
             _draw_skeleton(frame, tracks, frame_idx)
-            _draw_phase_overlay(frame, frame_idx=frame_idx, start=start, stop=stop, events=events)
+            _draw_phase_overlay(frame, frame_idx=frame_idx, start=start, stop=stop, events=render_events)
             final_summary_frame = frame.copy()
             writer.write(frame)
             frames_rendered += 1
@@ -1524,11 +1631,11 @@ def render_skeleton_video(
                 paused_frame = frame.copy()
                 hotspot_payload: Optional[Dict[str, str]] = None
                 if pause_key == "ffc":
-                    if _supports_ffc_story(events):
+                    if _supports_ffc_story(render_events):
                         preferred_ffc_risk = _preferred_ffc_cue_risk_id(
                             risk_by_id,
                             report_story=report_story,
-                            events=events,
+                            events=render_events,
                         )
                         should_draw_front_leg = preferred_ffc_risk == "knee_brace_failure"
                         should_draw_foot_line = preferred_ffc_risk == "foot_line_deviation"
@@ -1536,7 +1643,7 @@ def render_skeleton_video(
                             preferred_ffc_risk = _story_risk_for_phase(
                                 report_story,
                                 phase_key="ffc",
-                                events=events,
+                                events=render_events,
                             )
                         if not preferred_ffc_risk:
                             story_theme = str((report_story or {}).get("theme") or "")
@@ -1563,20 +1670,20 @@ def render_skeleton_video(
                                 paused_frame,
                                 pose_frames=pose_frames,
                                 frame_idx=frame_idx,
-                                events=events,
+                                events=render_events,
                                 hand=hand,
                                 risk=risk_by_id.get("foot_line_deviation"),
                             )
                         if preferred_ffc_risk:
                             hotspot_payload = {
                                 "risk_id": preferred_ffc_risk,
-                                "symptom_text": _summary_symptom_text(risk_by_id, events=events, report_story=report_story),
-                                "load_watch_text": _load_watch_label(preferred_ffc_risk) or _summary_load_watch_text(risk_by_id, events=events, report_story=report_story),
+                                "symptom_text": _summary_symptom_text(risk_by_id, events=render_events, report_story=report_story),
+                                "load_watch_text": _load_watch_label(preferred_ffc_risk) or _summary_load_watch_text(risk_by_id, events=render_events, report_story=report_story),
                             }
                 elif pause_key == "release":
                     release_hotspot_risk = _release_hotspot_risk_id(
                         risk_by_id,
-                        events=events,
+                        events=render_events,
                         report_story=report_story,
                     )
                     _draw_release_callout(
@@ -1585,13 +1692,13 @@ def render_skeleton_video(
                         frame_idx=frame_idx,
                         risk_by_id=risk_by_id,
                         report_story=report_story,
-                        events=events,
+                        events=render_events,
                     )
                     if release_hotspot_risk:
                         hotspot_payload = {
                             "risk_id": release_hotspot_risk,
-                            "symptom_text": _summary_symptom_text(risk_by_id, events=events, report_story=report_story),
-                            "load_watch_text": _load_watch_label(release_hotspot_risk) or _summary_load_watch_text(risk_by_id, events=events, report_story=report_story),
+                            "symptom_text": _summary_symptom_text(risk_by_id, events=render_events, report_story=report_story),
+                            "load_watch_text": _load_watch_label(release_hotspot_risk) or _summary_load_watch_text(risk_by_id, events=render_events, report_story=report_story),
                         }
                 cue_hold = pause_frames if hotspot_payload is None else max(1, int(round(pause_frames * 0.45)))
                 hotspot_hold = 0 if hotspot_payload is None else max(1, pause_frames - cue_hold)
@@ -1621,7 +1728,7 @@ def render_skeleton_video(
             _draw_end_summary(
                 summary_frame,
                 risk_by_id=risk_by_id,
-                events=events,
+                events=render_events,
                 action=action,
                 speed=estimated_release_speed,
                 elbow=elbow,
