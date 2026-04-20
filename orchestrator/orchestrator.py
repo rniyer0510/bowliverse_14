@@ -382,6 +382,15 @@ def _build_walkthrough_render(
         resolved_path,
         artifact_name=artifact_name,
     )
+    logger.info(
+        "[analyze:walkthrough_storage] run_id=%s storage_backend=%s uploaded=%s bucket=%s object=%s reason=%s",
+        run_id,
+        upload_result.get("storage_backend") or "local",
+        bool(upload_result.get("uploaded")),
+        upload_result.get("bucket") or "-",
+        upload_result.get("object_name") or "-",
+        upload_result.get("reason") or "-",
+    )
 
     return {
         **render_result,
@@ -414,12 +423,23 @@ def get_walkthrough_render(filename: str):
 
     local_path = os.path.join(RENDERS_DIR, safe_name)
     if os.path.exists(local_path):
+        logger.info(
+            "[renders:get] filename=%s source=local path=%s",
+            safe_name,
+            local_path,
+        )
         return FileResponse(local_path, media_type="video/mp4")
 
     remote_bytes = download_render_artifact(safe_name)
     if remote_bytes is not None:
+        logger.info(
+            "[renders:get] filename=%s source=gcs bytes=%s",
+            safe_name,
+            len(remote_bytes),
+        )
         return Response(content=remote_bytes, media_type="video/mp4")
 
+    logger.warning("[renders:get] filename=%s source=missing", safe_name)
     raise HTTPException(status_code=404, detail="Render not found")
 
 
