@@ -8,12 +8,14 @@ import numpy as np
 
 from app.workers.render import coach_video_renderer
 from app.workers.render.coach_video_renderer import (
+    _format_action_label,
     render_skeleton_video,
     _render_timeline_events,
     _summary_issue_lines,
 )
 from app.workers.render.render_load_watch import (
     _load_hotspot_regions,
+    _preferred_ffc_cue_risk_id,
     _summary_load_watch_text,
     _summary_symptom_text,
 )
@@ -54,6 +56,12 @@ def _pose_frame(frame_idx: int, shift: float):
 
 
 class CoachVideoRendererTest(unittest.TestCase):
+    def test_format_action_label_prefers_intent_when_present(self):
+        self.assertEqual(
+            _format_action_label({"action": "FRONT_ON", "intent": "semi_open"}),
+            "Semi Open",
+        )
+
     def test_render_timeline_events_falls_back_from_weak_ffc_near_release(self):
         render_events = _render_timeline_events(
             start=400,
@@ -70,6 +78,21 @@ class CoachVideoRendererTest(unittest.TestCase):
         self.assertLess(int((render_events["bfc"] or {}).get("frame")), int((render_events["ffc"] or {}).get("frame")))
         self.assertLess(int((render_events["ffc"] or {}).get("frame")), 492)
         self.assertGreaterEqual(int((render_events["ffc"] or {}).get("frame")), 460)
+
+    def test_preferred_ffc_cue_risk_id_allows_render_phase_fallback_story(self):
+        risk_by_id = {
+            "knee_brace_failure": {"risk_id": "knee_brace_failure", "signal_strength": 0.8, "confidence": 0.8},
+            "foot_line_deviation": {"risk_id": "foot_line_deviation", "signal_strength": 0.3, "confidence": 0.7},
+        }
+        events = {
+            "ffc": {"frame": 468, "confidence": 0.40, "method": "render_phase_fallback"},
+            "event_chain": {"quality": 0.05},
+        }
+
+        self.assertEqual(
+            _preferred_ffc_cue_risk_id(risk_by_id, report_story=None, events=events),
+            "knee_brace_failure",
+        )
 
     def test_render_skeleton_video_builds_tracks_for_full_pose_sequence(self):
         with tempfile.TemporaryDirectory() as tmpdir:
