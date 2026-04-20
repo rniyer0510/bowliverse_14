@@ -2,7 +2,7 @@ import unittest
 from copy import deepcopy
 
 from app.clinician.interpreter import ClinicianInterpreter
-from app.workers.elbow.elbow_legality import evaluate_elbow_legality
+from app.workers.elbow.elbow_legality import _release_trim_frames, evaluate_elbow_legality
 
 
 class ElbowLegalityFallbackTests(unittest.TestCase):
@@ -119,6 +119,10 @@ class ElbowLegalityFallbackTests(unittest.TestCase):
         self.assertAlmostEqual(result["baseline_angle_deg"], 130.0, places=2)
         self.assertAlmostEqual(result["extension_deg"], 15.0, places=2)
 
+    def test_release_trim_frames_scales_with_fps(self):
+        self.assertEqual(_release_trim_frames(30.0), 2)
+        self.assertEqual(_release_trim_frames(60.0), 3)
+
     def test_release_anchored_window_measures_extension_when_uah_is_too_late(self):
         elbow_signal = [
             {"frame": 10, "angle_deg": 100.0, "valid": True},
@@ -213,6 +217,40 @@ class ElbowLegalityFallbackTests(unittest.TestCase):
 
         self.assertEqual(result["verdict"], "LEGAL")
         self.assertEqual(result["reason"], "weak_window_but_clear_margin")
+
+    def test_weak_borderline_window_degrades_to_suspect_without_rescue_confirmation(self):
+        elbow_signal = [
+            {"frame": 19, "angle_deg": 110.0, "valid": True},
+            {"frame": 20, "angle_deg": 112.0, "valid": True},
+            {"frame": 21, "angle_deg": 115.0, "valid": True},
+            {"frame": 22, "angle_deg": 132.0, "valid": True},
+            {"frame": 23, "angle_deg": 136.0, "valid": True},
+            {"frame": 24, "angle_deg": 138.0, "valid": True},
+        ]
+        pose_frames = []
+        for i in range(30):
+            landmarks = [
+                {"x": 0.0, "y": 0.0, "z": 0.0, "visibility": 0.0}
+                for _ in range(33)
+            ]
+            landmarks[12] = {"x": 0.0, "y": 0.0, "z": 0.0, "visibility": 0.95}
+            pose_frames.append({"frame": i, "landmarks": landmarks})
+
+        events = {
+            "ffc": {"frame": 12},
+            "uah": {"frame": 21},
+            "release": {"frame": 22},
+        }
+
+        result = evaluate_elbow_legality(
+            elbow_signal=elbow_signal,
+            events=events,
+            pose_frames=pose_frames,
+            hand="R",
+        )
+
+        self.assertEqual(result["verdict"], "SUSPECT")
+        self.assertEqual(result["reason"], "weak_window_borderline")
 
     def test_low_visibility_rescue_degrades_to_suspect_when_only_grace_window_supports_it(self):
         pose_frames = self._low_vis_pose_frames(8)

@@ -1,6 +1,12 @@
 import unittest
 
-from app.workers.events.ffc_bfc import detect_ffc_bfc
+import numpy as np
+
+from app.workers.events.ffc_bfc import (
+    _hold_frames,
+    _pelvis_activity_onset,
+    detect_ffc_bfc,
+)
 from app.workers.events.release_uah import detect_release_uah, _nb_elbow_peak_is_plausible
 
 
@@ -58,6 +64,25 @@ def _frame(idx: int):
 
 
 class EventDetectionContractTest(unittest.TestCase):
+    def test_ffc_bfc_helper_enforces_min_hold_of_five_frames(self):
+        self.assertEqual(_hold_frames(30.0), 5)
+        self.assertEqual(_hold_frames(60.0), 5)
+        self.assertEqual(_hold_frames(120.0), 6)
+
+    def test_pelvis_activity_onset_prefers_stronger_later_segment(self):
+        R = np.array([0.1, 0.9, 0.8, 0.2, 0.1, 1.2, 1.1, 0.3], dtype=float)
+        vis_ok = np.array([True] * len(R), dtype=bool)
+
+        onset = _pelvis_activity_onset(
+            R=R,
+            vis_ok=vis_ok,
+            win_start=0,
+            win_end=len(R) - 1,
+            threshold=0.7,
+        )
+
+        self.assertEqual(onset, 5)
+
     def test_early_non_bowling_elbow_peak_is_not_treated_as_plausible_release_anchor(self):
         self.assertFalse(
             _nb_elbow_peak_is_plausible(
