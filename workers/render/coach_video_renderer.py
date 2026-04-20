@@ -132,6 +132,7 @@ WEAK_PHASE_METHODS = {
 
 MIN_FFC_STORY_CONFIDENCE = 0.35
 MIN_EVENT_CHAIN_QUALITY = 0.20
+TEXT_FONT = cv2.FONT_HERSHEY_SIMPLEX
 
 
 def _safe_float(value: Any) -> Optional[float]:
@@ -183,9 +184,9 @@ def _event_chain_quality(events: Optional[Dict[str, Any]]) -> float:
 
 
 def _supports_ffc_story(events: Optional[Dict[str, Any]]) -> bool:
-    return (
-        _event_confidence(events, "ffc") >= MIN_FFC_STORY_CONFIDENCE
-        and _event_chain_quality(events) >= MIN_EVENT_CHAIN_QUALITY
+    return _event_confidence(events, "ffc") >= MIN_FFC_STORY_CONFIDENCE and (
+        _event_chain_quality(events) >= MIN_EVENT_CHAIN_QUALITY
+        or _event_method(events, "ffc") == "render_phase_fallback"
     )
 
 
@@ -314,10 +315,83 @@ def _story_risk_for_phase(
 def _format_action_label(action: Optional[Dict[str, Any]]) -> Optional[str]:
     if not isinstance(action, dict):
         return None
-    raw = str(action.get("action") or "").strip()
-    if not raw or raw.upper() == "UNKNOWN":
-        return None
-    return raw.replace("_", " ").title()
+    for key in ("intent", "action"):
+        raw = str(action.get(key) or "").strip()
+        if raw and raw.upper() != "UNKNOWN":
+            return raw.replace("_", " ").title()
+    return None
+
+
+def _wrap_text_lines(
+    text: str,
+    *,
+    max_width: int,
+    font_scale: float,
+    thickness: int,
+    max_lines: Optional[int] = None,
+) -> List[str]:
+    if max_width <= 0:
+        return [str(text or "").strip()]
+    lines: List[str] = []
+    for paragraph in str(text or "").splitlines() or [""]:
+        words = paragraph.split()
+        if not words:
+            if lines:
+                lines.append("")
+            continue
+        current = words[0]
+        for word in words[1:]:
+            candidate = f"{current} {word}"
+            width_px, _ = cv2.getTextSize(candidate, TEXT_FONT, font_scale, thickness)[0]
+            if width_px <= max_width:
+                current = candidate
+            else:
+                lines.append(current)
+                current = word
+        lines.append(current)
+    if max_lines is not None and len(lines) > max_lines:
+        lines = lines[:max_lines]
+        last = lines[-1].rstrip()
+        while last:
+            width_px, _ = cv2.getTextSize(f"{last}...", TEXT_FONT, font_scale, thickness)[0]
+            if width_px <= max_width:
+                break
+            last = last[:-1].rstrip()
+        lines[-1] = f"{last}..." if last else "..."
+    return lines
+
+
+def _fit_wrapped_text(
+    text: str,
+    *,
+    max_width: int,
+    max_lines: int,
+    base_scale: float,
+    min_scale: float,
+    thickness: int,
+) -> Tuple[List[str], float]:
+    scale = float(base_scale)
+    while scale >= float(min_scale):
+        lines = _wrap_text_lines(
+            text,
+            max_width=max_width,
+            font_scale=scale,
+            thickness=thickness,
+            max_lines=max_lines,
+        )
+        if len(lines) <= max_lines:
+            return lines, scale
+        scale -= 0.03
+    return (
+        _wrap_text_lines(
+            text,
+            max_width=max_width,
+            font_scale=min_scale,
+            thickness=thickness,
+            max_lines=max_lines,
+        ),
+        float(min_scale),
+    )
 
 
 def _front_leg_joints(hand: Optional[str]) -> Tuple[int, int, int]:
@@ -766,11 +840,12 @@ def _draw_top_risk_panel(
     width = frame.shape[1]
     height = frame.shape[0]
     card_w = int(round(width * 0.58))
-    card_h = int(round(height * 0.14))
+    card_h = int(round(height * 0.16))
     x0 = int(round(width * 0.05))
     y0 = int(round(height * 0.05))
     x1 = min(width - 18, x0 + card_w)
     y1 = y0 + card_h
+    inner_w = max(40, x1 - x0 - 36)
     _overlay_panel(
         frame,
         x0=x0,
@@ -785,32 +860,54 @@ def _draw_top_risk_panel(
         frame,
         title,
         (x0 + 18, y0 + int(card_h * 0.28)),
-        cv2.FONT_HERSHEY_SIMPLEX,
+        TEXT_FONT,
         max(0.44, min(width, height) / 1400.0),
         accent,
         1,
         cv2.LINE_AA,
     )
-    cv2.putText(
-        frame,
+    headline_lines, headline_scale = _fit_wrapped_text(
         headline,
-        (x0 + 18, y0 + int(card_h * 0.58)),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        max(0.58, min(width, height) / 1100.0),
-        TEXT_COLOR,
-        2,
-        cv2.LINE_AA,
+        max_width=inner_w,
+        max_lines=2,
+        base_scale=max(0.58, min(width, height) / 1100.0),
+        min_scale=max(0.46, min(width, height) / 1380.0),
+        thickness=2,
     )
-    cv2.putText(
-        frame,
+    headline_y = y0 + int(card_h * 0.48)
+    headline_step = max(20, int(round(card_h * 0.20)))
+    for idx, line in enumerate(headline_lines):
+        cv2.putText(
+            frame,
+            line,
+            (x0 + 18, headline_y + idx * headline_step),
+            TEXT_FONT,
+            headline_scale,
+            TEXT_COLOR,
+            2,
+            cv2.LINE_AA,
+        )
+    body_lines, body_scale = _fit_wrapped_text(
         body,
-        (x0 + 18, y0 + int(card_h * 0.84)),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        max(0.38, min(width, height) / 1550.0),
-        MUTED_TEXT,
-        1,
-        cv2.LINE_AA,
+        max_width=inner_w,
+        max_lines=2,
+        base_scale=max(0.38, min(width, height) / 1550.0),
+        min_scale=max(0.30, min(width, height) / 1880.0),
+        thickness=1,
     )
+    body_y = y0 + int(card_h * 0.81)
+    body_step = max(15, int(round(card_h * 0.15)))
+    for idx, line in enumerate(body_lines):
+        cv2.putText(
+            frame,
+            line,
+            (x0 + 18, body_y + idx * body_step),
+            TEXT_FONT,
+            body_scale,
+            MUTED_TEXT,
+            1,
+            cv2.LINE_AA,
+        )
 
 
 def _front_leg_support_caption(risk: Optional[Dict[str, Any]]) -> Optional[Dict[str, str]]:
@@ -1325,7 +1422,7 @@ def _draw_end_summary(
     width = frame.shape[1]
     height = frame.shape[0]
     top_y = int(round(height * 0.05))
-    top_h = int(round(height * 0.14))
+    top_h = int(round(height * 0.16))
     top_w = int(round(width * 0.42))
     left_x = int(round(width * 0.05))
     right_x = int(round(width * 0.53))
@@ -1337,10 +1434,28 @@ def _draw_end_summary(
     ):
         x1 = min(width - 18, x0 + top_w)
         y1 = top_y + top_h
+        inner_w = max(40, x1 - x0 - 32)
         _overlay_panel(frame, x0=x0, y0=top_y, x1=x1, y1=y1, fill_color=PANEL_BG, edge_color=accent, alpha=0.84)
-        cv2.putText(frame, title, (x0 + 16, top_y + int(top_h * 0.24)), cv2.FONT_HERSHEY_SIMPLEX, max(0.40, min(width, height) / 1500.0), accent, 1, cv2.LINE_AA)
-        for idx, line in enumerate(str(body or "").splitlines()[:2]):
-            cv2.putText(frame, line, (x0 + 16, top_y + int(top_h * (0.54 + idx * 0.22))), cv2.FONT_HERSHEY_SIMPLEX, max(0.54, min(width, height) / 1150.0), TEXT_COLOR, 2 if idx == 0 else 1, cv2.LINE_AA)
+        cv2.putText(frame, title, (x0 + 16, top_y + int(top_h * 0.22)), TEXT_FONT, max(0.40, min(width, height) / 1500.0), accent, 1, cv2.LINE_AA)
+        lines, body_scale = _fit_wrapped_text(
+            str(body or ""),
+            max_width=inner_w,
+            max_lines=2,
+            base_scale=max(0.54, min(width, height) / 1150.0),
+            min_scale=max(0.42, min(width, height) / 1450.0),
+            thickness=2,
+        )
+        for idx, line in enumerate(lines):
+            cv2.putText(
+                frame,
+                line,
+                (x0 + 16, top_y + int(top_h * (0.48 + idx * 0.20))),
+                TEXT_FONT,
+                body_scale,
+                TEXT_COLOR,
+                2 if idx == 0 else 1,
+                cv2.LINE_AA,
+            )
 
     bottom_y = int(round(height * 0.73))
     stat_h = int(round(height * 0.13))
@@ -1423,6 +1538,56 @@ def _draw_hotspot_marker(
     cv2.addWeighted(overlay, min(0.24, halo_alpha), frame, 1.0 - min(0.24, halo_alpha), 0.0, frame)
 
 
+def _draw_hotspot_label(
+    frame: np.ndarray,
+    *,
+    center: Tuple[int, int],
+    label: str,
+    direction: Tuple[float, float],
+    scale: int,
+) -> None:
+    if not label:
+        return
+    width = frame.shape[1]
+    height = frame.shape[0]
+    font_scale = max(0.34, scale / 1500.0)
+    thickness = 1
+    (text_w, text_h), baseline = cv2.getTextSize(label, TEXT_FONT, font_scale, thickness)
+    pad_x = max(8, scale // 60)
+    pad_y = max(6, scale // 84)
+    dx, dy = direction
+    offset_x = int(round((scale * 0.12) * (1.0 if dx >= 0.0 else -1.0)))
+    offset_y = int(round((scale * 0.05) * dy))
+    x0 = center[0] + offset_x
+    if dx < 0.0:
+        x0 -= text_w + pad_x * 2
+    x0 = max(12, min(width - text_w - pad_x * 2 - 12, x0))
+    y0 = center[1] + offset_y - text_h // 2 - pad_y
+    y0 = max(12, min(height - text_h - baseline - pad_y * 2 - 12, y0))
+    x1 = x0 + text_w + pad_x * 2
+    y1 = y0 + text_h + baseline + pad_y * 2
+    _overlay_panel(
+        frame,
+        x0=x0,
+        y0=y0,
+        x1=x1,
+        y1=y1,
+        fill_color=PANEL_BG,
+        edge_color=HOTSPOT_RING,
+        alpha=0.70,
+    )
+    cv2.putText(
+        frame,
+        label,
+        (x0 + pad_x, y0 + pad_y + text_h),
+        TEXT_FONT,
+        font_scale,
+        TEXT_COLOR,
+        thickness,
+        cv2.LINE_AA,
+    )
+
+
 def _load_watch_support_text(load_watch_text: str) -> str:
     lower = str(load_watch_text or "").lower()
     if "lower back" in lower or "side trunk" in lower:
@@ -1438,16 +1603,53 @@ def _draw_load_watch_card(
     width = frame.shape[1]
     height = frame.shape[0]
     card_w = int(round(width * 0.48))
-    card_h = int(round(height * 0.14))
+    card_h = int(round(height * 0.16))
     top_y = int(round(height * 0.05))
     left_x = int(round(width * 0.05))
     x1 = min(width - 18, left_x + card_w)
     y1 = top_y + card_h
+    inner_w = max(40, x1 - left_x - 32)
     accent = (0, 132, 255)
     _overlay_panel(frame, x0=left_x, y0=top_y, x1=x1, y1=y1, fill_color=PANEL_BG, edge_color=accent, alpha=0.84)
-    cv2.putText(frame, "Load watch", (left_x + 16, top_y + int(card_h * 0.24)), cv2.FONT_HERSHEY_SIMPLEX, max(0.40, min(width, height) / 1500.0), accent, 1, cv2.LINE_AA)
-    cv2.putText(frame, load_watch_text, (left_x + 16, top_y + int(card_h * 0.52)), cv2.FONT_HERSHEY_SIMPLEX, max(0.58, min(width, height) / 1120.0), TEXT_COLOR, 2, cv2.LINE_AA)
-    cv2.putText(frame, _load_watch_support_text(load_watch_text), (left_x + 16, top_y + int(card_h * 0.80)), cv2.FONT_HERSHEY_SIMPLEX, max(0.30, min(width, height) / 1900.0), MUTED_TEXT, 1, cv2.LINE_AA)
+    cv2.putText(frame, "Load watch", (left_x + 16, top_y + int(card_h * 0.22)), TEXT_FONT, max(0.40, min(width, height) / 1500.0), accent, 1, cv2.LINE_AA)
+    watch_lines, watch_scale = _fit_wrapped_text(
+        load_watch_text,
+        max_width=inner_w,
+        max_lines=2,
+        base_scale=max(0.58, min(width, height) / 1120.0),
+        min_scale=max(0.44, min(width, height) / 1420.0),
+        thickness=2,
+    )
+    for idx, line in enumerate(watch_lines):
+        cv2.putText(
+            frame,
+            line,
+            (left_x + 16, top_y + int(card_h * (0.44 + idx * 0.20))),
+            TEXT_FONT,
+            watch_scale,
+            TEXT_COLOR,
+            2 if idx == 0 else 1,
+            cv2.LINE_AA,
+        )
+    support_lines, support_scale = _fit_wrapped_text(
+        _load_watch_support_text(load_watch_text),
+        max_width=inner_w,
+        max_lines=2,
+        base_scale=max(0.30, min(width, height) / 1900.0),
+        min_scale=max(0.26, min(width, height) / 2200.0),
+        thickness=1,
+    )
+    for idx, line in enumerate(support_lines):
+        cv2.putText(
+            frame,
+            line,
+            (left_x + 16, top_y + int(card_h * (0.78 + idx * 0.12))),
+            TEXT_FONT,
+            support_scale,
+            MUTED_TEXT,
+            1,
+            cv2.LINE_AA,
+        )
 
 
 def _draw_load_watch_phase(
@@ -1487,6 +1689,8 @@ def _draw_load_watch_phase(
             key=lambda region: float(region.get("weight") or 0.0),
             reverse=True,
         )[:1]
+    elif risk_id in FFC_DEPENDENT_RISKS:
+        ranked_regions = ranked_regions[:3]
     elif len(ranked_regions) > 1:
         lead = float(ranked_regions[0].get("weight") or 0.0)
         ranked_regions = [
@@ -1511,6 +1715,13 @@ def _draw_load_watch_phase(
             scale=scale,
             weight=float(region.get("weight") or 0.8),
             pulse_phase=pulse_phase,
+        )
+        _draw_hotspot_label(
+            frame,
+            center=(int(center[0]), int(center[1])),
+            label=str(region.get("label") or ""),
+            direction=tuple(region.get("direction") or (1.0, -0.25)),
+            scale=scale,
         )
 
 
