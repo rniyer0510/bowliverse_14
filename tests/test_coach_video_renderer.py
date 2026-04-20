@@ -6,6 +6,7 @@ from unittest import mock
 import cv2
 import numpy as np
 
+from app.workers.render import coach_video_renderer
 from app.workers.render.coach_video_renderer import render_skeleton_video, _summary_issue_lines
 from app.workers.render.render_load_watch import (
     _load_hotspot_regions,
@@ -49,6 +50,48 @@ def _pose_frame(frame_idx: int, shift: float):
 
 
 class CoachVideoRendererTest(unittest.TestCase):
+    def test_render_skeleton_video_builds_tracks_for_full_pose_sequence(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            video_path = os.path.join(tmpdir, "input.mp4")
+            output_path = os.path.join(tmpdir, "output.mp4")
+
+            writer = cv2.VideoWriter(
+                video_path,
+                cv2.VideoWriter_fourcc(*"mp4v"),
+                24.0,
+                (160, 120),
+            )
+            self.assertTrue(writer.isOpened())
+            for _ in range(8):
+                writer.write(np.zeros((120, 160, 3), dtype=np.uint8))
+            writer.release()
+
+            pose_frames = [_pose_frame(i, shift=0.01 * i) for i in range(8)]
+            with mock.patch.object(
+                coach_video_renderer,
+                "_build_smoothed_tracks",
+                wraps=coach_video_renderer._build_smoothed_tracks,
+            ) as build_tracks:
+                result = render_skeleton_video(
+                    video_path=video_path,
+                    pose_frames=pose_frames,
+                    events={
+                        "bfc": {"frame": 2},
+                        "ffc": {"frame": 3},
+                        "release": {"frame": 5},
+                    },
+                    output_path=output_path,
+                    start_frame=2,
+                    end_frame=6,
+                    pause_seconds=0.0,
+                    end_summary_seconds=0.0,
+                )
+
+            self.assertTrue(result["available"])
+            self.assertEqual(build_tracks.call_count, 1)
+            self.assertNotIn("start_frame", build_tracks.call_args.kwargs)
+            self.assertNotIn("end_frame", build_tracks.call_args.kwargs)
+
     def test_render_skeleton_video_outputs_nonempty_mp4_with_phase_overlay(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             video_path = os.path.join(tmpdir, "input.mp4")
@@ -246,6 +289,33 @@ class CoachVideoRendererTest(unittest.TestCase):
             events={
                 "ffc": {"frame": 2, "confidence": 0.9},
                 "event_chain": {"quality": 0.9},
+            },
+        )
+
+        self.assertEqual(text, "Front knee / leg chain\nLower back / side trunk")
+
+    def test_summary_load_watch_keeps_leg_family_when_ffc_story_is_weak(self):
+        text = _summary_load_watch_text(
+            {
+                "knee_brace_failure": {
+                    "risk_id": "knee_brace_failure",
+                    "signal_strength": 0.95,
+                    "confidence": 0.95,
+                },
+                "lateral_trunk_lean": {
+                    "risk_id": "lateral_trunk_lean",
+                    "signal_strength": 0.7,
+                    "confidence": 0.9,
+                },
+            },
+            events={
+                "ffc": {
+                    "frame": 2,
+                    "confidence": 0.2,
+                    "timing_flag": "early_relative_to_release",
+                },
+                "event_chain": {"quality": 0.1},
+                "release": {"frame": 4, "confidence": 0.9},
             },
         )
 
