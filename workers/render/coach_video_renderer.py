@@ -27,13 +27,13 @@ logger = get_logger(__name__)
 RENDER_DIR = get_render_dir()
 
 MIN_VISIBILITY = 0.35
-SKELETON_COLOR = (246, 232, 78)
-SKELETON_SHADOW = (20, 18, 14)
-JOINT_OUTER = (252, 252, 252)
+SKELETON_COLOR = (255, 240, 88)
+SKELETON_SHADOW = (10, 10, 10)
+JOINT_OUTER = (255, 255, 255)
 TEXT_COLOR = (246, 248, 252)
 MUTED_TEXT = (214, 220, 228)
-PANEL_BG = (18, 21, 26)
-PANEL_EDGE = (74, 86, 102)
+PANEL_BG = (14, 17, 22)
+PANEL_EDGE = (96, 112, 132)
 ACTIVE_FILL = (74, 194, 242)
 ACTIVE_EDGE = (105, 222, 255)
 INACTIVE_FILL = (44, 52, 62)
@@ -133,6 +133,9 @@ WEAK_PHASE_METHODS = {
 
 MIN_FFC_STORY_CONFIDENCE = 0.35
 MIN_EVENT_CHAIN_QUALITY = 0.20
+POST_RELEASE_SKELETON_TAIL_SECONDS = 0.16
+MIN_TRACK_QUALITY = 0.42
+MIN_POST_RELEASE_TRACK_QUALITY = 0.58
 TEXT_FONT = cv2.FONT_HERSHEY_SIMPLEX
 
 
@@ -578,7 +581,7 @@ def _frame_point(
 
 
 def _draw_joint(frame: np.ndarray, point: Tuple[int, int], scale: int) -> None:
-    outer = max(3, scale // 210)
+    outer = max(4, scale // 190)
     inner = max(2, outer - 1)
     cv2.circle(frame, point, outer + 1, SKELETON_SHADOW, -1, cv2.LINE_AA)
     cv2.circle(frame, point, outer, JOINT_OUTER, -1, cv2.LINE_AA)
@@ -587,8 +590,8 @@ def _draw_joint(frame: np.ndarray, point: Tuple[int, int], scale: int) -> None:
 
 def _draw_skeleton(frame: np.ndarray, tracks: Dict[int, Dict[str, Any]], frame_idx: int) -> None:
     scale = min(frame.shape[0], frame.shape[1])
-    shadow_thickness = max(4, scale // 140)
-    line_thickness = max(2, scale // 220)
+    shadow_thickness = max(5, scale // 120)
+    line_thickness = max(3, scale // 180)
     for start_idx, end_idx in SKELETON_EDGES:
         start = _track_point(tracks, start_idx, frame_idx)
         end = _track_point(tracks, end_idx, frame_idx)
@@ -612,7 +615,7 @@ def _overlay_panel(
     y1: int,
     fill_color: Tuple[int, int, int],
     edge_color: Tuple[int, int, int],
-    alpha: float = 0.82,
+    alpha: float = 0.88,
 ) -> None:
     x0 = max(0, min(frame.shape[1] - 1, x0))
     x1 = max(0, min(frame.shape[1], x1))
@@ -663,6 +666,50 @@ def _event_confidence(events: Optional[Dict[str, Any]], key: str) -> float:
 def _event_method(events: Optional[Dict[str, Any]], key: str) -> str:
     event = (events or {}).get(key) or {}
     return str(event.get("method") or "").strip().lower()
+
+
+def _tracked_joint_quality(
+    pose_frames: List[Dict[str, Any]],
+    frame_idx: int,
+) -> float:
+    if frame_idx < 0 or frame_idx >= len(pose_frames):
+        return 0.0
+    landmarks = (pose_frames[frame_idx] or {}).get("landmarks") or []
+    if not isinstance(landmarks, list) or not landmarks:
+        return 0.0
+    visible = 0
+    for joint_idx in TRACKED_JOINTS:
+        visibility = _safe_landmark_value(landmarks, joint_idx, "visibility") or 0.0
+        if visibility >= MIN_VISIBILITY:
+            visible += 1
+    return float(visible) / float(max(1, len(TRACKED_JOINTS)))
+
+
+def _safe_landmark_value(landmarks: List[Dict[str, Any]], idx: int, key: str) -> Optional[float]:
+    try:
+        value = ((landmarks[idx] or {}).get(key))
+    except Exception:
+        return None
+    return _safe_float(value)
+
+
+def _should_draw_skeleton_frame(
+    *,
+    pose_frames: List[Dict[str, Any]],
+    frame_idx: int,
+    events: Optional[Dict[str, Any]],
+    fps: float,
+) -> bool:
+    quality = _tracked_joint_quality(pose_frames, frame_idx)
+    if quality < MIN_TRACK_QUALITY:
+        return False
+    release_frame = _safe_int(((events or {}).get("release") or {}).get("frame"))
+    if release_frame is None or frame_idx <= release_frame:
+        return True
+    post_release_tail = max(1, int(round(float(fps) * POST_RELEASE_SKELETON_TAIL_SECONDS)))
+    if frame_idx > release_frame + post_release_tail:
+        return False
+    return quality >= MIN_POST_RELEASE_TRACK_QUALITY
 
 
 def _render_timeline_events(
@@ -2048,7 +2095,13 @@ def render_skeleton_video(
             if not ok or frame is None:
                 break
             raw_frame = frame.copy()
-            _draw_skeleton(frame, tracks, frame_idx)
+            if _should_draw_skeleton_frame(
+                pose_frames=pose_frames,
+                frame_idx=frame_idx,
+                events=render_events,
+                fps=fps,
+            ):
+                _draw_skeleton(frame, tracks, frame_idx)
             _draw_phase_overlay(frame, frame_idx=frame_idx, start=start, stop=stop, events=render_events)
             final_summary_frame = raw_frame
             writer.write(frame)

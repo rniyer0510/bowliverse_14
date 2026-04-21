@@ -386,6 +386,44 @@ class CoachVideoRendererTest(unittest.TestCase):
             self.assertGreaterEqual(draw_phase.call_count, 1)
             self.assertLessEqual(draw_phase.call_count, 3)
 
+    def test_render_skeleton_video_stops_drawing_skeleton_late_after_release(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            video_path = os.path.join(tmpdir, "input.mp4")
+            output_path = os.path.join(tmpdir, "output.mp4")
+
+            writer = cv2.VideoWriter(
+                video_path,
+                cv2.VideoWriter_fourcc(*"mp4v"),
+                24.0,
+                (160, 120),
+            )
+            self.assertTrue(writer.isOpened())
+            for _ in range(10):
+                writer.write(np.zeros((120, 160, 3), dtype=np.uint8))
+            writer.release()
+
+            pose_frames = [_pose_frame(i, shift=0.01 * i) for i in range(10)]
+            with mock.patch.object(
+                coach_video_renderer,
+                "_draw_skeleton",
+                wraps=coach_video_renderer._draw_skeleton,
+            ) as draw_skeleton:
+                result = render_skeleton_video(
+                    video_path=video_path,
+                    pose_frames=pose_frames,
+                    events={
+                        "bfc": {"frame": 0},
+                        "ffc": {"frame": 1},
+                        "release": {"frame": 2},
+                    },
+                    output_path=output_path,
+                    pause_seconds=0.0,
+                    end_summary_seconds=0.0,
+                )
+
+            self.assertTrue(result["available"])
+            self.assertLess(draw_skeleton.call_count, len(pose_frames))
+
     def test_render_skeleton_video_publishes_stable_output_path_without_ffmpeg(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             video_path = os.path.join(tmpdir, "input.mp4")
