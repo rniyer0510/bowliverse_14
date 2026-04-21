@@ -4,8 +4,8 @@ PHASE-1 INVARIANTS (UPDATED FOR REAL POSE DATA):
 
 1. Pelvis kinematics define WHEN braking begins.
 2. Geometry defines WHEN contact actually occurs.
-3. FFC = first frame >= pelvis_on where FRONT foot is grounded AND back foot is grounded OR recently grounded.
-   (Back foot can unload during braking; strict BOTH-feet-flat is too brittle with pose jitter.)
+3. FFC = latest plausible landing frame before release, found by searching backward from release
+   and confirmed with front-foot grounding plus back-foot support/unloading heuristics.
 4. Kinematics and geometry never compete on the same frame.
 5. If uncertain, return a conservative fallback with low confidence (never return {}).
 """
@@ -233,6 +233,126 @@ def _recently_grounded(
     return False
 
 
+def _candidate_case(
+    *,
+    frame: int,
+    front_label: str,
+    front_score: int,
+    back_score: int,
+    method: str,
+    back_recent: bool = False,
+):
+    back_support = max(back_score, 1 if back_recent else 0)
+    confidence = min(0.9, 0.42 + 0.08 * front_score + 0.05 * back_support)
+    return build_candidate(
+        frame=frame,
+        method=method,
+        confidence=confidence,
+        score=float(front_score + 0.5 * back_support),
+        reason=f"{front_label}_front",
+    )
+
+
+def _pick_ffc_backward_from_release(
+    *,
+    pelvis_on: int,
+    win_end: int,
+    hold: int,
+    win_start: int,
+    dt: float,
+    back_recent: int,
+    y_LA: np.ndarray,
+    y_RA: np.ndarray,
+    y_LFI: np.ndarray,
+    y_RFI: np.ndarray,
+) -> Tuple[Optional[int], Optional[str], List[Dict], float]:
+    """
+    Search backward from the release-side window for the latest plausible front-foot contact.
+    Kinetic-chain timing (pelvis_on -> release neighborhood) defines the search region;
+    grounding heuristics pick the exact frame.
+    """
+    candidates: List[Dict] = []
+
+    for i in range(win_end - hold, pelvis_on - 1, -1):
+        left_score = _foot_ground_score(y_LA, y_LFI, i, hold, win_start, win_end, dt)
+        right_score = _foot_ground_score(y_RA, y_RFI, i, hold, win_start, win_end, dt)
+        left_grounded = left_score >= 2
+        right_grounded = right_score >= 2
+        right_recent = _recently_grounded(
+            y_RA, y_RFI, i, hold, win_start, win_end, dt, back_recent
+        )
+        left_recent = _recently_grounded(
+            y_LA, y_LFI, i, hold, win_start, win_end, dt, back_recent
+        )
+
+        left_front_ok = left_grounded and (right_grounded or right_recent)
+        right_front_ok = right_grounded and (left_grounded or left_recent)
+
+        if left_front_ok:
+            candidate = _candidate_case(
+                frame=i,
+                front_label="left",
+                front_score=left_score,
+                back_score=right_score,
+                back_recent=right_recent,
+                method="release_backward_chain_grounding",
+            )
+            if candidate is not None:
+                candidates.append(candidate)
+            return i, "left", candidates, float(candidate.get("confidence") or 0.62) if candidate else 0.62
+
+        if right_front_ok:
+            candidate = _candidate_case(
+                frame=i,
+                front_label="right",
+                front_score=right_score,
+                back_score=left_score,
+                back_recent=left_recent,
+                method="release_backward_chain_grounding",
+            )
+            if candidate is not None:
+                candidates.append(candidate)
+            return i, "right", candidates, float(candidate.get("confidence") or 0.62) if candidate else 0.62
+
+    return None, None, candidates, 0.0
+
+
+def _pick_bfc_backward_from_ffc(
+    *,
+    ffc: int,
+    front_side: Optional[str],
+    hold: int,
+    win_start: int,
+    win_end: int,
+    dt: float,
+    y_LA: np.ndarray,
+    y_RA: np.ndarray,
+    y_LFI: np.ndarray,
+    y_RFI: np.ndarray,
+) -> Tuple[int, float, str]:
+    """
+    Search backward from confirmed FFC for the latest stable back-foot support frame.
+    """
+    if front_side == "left":
+        front_ank, front_toe = y_LA, y_LFI
+        back_ank, back_toe = y_RA, y_RFI
+    elif front_side == "right":
+        front_ank, front_toe = y_RA, y_RFI
+        back_ank, back_toe = y_LA, y_LFI
+    else:
+        return _clamp(ffc - max(3, hold), win_start, ffc), 0.35, "context_pre_ffc"
+
+    earliest = max(win_start, ffc - max(6, int(round(0.35 * max(1.0, 1.0 / max(dt, 1e-6))))))
+    for i in range(ffc - 1, earliest - 1, -1):
+        back_score = _foot_ground_score(back_ank, back_toe, i, hold, win_start, win_end, dt)
+        front_score = _foot_ground_score(front_ank, front_toe, i, hold, win_start, win_end, dt)
+        if back_score >= 2 and (front_score < 2 or back_score > front_score):
+            confidence = min(0.65, 0.28 + 0.09 * back_score + 0.03 * max(0, back_score - front_score))
+            return i, confidence, "backward_from_ffc_support"
+
+    return _clamp(ffc - max(3, hold), win_start, ffc), 0.35, "context_pre_ffc"
+
+
 # ------------------------------------------------------------
 # Main
 # ------------------------------------------------------------
@@ -358,37 +478,25 @@ def detect_ffc_bfc(
             "bfc": {"frame": int(bfc), "confidence": 0.20, "method": "no_foot_data_fallback"},
         }
 
-    # Determine which side is front-foot at FFC? We can't know from hand reliably here (camera dependent).
-    # So we test both possibilities and pick the earliest frame that satisfies either:
-    #   (L is front and R is back) OR (R is front and L is back)
+    # Search backward from release for the latest plausible landing frame.
+    # Kinetic-chain timing localizes the neighborhood; grounding heuristics
+    # choose the exact FFC frame inside that neighborhood.
     back_recent = max(2, int(round(0.03 * fps_f)))  # ~30ms lookback
     ffc = None
+    front_side = None
     ffc_candidates: List[Dict] = []
-
-    for i in range(pelvis_on, win_end - hold):
-        left_score = _foot_ground_score(y_LA, y_LFI, i, hold, win_start, win_end, dt)
-        right_score = _foot_ground_score(y_RA, y_RFI, i, hold, win_start, win_end, dt)
-        Lg = left_score >= 2
-        Rg = right_score >= 2
-
-        # Case A: Left is front, Right is back (allow recent grounding for back)
-        okA = Lg and (Rg or _recently_grounded(y_RA, y_RFI, i, hold, win_start, win_end, dt, back_recent))
-
-        # Case B: Right is front, Left is back
-        okB = Rg and (Lg or _recently_grounded(y_LA, y_LFI, i, hold, win_start, win_end, dt, back_recent))
-
-        if okA or okB:
-            candidate = build_candidate(
-                frame=i,
-                method="pelvis_then_geometry_relaxed",
-                confidence=min(0.9, 0.45 + 0.08 * max(left_score, right_score)),
-                score=float(max(left_score, right_score)),
-                reason="left_front" if okA else "right_front",
-            )
-            if candidate is not None:
-                ffc_candidates.append(candidate)
-            ffc = i
-            break
+    ffc, front_side, ffc_candidates, ffc_confidence = _pick_ffc_backward_from_release(
+        pelvis_on=pelvis_on,
+        win_end=win_end,
+        hold=hold,
+        win_start=win_start,
+        dt=dt,
+        back_recent=back_recent,
+        y_LA=y_LA,
+        y_RA=y_RA,
+        y_LFI=y_LFI,
+        y_RFI=y_RFI,
+    )
 
     # ------------------------------------------------------------
     # Fallback ladder (never return empty)
@@ -473,9 +581,19 @@ def detect_ffc_bfc(
     # ------------------------------------------------------------
     logger.info(f"[FFC/BFC][RESULT] CHOSEN_FFC_FRAME={ffc}")
 
-    bfc = _clamp(ffc - max(3, hold), win_start, ffc)
-    ffc_confidence = 0.62
-    bfc_confidence = 0.35
+    bfc, bfc_confidence, bfc_method = _pick_bfc_backward_from_ffc(
+        ffc=ffc,
+        front_side=front_side,
+        hold=hold,
+        win_start=win_start,
+        win_end=win_end,
+        dt=dt,
+        y_LA=y_LA,
+        y_RA=y_RA,
+        y_LFI=y_LFI,
+        y_RFI=y_RFI,
+    )
+    ffc_confidence = max(0.45, ffc_confidence or 0.62)
     chain = chain_quality(
         bfc_frame=bfc,
         ffc_frame=ffc,
@@ -489,10 +607,10 @@ def detect_ffc_bfc(
         "ffc": {
             "frame": int(ffc),
             "confidence": ffc_confidence,
-            "method": "pelvis_then_geometry_relaxed",
+            "method": "release_backward_chain_grounding",
             "candidates": compact_candidates(ffc_candidates),
             "window": [int(win_start), int(win_end)],
         },
-        "bfc": {"frame": int(bfc), "confidence": bfc_confidence, "method": "context_pre_ffc"},
+        "bfc": {"frame": int(bfc), "confidence": bfc_confidence, "method": bfc_method},
         "event_chain": chain,
     }
