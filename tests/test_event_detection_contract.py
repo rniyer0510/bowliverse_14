@@ -123,6 +123,8 @@ class EventDetectionContractTest(unittest.TestCase):
         self.assertTrue(result["ffc"]["candidates"])
         self.assertLessEqual(result["bfc"]["frame"], result["ffc"]["frame"])
         self.assertLessEqual(result["ffc"]["frame"], release_events["release"]["frame"])
+        self.assertEqual(result["ffc"]["method"], "release_backward_chain_grounding")
+        self.assertIn(result["bfc"]["method"], {"backward_from_ffc_support", "context_pre_ffc"})
 
 
 if __name__ == "__main__":
