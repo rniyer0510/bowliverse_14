@@ -82,6 +82,35 @@ class CoachVideoRendererTest(unittest.TestCase):
         self.assertLess(int((render_events["ffc"] or {}).get("frame")), 492)
         self.assertGreaterEqual(int((render_events["ffc"] or {}).get("frame")), 460)
 
+    def test_render_timeline_events_preserves_ordered_bfc_even_if_low_confidence(self):
+        render_events = _render_timeline_events(
+            start=103,
+            stop=168,
+            events={
+                "bfc": {"frame": 133, "confidence": 0.0, "method": "simple_grounded_bfc"},
+                "ffc": {"frame": 134, "confidence": 0.67, "method": "release_backward_chain_grounding"},
+                "release": {"frame": 140, "confidence": 0.54, "method": "peak_plus_offset_corrected"},
+            },
+        )
+
+        self.assertEqual((render_events["bfc"] or {}).get("frame"), 133)
+        self.assertEqual((render_events["bfc"] or {}).get("method"), "simple_grounded_bfc")
+        self.assertEqual((render_events["ffc"] or {}).get("frame"), 134)
+
+    def test_render_timeline_events_falls_back_when_bfc_is_not_before_ffc(self):
+        render_events = _render_timeline_events(
+            start=103,
+            stop=168,
+            events={
+                "bfc": {"frame": 136, "confidence": 0.9, "method": "simple_grounded_bfc"},
+                "ffc": {"frame": 134, "confidence": 0.67, "method": "release_backward_chain_grounding"},
+                "release": {"frame": 140, "confidence": 0.54, "method": "peak_plus_offset_corrected"},
+            },
+        )
+
+        self.assertEqual((render_events["bfc"] or {}).get("method"), "render_phase_fallback")
+        self.assertLess(int((render_events["bfc"] or {}).get("frame")), 134)
+
     def test_preferred_ffc_cue_risk_id_allows_render_phase_fallback_story(self):
         risk_by_id = {
             "knee_brace_failure": {"risk_id": "knee_brace_failure", "signal_strength": 0.8, "confidence": 0.8},

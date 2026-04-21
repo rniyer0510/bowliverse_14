@@ -149,7 +149,7 @@ class EventDetectionContractTest(unittest.TestCase):
         self.assertLessEqual(result["bfc"]["frame"], result["ffc"]["frame"])
         self.assertLessEqual(result["ffc"]["frame"], release_events["release"]["frame"])
         self.assertEqual(result["ffc"]["method"], "release_backward_chain_grounding")
-        self.assertIn(result["bfc"]["method"], {"backward_from_ffc_support", "context_pre_ffc", "no_ground_confirmed"})
+        self.assertIn(result["bfc"]["method"], {"simple_grounded_bfc", "context_pre_ffc", "no_ground_confirmed"})
 
     def test_ffc_bfc_returns_empty_for_too_few_frames(self):
         result = detect_ffc_bfc(

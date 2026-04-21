@@ -746,8 +746,6 @@ def _render_timeline_events(
         raw_bfc is None
         or raw_bfc < start + 1
         or raw_bfc >= stop - 2
-        or _event_confidence(events, "bfc") < 0.20
-        or _event_method(events, "bfc") in WEAK_PHASE_METHODS
         or (candidate_ffc is not None and raw_bfc >= candidate_ffc)
     )
 

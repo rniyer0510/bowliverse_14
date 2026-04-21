@@ -298,35 +298,6 @@ def _ground_window_strength(
     return strength
 
 
-def _estimate_bfc_from_runup_speed(
-    *,
-    ffc: int,
-    win_start: int,
-    dt: float,
-    fps: float,
-    approach_speed: np.ndarray,
-) -> Tuple[int, float]:
-    """
-    Occlusion-aware fallback: estimate BFC from approach momentum into FFC.
-    Faster approach implies a slightly longer BFC->FFC gap; slower approach keeps
-    the estimate closer to FFC.
-    """
-    recent_start = max(win_start, ffc - max(4, int(round(0.20 * fps))))
-    recent = approach_speed[recent_start:ffc]
-    history = approach_speed[win_start:ffc]
-    recent_speed = float(np.median(recent[np.isfinite(recent)])) if np.any(np.isfinite(recent)) else 0.0
-    history_p90 = _robust_percentile(history, 90)
-    history_p30 = _robust_percentile(history, 30)
-    span = max(history_p90 - history_p30, 1e-6)
-    normalized = max(0.0, min(1.0, (recent_speed - history_p30) / span))
-
-    offset_seconds = 0.08 + (0.06 * normalized)
-    offset_frames = max(2, int(round(offset_seconds * fps)))
-    frame = _clamp(ffc - offset_frames, win_start, ffc)
-    confidence = 0.24 + (0.10 * normalized)
-    return frame, confidence
-
-
 def _pick_ffc_backward_from_release(
     *,
     search_start: int,
@@ -481,123 +452,39 @@ def _pick_bfc_backward_from_ffc(
     approach_speed: np.ndarray,
 ) -> Tuple[int, float, str]:
     """
-    Search backward from confirmed FFC for the latest stable back-foot support frame.
+    Simple BFC rule:
+    find the latest contiguous grounded back-foot support block closest to FFC,
+    then keep the last grounded frame before unloading.
     """
     if front_side == "left":
-        front_ank, front_toe = y_LA, y_LFI
         back_ank, back_toe = y_RA, y_RFI
-        back_vis_ank, back_vis_toe = vis_RA, vis_RFI
     elif front_side == "right":
-        front_ank, front_toe = y_RA, y_RFI
         back_ank, back_toe = y_LA, y_LFI
-        back_vis_ank, back_vis_toe = vis_LA, vis_LFI
     else:
-        return _clamp(ffc - max(3, hold), win_start, ffc), 0.35, "context_pre_ffc"
+        return _clamp(ffc - 1, win_start, ffc), 0.0, "context_pre_ffc"
 
-    earliest = max(win_start, ffc - max(6, int(round(0.35 * max(1.0, 1.0 / max(dt, 1e-6))))))
-    visibility_window = slice(earliest, min(ffc + 1, len(back_vis_ank)))
-    back_visibility = float(
-        np.median(
-            np.concatenate(
-                [back_vis_ank[visibility_window], back_vis_toe[visibility_window]]
-            )
-        )
-    ) if visibility_window.stop > visibility_window.start else 0.0
-    candidates: List[Dict[str, float]] = []
-    for i in range(ffc - 1, earliest - 1, -1):
-        back_score = _foot_ground_score(back_ank, back_toe, i, hold, win_start, win_end, dt)
-        front_score = _foot_ground_score(front_ank, front_toe, i, hold, win_start, win_end, dt)
-        if back_score < 2:
+    earliest = max(win_start, ffc - max(3, hold + 1))
+    seed_frame: Optional[int] = None
+
+    for idx in range(ffc - 1, earliest - 1, -1):
+        back_score = _foot_ground_score(back_ank, back_toe, idx, hold, win_start, win_end, dt)
+        if back_score >= 2:
+            seed_frame = idx
             continue
+        if seed_frame is not None:
+            break
 
-        stability = _ground_window_strength(
-            back_ank,
-            back_toe,
-            frame=i,
-            hold=hold,
-            win_start=win_start,
-            win_end=win_end,
-            dt=dt,
-            radius=max(1, hold // 2),
-        )
-        separation = max(0, back_score - front_score)
-        confidence = min(0.7, 0.28 + 0.09 * back_score + 0.03 * separation + 0.01 * stability)
+    if seed_frame is None:
+        return _clamp(ffc - 1, win_start, ffc), 0.0, "no_ground_confirmed"
 
-        candidates.append(
-            {
-                "frame": float(i),
-                "confidence": float(confidence),
-                "stability": float(stability),
-                "back_score": float(back_score),
-                "front_score": float(front_score),
-            }
-        )
+    chosen_frame = seed_frame
+    for idx in range(seed_frame + 1, min(ffc, win_end + 1)):
+        back_score = _foot_ground_score(back_ank, back_toe, idx, hold, win_start, win_end, dt)
+        if back_score < 2:
+            break
+        chosen_frame = idx
 
-    direct_choice: Optional[Dict[str, float]] = None
-    if back_visibility >= 0.65:
-        for candidate in candidates:
-            if candidate["stability"] >= max(4.0, 1.6 * candidate["back_score"]):
-                direct_choice = candidate
-                break
-
-    speed_frame, speed_confidence = _estimate_bfc_from_runup_speed(
-        ffc=ffc,
-        win_start=win_start,
-        dt=dt,
-        fps=fps,
-        approach_speed=approach_speed,
-    )
-
-    # If the direct pick is not clearly trustworthy, relocalize around the
-    # timing prior and then choose the latest plausible support frame in that
-    # smaller neighborhood. This behaves better under partial occlusion than
-    # trusting the whole backward window.
-    should_confirm_with_prior = back_visibility < 0.65 or direct_choice is None
-    if should_confirm_with_prior:
-        band_start = max(earliest, speed_frame - 1)
-        band_end = min(ffc - 1, speed_frame + 1)
-        for idx in range(band_end, band_start - 1, -1):
-            back_score = _foot_ground_score(
-                back_ank, back_toe, idx, hold, win_start, win_end, dt
-            )
-            front_score = _foot_ground_score(
-                front_ank, front_toe, idx, hold, win_start, win_end, dt
-            )
-            if back_score < 2:
-                continue
-            stability = _ground_window_strength(
-                back_ank,
-                back_toe,
-                frame=idx,
-                hold=hold,
-                win_start=win_start,
-                win_end=win_end,
-                dt=dt,
-                radius=max(1, hold // 2),
-            )
-            if stability >= max(2.8, 1.1 * back_score):
-                confidence = max(
-                    speed_confidence,
-                    min(0.64, 0.26 + 0.08 * back_score + 0.01 * stability),
-                )
-                return idx, confidence, "runup_speed_confirmed_bfc"
-
-        if back_visibility < 0.45 or direct_choice is None:
-            return speed_frame, 0.0, "no_ground_confirmed"
-
-    if direct_choice is not None:
-        return int(direct_choice["frame"]), float(direct_choice["confidence"]), "backward_from_ffc_support"
-
-    if candidates:
-        # Residual visible-but-noisy case: still prefer the latest plausible
-        # support frame instead of the strongest earlier one.
-        chosen = candidates[0]
-        return int(chosen["frame"]), float(chosen["confidence"]), "backward_from_ffc_support"
-
-    if back_visibility < 0.45:
-        return speed_frame, 0.0, "no_ground_confirmed"
-
-    return _clamp(ffc - max(3, hold), win_start, ffc), 0.35, "context_pre_ffc"
+    return int(chosen_frame), 0.0, "simple_grounded_bfc"
 
 
 def _sanitize_bfc_frame(
