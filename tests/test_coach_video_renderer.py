@@ -279,6 +279,113 @@ class CoachVideoRendererTest(unittest.TestCase):
             self.assertEqual(result["end_frame"], 4)
             self.assertEqual(result["frames_rendered"], 41)
 
+    def test_render_skeleton_video_uses_clean_raw_frame_for_end_summary(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            video_path = os.path.join(tmpdir, "input.mp4")
+            output_path = os.path.join(tmpdir, "output.mp4")
+
+            writer = cv2.VideoWriter(
+                video_path,
+                cv2.VideoWriter_fourcc(*"mp4v"),
+                10.0,
+                (160, 120),
+            )
+            self.assertTrue(writer.isOpened())
+            for _ in range(5):
+                writer.write(np.zeros((120, 160, 3), dtype=np.uint8))
+            writer.release()
+
+            pose_frames = [_pose_frame(i, shift=0.01 * i) for i in range(5)]
+            captured_summary_inputs = []
+
+            def fake_draw_skeleton(frame, tracks, frame_idx):
+                frame[:, :] = (255, 0, 255)
+
+            def fake_draw_phase_overlay(frame, *, frame_idx, start, stop, events):
+                frame[0:10, 0:10] = (0, 255, 255)
+
+            def capture_summary(frame, **kwargs):
+                captured_summary_inputs.append(frame.copy())
+
+            with mock.patch.object(
+                coach_video_renderer,
+                "_draw_skeleton",
+                side_effect=fake_draw_skeleton,
+            ), mock.patch.object(
+                coach_video_renderer,
+                "_draw_phase_overlay",
+                side_effect=fake_draw_phase_overlay,
+            ), mock.patch.object(
+                coach_video_renderer,
+                "_draw_end_summary",
+                side_effect=capture_summary,
+            ):
+                result = render_skeleton_video(
+                    video_path=video_path,
+                    pose_frames=pose_frames,
+                    events={
+                        "bfc": {"frame": 1},
+                        "ffc": {"frame": 2},
+                        "release": {"frame": 4},
+                    },
+                    output_path=output_path,
+                    pause_seconds=0.0,
+                    end_summary_seconds=1.0,
+                )
+
+            self.assertTrue(result["available"])
+            self.assertEqual(len(captured_summary_inputs), 1)
+            summary_input = captured_summary_inputs[0]
+            self.assertFalse(np.all(summary_input == np.array([255, 0, 255], dtype=np.uint8)))
+            self.assertFalse(np.all(summary_input[0:10, 0:10] == np.array([0, 255, 255], dtype=np.uint8)))
+
+    def test_render_skeleton_video_reuses_cached_hotspot_stage_frames(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            video_path = os.path.join(tmpdir, "input.mp4")
+            output_path = os.path.join(tmpdir, "output.mp4")
+
+            writer = cv2.VideoWriter(
+                video_path,
+                cv2.VideoWriter_fourcc(*"mp4v"),
+                10.0,
+                (160, 120),
+            )
+            self.assertTrue(writer.isOpened())
+            for _ in range(5):
+                writer.write(np.zeros((120, 160, 3), dtype=np.uint8))
+            writer.release()
+
+            pose_frames = [_pose_frame(i, shift=0.01 * i) for i in range(5)]
+            with mock.patch.object(
+                coach_video_renderer,
+                "_draw_load_watch_phase",
+                wraps=coach_video_renderer._draw_load_watch_phase,
+            ) as draw_phase:
+                result = render_skeleton_video(
+                    video_path=video_path,
+                    pose_frames=pose_frames,
+                    events={
+                        "bfc": {"frame": 1, "confidence": 0.9},
+                        "ffc": {"frame": 2, "confidence": 0.9},
+                        "release": {"frame": 4, "confidence": 0.9},
+                        "event_chain": {"quality": 0.9},
+                    },
+                    risks=[
+                        {
+                            "risk_id": "knee_brace_failure",
+                            "signal_strength": 0.9,
+                            "confidence": 0.9,
+                        }
+                    ],
+                    output_path=output_path,
+                    pause_seconds=1.0,
+                    end_summary_seconds=0.0,
+                )
+
+            self.assertTrue(result["available"])
+            self.assertGreaterEqual(draw_phase.call_count, 1)
+            self.assertLessEqual(draw_phase.call_count, 3)
+
     def test_render_skeleton_video_publishes_stable_output_path_without_ffmpeg(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             video_path = os.path.join(tmpdir, "input.mp4")

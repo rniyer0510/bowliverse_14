@@ -1856,6 +1856,34 @@ def _draw_load_watch_phase(
                 occupied_rects.append(rect)
 
 
+def _hotspot_stage_plan(hotspot_hold: int) -> List[Tuple[str, int]]:
+    hotspot_hold = max(0, int(hotspot_hold))
+    if hotspot_hold <= 0:
+        return []
+    if hotspot_hold == 1:
+        return [("label", 1)]
+    if hotspot_hold == 2:
+        return [("rings", 1), ("label", 1)]
+
+    line_count = max(1, int(round(hotspot_hold * 0.16)))
+    label_count = max(1, int(round(hotspot_hold * 0.16)))
+    rings_count = max(1, hotspot_hold - line_count - label_count)
+    while line_count + rings_count + label_count > hotspot_hold:
+        if rings_count > 1:
+            rings_count -= 1
+        elif label_count > 1:
+            label_count -= 1
+        else:
+            line_count -= 1
+    while line_count + rings_count + label_count < hotspot_hold:
+        rings_count += 1
+    return [
+        ("line", line_count),
+        ("rings", rings_count),
+        ("label", label_count),
+    ]
+
+
 def _hotspot_search_window(
     *,
     phase_key: str,
@@ -2019,9 +2047,10 @@ def render_skeleton_video(
             ok, frame = cap.read()
             if not ok or frame is None:
                 break
+            raw_frame = frame.copy()
             _draw_skeleton(frame, tracks, frame_idx)
             _draw_phase_overlay(frame, frame_idx=frame_idx, start=start, stop=stop, events=render_events)
-            final_summary_frame = frame.copy()
+            final_summary_frame = raw_frame
             writer.write(frame)
             frames_rendered += 1
             if (
@@ -2123,32 +2152,29 @@ def render_skeleton_video(
                         start=start,
                         stop=stop,
                     )
-                for hotspot_idx in range(hotspot_hold):
-                    hotspot_frame = frame.copy()
-                    pulse_phase = 0.0 if hotspot_hold <= 1 else float(hotspot_idx) / float(hotspot_hold - 1)
-                    if hotspot_hold <= 2:
-                        stage = "label"
-                    else:
-                        stage_ratio = float(hotspot_idx) / float(max(1, hotspot_hold))
-                        if stage_ratio < 0.16:
-                            stage = "line"
-                        elif stage_ratio < 0.84:
-                            stage = "rings"
-                        else:
-                            stage = "label"
-                    _draw_load_watch_phase(
-                        hotspot_frame,
-                        tracks=tracks,
-                        frame_idx=hotspot_frame_idx,
-                        hand=hand,
-                        risk_id=str((hotspot_payload or {}).get("risk_id") or ""),
-                        risk_by_id=risk_by_id,
-                        load_watch_text=str((hotspot_payload or {}).get("load_watch_text") or ""),
-                        pulse_phase=pulse_phase,
-                        stage=stage,
-                    )
-                    writer.write(hotspot_frame)
-                    frames_rendered += 1
+                if hotspot_payload and hotspot_hold > 0:
+                    stage_frames: List[Tuple[np.ndarray, int]] = []
+                    for stage, repeat_count in _hotspot_stage_plan(hotspot_hold):
+                        if repeat_count <= 0:
+                            continue
+                        hotspot_frame = frame.copy()
+                        pulse_phase = 0.50 if stage == "rings" else (0.85 if stage == "label" else 0.0)
+                        _draw_load_watch_phase(
+                            hotspot_frame,
+                            tracks=tracks,
+                            frame_idx=hotspot_frame_idx,
+                            hand=hand,
+                            risk_id=str((hotspot_payload or {}).get("risk_id") or ""),
+                            risk_by_id=risk_by_id,
+                            load_watch_text=str((hotspot_payload or {}).get("load_watch_text") or ""),
+                            pulse_phase=pulse_phase,
+                            stage=stage,
+                        )
+                        stage_frames.append((hotspot_frame, repeat_count))
+                    for hotspot_frame, repeat_count in stage_frames:
+                        for _ in range(repeat_count):
+                            writer.write(hotspot_frame)
+                            frames_rendered += 1
             frame_idx += 1
 
         summary_hold_frames = max(0, int(round(float(end_summary_seconds or 0.0) * fps)))
