@@ -6,8 +6,8 @@ from app.workers.events.release_uah import detect_release_uah, _nb_elbow_peak_is
 
 def _landmark(x, y, visibility=0.99):
     return {
-        "x": float(x),
-        "y": float(y),
+        "x": None if x is None else float(x),
+        "y": None if y is None else float(y),
         "z": 0.0,
         "visibility": float(visibility),
     }
@@ -55,6 +55,31 @@ def _frame(idx: int):
     lm[32] = _landmark(0.65, left_toe_y)
 
     return {"frame": idx, "landmarks": lm}
+
+
+def _frame_no_feet(idx: int):
+    frame = _frame(idx)
+    lm = frame["landmarks"]
+    for landmark_idx in (27, 28, 31, 32):
+        lm[landmark_idx] = _landmark(None, None, 0.0)
+    return frame
+
+
+def _frame_chaotic_feet(idx: int):
+    frame = _frame(idx)
+    lm = frame["landmarks"]
+
+    # Alternate foot heights aggressively so grounding heuristics never get a
+    # stable hold window, forcing the detector into its conservative fallback.
+    right_cycle = (0.95, 0.84, 0.90)
+    left_cycle = (0.84, 0.95, 0.89)
+    right_phase = right_cycle[idx % 3]
+    left_phase = left_cycle[idx % 3]
+    lm[27] = _landmark(0.43, right_phase)
+    lm[31] = _landmark(0.46, right_phase + 0.025)
+    lm[28] = _landmark(0.62, left_phase)
+    lm[32] = _landmark(0.65, left_phase + 0.025)
+    return frame
 
 
 class EventDetectionContractTest(unittest.TestCase):
@@ -124,7 +149,108 @@ class EventDetectionContractTest(unittest.TestCase):
         self.assertLessEqual(result["bfc"]["frame"], result["ffc"]["frame"])
         self.assertLessEqual(result["ffc"]["frame"], release_events["release"]["frame"])
         self.assertEqual(result["ffc"]["method"], "release_backward_chain_grounding")
-        self.assertIn(result["bfc"]["method"], {"backward_from_ffc_support", "context_pre_ffc"})
+        self.assertIn(result["bfc"]["method"], {"backward_from_ffc_support", "context_pre_ffc", "no_ground_confirmed"})
+
+    def test_ffc_bfc_returns_empty_for_too_few_frames(self):
+        result = detect_ffc_bfc(
+            pose_frames=[_frame(i) for i in range(8)],
+            hand="R",
+            release_frame=5,
+            delivery_window=(0, 7),
+            fps=60.0,
+        )
+
+        self.assertEqual(result, {})
+
+    def test_ffc_bfc_returns_empty_when_release_is_missing(self):
+        result = detect_ffc_bfc(
+            pose_frames=[_frame(i) for i in range(40)],
+            hand="R",
+            release_frame=None,
+            delivery_window=(0, 39),
+            fps=60.0,
+        )
+
+        self.assertEqual(result, {})
+
+    def test_ffc_bfc_uses_no_foot_data_fallback_when_feet_are_occluded(self):
+        pose_frames = [_frame_no_feet(i) for i in range(40)]
+        release_events = detect_release_uah(
+            pose_frames=pose_frames,
+            hand="R",
+            fps=60.0,
+        )
+
+        result = detect_ffc_bfc(
+            pose_frames=pose_frames,
+            hand="R",
+            release_frame=release_events["release"]["frame"],
+            delivery_window=tuple(release_events["delivery_window"]),
+            fps=60.0,
+        )
+
+        self.assertEqual(result["ffc"]["method"], "no_foot_data_fallback")
+        self.assertEqual(result["bfc"]["method"], "no_foot_data_fallback")
+        self.assertLessEqual(result["bfc"]["frame"], result["ffc"]["frame"])
+        self.assertLessEqual(result["ffc"]["frame"], release_events["release"]["frame"])
+
+    def test_ffc_bfc_uses_ultimate_fallback_when_grounding_is_never_stable(self):
+        pose_frames = [_frame_chaotic_feet(i) for i in range(40)]
+        release_events = detect_release_uah(
+            pose_frames=pose_frames,
+            hand="R",
+            fps=60.0,
+        )
+
+        result = detect_ffc_bfc(
+            pose_frames=pose_frames,
+            hand="R",
+            release_frame=release_events["release"]["frame"],
+            delivery_window=tuple(release_events["delivery_window"]),
+            fps=60.0,
+        )
+
+        self.assertEqual(result["ffc"]["method"], "ultimate_fallback")
+        self.assertEqual(result["bfc"]["method"], "ultimate_fallback")
+        self.assertIn("candidates", result["ffc"])
+        self.assertTrue(result["ffc"]["candidates"])
+        self.assertLessEqual(result["ffc"]["frame"], release_events["release"]["frame"])
+
+    def test_ffc_bfc_keeps_ordering_on_lower_fps(self):
+        pose_frames = [_frame(i) for i in range(40)]
+        release_events = detect_release_uah(
+            pose_frames=pose_frames,
+            hand="R",
+            fps=24.0,
+        )
+
+        result = detect_ffc_bfc(
+            pose_frames=pose_frames,
+            hand="R",
+            release_frame=release_events["release"]["frame"],
+            delivery_window=tuple(release_events["delivery_window"]),
+            fps=24.0,
+        )
+
+        self.assertIn(result["ffc"]["method"], {"release_backward_chain_grounding", "single_foot_fallback", "ultimate_fallback"})
+        self.assertLessEqual(result["bfc"]["frame"], result["ffc"]["frame"])
+        self.assertLessEqual(result["ffc"]["frame"], release_events["release"]["frame"])
+        self.assertGreater(result["ffc"]["confidence"], 0.0)
+
+    def test_single_foot_fallback_prefers_latest_plausible_frame(self):
+        pose_frames = [_frame(i) for i in range(40)]
+
+        result = detect_ffc_bfc(
+            pose_frames=pose_frames,
+            hand="R",
+            release_frame=8,
+            delivery_window=(0, 39),
+            fps=24.0,
+        )
+
+        self.assertEqual(result["ffc"]["method"], "single_foot_fallback")
+        self.assertEqual(result["ffc"]["frame"], 3)
+        self.assertLessEqual(result["bfc"]["frame"], result["ffc"]["frame"])
 
 
 if __name__ == "__main__":
