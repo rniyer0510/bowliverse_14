@@ -30,6 +30,9 @@ from app.persistence.models import (
     AnalysisResultRaw,
     AnalysisExplanationTrace,
     LearningCase,
+    LearningCaseCluster,
+    CoachFlag,
+    PrescriptionFollowup,
 )
 from app.common.auth import get_current_account
 
@@ -470,6 +473,164 @@ def _build_history_uncertainty_summary(
         "unresolved_runs": unresolved_count,
         "window_runs": len(recent),
         "unresolved_rate": round(rate, 3),
+    }
+
+
+def _build_learning_cluster_item(
+    cluster_row: LearningCaseCluster,
+    *,
+    case_rows: List[LearningCase],
+    coach_flag_rows: List[CoachFlag],
+) -> Dict[str, Any]:
+    run_ids = [str(row.run_id) for row in case_rows]
+    player_ids = sorted({str(row.player_id) for row in case_rows})
+    account_ids = sorted(
+        {
+            str(row.account_id)
+            for row in case_rows
+            if getattr(row, "account_id", None) is not None
+        }
+    )
+    followup_outcomes = Counter(
+        str(row.followup_outcome)
+        for row in case_rows
+        if getattr(row, "followup_outcome", None)
+    )
+    return {
+        "learning_case_cluster_id": str(cluster_row.learning_case_cluster_id),
+        "knowledge_pack_id": cluster_row.knowledge_pack_id,
+        "knowledge_pack_version": cluster_row.knowledge_pack_version,
+        "source_type": cluster_row.source_type,
+        "case_type": cluster_row.case_type,
+        "priority": cluster_row.priority,
+        "status": cluster_row.status,
+        "suggested_gap_type": cluster_row.suggested_gap_type,
+        "trigger_reason": cluster_row.trigger_reason,
+        "symptom_bundle_hash": cluster_row.symptom_bundle_hash,
+        "renderer_mode": cluster_row.renderer_mode,
+        "chosen_mechanism_id": cluster_row.chosen_mechanism_id,
+        "prescription_id": cluster_row.prescription_id,
+        "candidate_mechanism_ids": list(cluster_row.candidate_mechanism_ids or []),
+        "case_count": int(cluster_row.case_count or 0),
+        "coach_flag_count": int(cluster_row.coach_flag_count or 0),
+        "first_run_id": str(cluster_row.first_run_id) if cluster_row.first_run_id else None,
+        "latest_run_id": str(cluster_row.latest_run_id) if cluster_row.latest_run_id else None,
+        "representative_learning_case_id": (
+            str(cluster_row.representative_learning_case_id)
+            if cluster_row.representative_learning_case_id
+            else None
+        ),
+        "created_at": cluster_row.created_at,
+        "updated_at": cluster_row.updated_at,
+        "run_ids": run_ids,
+        "player_ids": player_ids,
+        "account_ids": account_ids,
+        "case_statuses": dict(Counter(str(row.status) for row in case_rows)),
+        "followup_outcomes": dict(followup_outcomes),
+        "coach_flag_types": dict(Counter(str(row.flag_type) for row in coach_flag_rows)),
+        "cluster_payload": dict(cluster_row.cluster_payload or {}),
+    }
+
+
+def _render_reasoning_mode(result_json: Optional[Dict[str, Any]]) -> Optional[str]:
+    if not isinstance(result_json, dict):
+        return None
+    render_reasoning = result_json.get("render_reasoning_v1")
+    if isinstance(render_reasoning, dict):
+        mode = render_reasoning.get("renderer_mode")
+        return str(mode) if isinstance(mode, str) and mode else None
+    return None
+
+
+def _coverage_metrics_payload(
+    *,
+    runs: List[AnalysisRun],
+    raw_by_run_id: Dict[Any, AnalysisResultRaw],
+    followups: List[PrescriptionFollowup],
+    coach_flags: List[CoachFlag],
+    include_breakdown: bool = True,
+) -> Dict[str, Any]:
+    total_runs = len(runs)
+    diagnosis_counts = Counter(
+        str(run.deterministic_diagnosis_status or "").strip().lower()
+        for run in runs
+        if getattr(run, "deterministic_diagnosis_status", None)
+    )
+    renderer_counts = Counter(
+        mode
+        for mode in (
+            _render_reasoning_mode(
+                raw_by_run_id.get(run.run_id).result_json if raw_by_run_id.get(run.run_id) else None
+            )
+            for run in runs
+        )
+        if mode
+    )
+    followup_status_counts = Counter(
+        str(row.response_status or "")
+        for row in followups
+    )
+    total_followups = len(followups)
+
+    def rate(count: int, denominator: int) -> float:
+        if denominator <= 0:
+            return 0.0
+        return round(float(count) / float(denominator), 3)
+
+    overall = {
+        "total_runs": total_runs,
+        "total_followups": total_followups,
+        "total_coach_flags": len(coach_flags),
+        "high_confidence_resolution_rate": rate(diagnosis_counts.get("confident_match", 0), total_runs),
+        "partial_resolution_rate": rate(diagnosis_counts.get("partial_match", 0), total_runs),
+        "no_match_rate": rate(diagnosis_counts.get("no_match", 0), total_runs),
+        "ambiguity_rate": rate(diagnosis_counts.get("ambiguous_match", 0), total_runs),
+        "weak_match_rate": rate(diagnosis_counts.get("weak_match", 0), total_runs),
+        "prescription_non_response_rate": rate(
+            followup_status_counts.get("NO_CLEAR_CHANGE", 0) + followup_status_counts.get("WORSENING", 0),
+            total_followups,
+        ),
+        "renderer_event_only_rate": rate(renderer_counts.get("event_only", 0), total_runs),
+        "coach_flag_rate": rate(len(coach_flags), total_runs),
+    }
+
+    by_pack_version: Dict[str, Dict[str, Any]] = {}
+    if not include_breakdown:
+        return {
+            "overall": overall,
+            "by_pack_version": by_pack_version,
+        }
+    runs_by_pack: Dict[str, List[AnalysisRun]] = {}
+    for run in runs:
+        pack_version = str(run.knowledge_pack_version or "unknown")
+        runs_by_pack.setdefault(pack_version, []).append(run)
+    followups_by_pack: Dict[str, List[PrescriptionFollowup]] = {}
+    for row in followups:
+        pack_version = str(row.knowledge_pack_version or "unknown")
+        followups_by_pack.setdefault(pack_version, []).append(row)
+    coach_flags_by_pack: Dict[str, List[CoachFlag]] = {}
+    for row in coach_flags:
+        pack_version = str(row.knowledge_pack_version or "unknown")
+        coach_flags_by_pack.setdefault(pack_version, []).append(row)
+
+    for pack_version, pack_runs in runs_by_pack.items():
+        pack_followups = followups_by_pack.get(pack_version, [])
+        pack_flags = coach_flags_by_pack.get(pack_version, [])
+        pack_raw_by_run_id = {
+            run.run_id: raw_by_run_id.get(run.run_id)
+            for run in pack_runs
+        }
+        by_pack_version[pack_version] = _coverage_metrics_payload(
+            runs=pack_runs,
+            raw_by_run_id=pack_raw_by_run_id,
+            followups=pack_followups,
+            coach_flags=pack_flags,
+            include_breakdown=False,
+        )["overall"]
+
+    return {
+        "overall": overall,
+        "by_pack_version": by_pack_version,
     }
 
 
@@ -1448,3 +1609,122 @@ def get_analysis_run(
         "visual_walkthrough": _extract_visual_walkthrough(raw.result_json if raw else None),
         "result": raw.result_json if raw else None,
     }
+
+
+@router.get("/players/{player_id}/learning-case-clusters")
+def list_learning_case_clusters(
+    player_id: str,
+    status: Optional[str] = None,
+    current_account=Depends(get_current_account),
+    db: Session = Depends(get_db),
+):
+    link = (
+        db.query(AccountPlayerLink)
+        .filter_by(
+            account_id=current_account.account_id,
+            player_id=player_id,
+        )
+        .first()
+    )
+    if not link:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    cases_query = db.query(LearningCase).filter(LearningCase.player_id == player_id)
+    if status:
+        cases_query = cases_query.filter(LearningCase.status == status.upper())
+    case_rows = cases_query.order_by(LearningCase.created_at.desc()).all()
+    cluster_ids = [
+        row.learning_case_cluster_id
+        for row in case_rows
+        if getattr(row, "learning_case_cluster_id", None) is not None
+    ]
+    if not cluster_ids:
+        return {"items": []}
+
+    cluster_rows = (
+        db.query(LearningCaseCluster)
+        .filter(LearningCaseCluster.learning_case_cluster_id.in_(cluster_ids))
+        .order_by(LearningCaseCluster.updated_at.desc())
+        .all()
+    )
+    coach_flag_rows = (
+        db.query(CoachFlag)
+        .filter(CoachFlag.learning_case_cluster_id.in_(cluster_ids))
+        .all()
+    )
+    cases_by_cluster: Dict[Any, List[LearningCase]] = {}
+    for row in case_rows:
+        if row.learning_case_cluster_id is not None:
+            cases_by_cluster.setdefault(row.learning_case_cluster_id, []).append(row)
+    coach_flags_by_cluster: Dict[Any, List[CoachFlag]] = {}
+    for row in coach_flag_rows:
+        if row.learning_case_cluster_id is not None:
+            coach_flags_by_cluster.setdefault(row.learning_case_cluster_id, []).append(row)
+
+    return {
+        "items": [
+            _build_learning_cluster_item(
+                cluster_row,
+                case_rows=cases_by_cluster.get(cluster_row.learning_case_cluster_id, []),
+                coach_flag_rows=coach_flags_by_cluster.get(cluster_row.learning_case_cluster_id, []),
+            )
+            for cluster_row in cluster_rows
+        ]
+    }
+
+
+@router.get("/players/{player_id}/learning-coverage")
+def get_learning_coverage(
+    player_id: str,
+    season: Optional[int] = None,
+    current_account=Depends(get_current_account),
+    db: Session = Depends(get_db),
+):
+    link = (
+        db.query(AccountPlayerLink)
+        .filter_by(
+            account_id=current_account.account_id,
+            player_id=player_id,
+        )
+        .first()
+    )
+    if not link:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    runs_query = db.query(AnalysisRun).filter(AnalysisRun.player_id == player_id)
+    if season is not None:
+        runs_query = runs_query.filter(AnalysisRun.season == season)
+    runs = runs_query.order_by(AnalysisRun.created_at.desc()).all()
+    run_ids = [row.run_id for row in runs]
+    raw_by_run_id: Dict[Any, AnalysisResultRaw] = {}
+    if run_ids:
+        raw_rows = db.query(AnalysisResultRaw).filter(AnalysisResultRaw.run_id.in_(run_ids)).all()
+        raw_by_run_id = {row.run_id: row for row in raw_rows}
+
+    if run_ids:
+        followups = (
+            db.query(PrescriptionFollowup)
+            .filter(
+                PrescriptionFollowup.player_id == player_id,
+                PrescriptionFollowup.prescription_assigned_at_run_id.in_(run_ids),
+            )
+            .all()
+        )
+        coach_flags = (
+            db.query(CoachFlag)
+            .filter(
+                CoachFlag.player_id == player_id,
+                CoachFlag.run_id.in_(run_ids),
+            )
+            .all()
+        )
+    else:
+        followups = []
+        coach_flags = []
+
+    return _coverage_metrics_payload(
+        runs=runs,
+        raw_by_run_id=raw_by_run_id,
+        followups=followups,
+        coach_flags=coach_flags,
+    )
