@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Optional
 
 from sqlalchemy.orm import Session
 
+from app.persistence.knowledge_pack_monitoring import resolve_open_rollback_alerts_for_candidate
 from app.persistence.models import (
     KnowledgePackReleaseCandidate,
     KnowledgePackReleaseEvent,
@@ -159,6 +160,11 @@ def apply_release_action(
         _require(str(candidate_row.current_environment or "") == "production", "Only production candidates can be rolled back")
         candidate_row.status = "ROLLED_BACK"
         candidate_row.current_environment = "staging"
+        resolve_open_rollback_alerts_for_candidate(
+            candidate_id=candidate_row.knowledge_pack_release_candidate_id,
+            db=db,
+            resolution_status="ROLLED_BACK",
+        )
 
     candidate_row.updated_at = now
     candidate_row.updated_by_account_id = _parse_uuid(account_id)

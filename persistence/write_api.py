@@ -24,14 +24,17 @@ from app.persistence.knowledge_pack_releases import (
     create_release_candidate,
 )
 from app.persistence.knowledge_pack_regressions import run_release_candidate_regression
+from app.persistence.knowledge_pack_monitoring import run_post_promotion_monitoring
 from app.persistence.models import (
     AnalysisRun,
     AnalysisResultRaw,
     AccountPlayerLink,
     CoachFlag,
+    KnowledgePackMonitoringSnapshot,
     KnowledgePackRegressionRun,
     KnowledgePackReleaseCandidate,
     KnowledgePackReleaseEvent,
+    KnowledgePackRollbackAlert,
     LearningCase,
     LearningCaseCluster,
     LearningCaseReviewEvent,
@@ -675,6 +678,47 @@ async def run_knowledge_pack_release_regression_suite(
     }
 
 
+@router.post("/knowledge-pack-release-candidates/{release_candidate_id}/run-monitoring-check")
+async def run_knowledge_pack_release_monitoring_check(
+    release_candidate_id: str,
+    current_account=Depends(get_current_account),
+    db: Session = Depends(get_db),
+):
+    _require_coach_reviewer(current_account)
+    release_candidate_uuid = _parse_uuid_param(release_candidate_id, "release_candidate_id")
+    candidate = (
+        db.query(KnowledgePackReleaseCandidate)
+        .filter(KnowledgePackReleaseCandidate.knowledge_pack_release_candidate_id == release_candidate_uuid)
+        .first()
+    )
+    if not candidate:
+        raise HTTPException(status_code=404, detail="Knowledge-pack release candidate not found")
+
+    try:
+        snapshot, alert = run_post_promotion_monitoring(
+            candidate_row=candidate,
+            account_id=str(current_account.account_id),
+            db=db,
+        )
+        db.commit()
+        db.refresh(candidate)
+        db.refresh(snapshot)
+        if alert is not None:
+            db.refresh(alert)
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception:
+        db.rollback()
+        raise
+
+    return {
+        "release_candidate": _knowledge_pack_release_candidate_response(candidate),
+        "monitoring_snapshot": _knowledge_pack_monitoring_snapshot_response(snapshot),
+        "rollback_alert": _knowledge_pack_rollback_alert_response(alert) if alert else None,
+    }
+
+
 def _minimal_result_for_run(analysis_run: AnalysisRun) -> dict:
     return {
         "run_id": str(analysis_run.run_id),
@@ -815,4 +859,40 @@ def _knowledge_pack_regression_run_response(row: KnowledgePackRegressionRun) -> 
         "summary": dict(row.summary_json or {}),
         "created_by_account_id": str(row.created_by_account_id) if row.created_by_account_id else None,
         "created_at": row.created_at,
+    }
+
+
+def _knowledge_pack_monitoring_snapshot_response(row: KnowledgePackMonitoringSnapshot) -> dict:
+    return {
+        "knowledge_pack_monitoring_snapshot_id": str(row.knowledge_pack_monitoring_snapshot_id),
+        "knowledge_pack_release_candidate_id": str(row.knowledge_pack_release_candidate_id),
+        "baseline_pack_version": row.baseline_pack_version,
+        "candidate_pack_version": row.candidate_pack_version,
+        "baseline_window_start": row.baseline_window_start,
+        "baseline_window_end": row.baseline_window_end,
+        "candidate_window_start": row.candidate_window_start,
+        "candidate_window_end": row.candidate_window_end,
+        "sufficient_data": bool(row.sufficient_data),
+        "alert_triggered": bool(row.alert_triggered),
+        "rollback_recommended": bool(row.rollback_recommended),
+        "baseline_metrics": dict(row.baseline_metrics_json or {}),
+        "candidate_metrics": dict(row.candidate_metrics_json or {}),
+        "regression_metrics": dict(row.regression_metrics_json or {}),
+        "alert_rules": dict(row.alert_rules_json or {}),
+        "created_by_account_id": str(row.created_by_account_id) if row.created_by_account_id else None,
+        "created_at": row.created_at,
+    }
+
+
+def _knowledge_pack_rollback_alert_response(row: KnowledgePackRollbackAlert) -> dict:
+    return {
+        "knowledge_pack_rollback_alert_id": str(row.knowledge_pack_rollback_alert_id),
+        "knowledge_pack_release_candidate_id": str(row.knowledge_pack_release_candidate_id),
+        "knowledge_pack_monitoring_snapshot_id": str(row.knowledge_pack_monitoring_snapshot_id),
+        "status": row.status,
+        "summary": row.summary,
+        "triggered_rules": dict(row.triggered_rules_json or {}),
+        "resolved_at": row.resolved_at,
+        "created_at": row.created_at,
+        "updated_at": row.updated_at,
     }

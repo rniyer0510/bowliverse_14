@@ -802,6 +802,100 @@ class KnowledgePackRegressionCaseResult(Base):
     )
 
 
+class KnowledgePackMonitoringSnapshot(Base):
+    __tablename__ = "knowledge_pack_monitoring_snapshot"
+
+    knowledge_pack_monitoring_snapshot_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    knowledge_pack_release_candidate_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("knowledge_pack_release_candidate.knowledge_pack_release_candidate_id"),
+        nullable=False,
+    )
+    baseline_pack_version: Mapped[str] = mapped_column(String, nullable=False)
+    candidate_pack_version: Mapped[str] = mapped_column(String, nullable=False)
+    baseline_window_start: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True),
+        nullable=False,
+    )
+    baseline_window_end: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True),
+        nullable=False,
+    )
+    candidate_window_start: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True),
+        nullable=False,
+    )
+    candidate_window_end: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True),
+        nullable=False,
+    )
+    sufficient_data: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    alert_triggered: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    rollback_recommended: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    baseline_metrics_json: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    candidate_metrics_json: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    regression_metrics_json: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    alert_rules_json: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    created_by_account_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("account.account_id"),
+        nullable=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True),
+        default=datetime.utcnow,
+        nullable=False,
+    )
+
+
+class KnowledgePackRollbackAlert(Base):
+    __tablename__ = "knowledge_pack_rollback_alert"
+
+    knowledge_pack_rollback_alert_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    knowledge_pack_release_candidate_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("knowledge_pack_release_candidate.knowledge_pack_release_candidate_id"),
+        nullable=False,
+    )
+    knowledge_pack_monitoring_snapshot_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("knowledge_pack_monitoring_snapshot.knowledge_pack_monitoring_snapshot_id"),
+        nullable=False,
+    )
+    status: Mapped[str] = mapped_column(String, nullable=False, default="OPEN")
+    summary: Mapped[str] = mapped_column(Text, nullable=False)
+    triggered_rules_json: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    resolved_at: Mapped[Optional[datetime]] = mapped_column(
+        TIMESTAMP(timezone=True),
+        nullable=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True),
+        default=datetime.utcnow,
+        nullable=False,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True),
+        default=datetime.utcnow,
+        nullable=False,
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('OPEN','ACKNOWLEDGED','DISMISSED','ROLLED_BACK')",
+            name="ck_knowledge_pack_rollback_alert_status",
+        ),
+    )
+
+
 class CoachFlag(Base):
     __tablename__ = "coach_flag"
 
