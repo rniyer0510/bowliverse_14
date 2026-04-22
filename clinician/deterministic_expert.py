@@ -183,17 +183,34 @@ class DeterministicExpertSystem:
             estimated_release_speed=estimated_release_speed,
         )
         history_context = self._summarize_prior_results(prior_results or [])
-        symptoms = self._build_symptoms(metrics)
-        hypotheses, selection = self._score_mechanisms(symptoms, metrics)
-        archetype = self._select_archetype(
+        capture_quality = self._build_capture_quality(
+            events=events,
+            action=action,
             metrics=metrics,
-            selection=selection,
-            history_context=history_context,
         )
+        symptoms = self._build_symptoms(metrics)
+        mechanics_evidence = self._build_mechanics_evidence_payload(
+            events=events,
+            symptoms=symptoms,
+            metrics=metrics,
+            capture_quality=capture_quality,
+        )
+        if capture_quality["status"] == "UNUSABLE":
+            hypotheses = []
+            selection = self._capture_quality_short_circuit_selection(capture_quality)
+            archetype = None
+        else:
+            hypotheses, selection = self._score_mechanisms(symptoms, metrics)
+            archetype = self._select_archetype(
+                metrics=metrics,
+                selection=selection,
+                history_context=history_context,
+            )
         kinetic_chain = self._build_kinetic_chain_payload(
             metrics,
             hypotheses,
             selection,
+            capture_quality=capture_quality,
             archetype=archetype,
             history_context=history_context,
         )
@@ -219,6 +236,8 @@ class DeterministicExpertSystem:
             "knowledge_pack_id": self._pack["pack_id"],
             "knowledge_pack_version": self._pack["pack_version"],
             "unknown_path_enforced": True,
+            "capture_quality_v1": capture_quality,
+            "mechanics_evidence_v1": mechanics_evidence,
             "metrics": metrics,
             "symptoms": symptoms,
             "mechanism_hypotheses": hypotheses,
@@ -229,6 +248,120 @@ class DeterministicExpertSystem:
             "mechanism_explanation_v1": mechanism_explanation,
             "prescription_plan_v1": prescription_plan,
             "history_plan_v1": history_plan,
+        }
+
+    def _build_capture_quality(
+        self,
+        *,
+        events: Dict[str, Any],
+        action: Dict[str, Any],
+        metrics: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        event_chain = (events or {}).get("event_chain") or {}
+        ordered = bool(event_chain.get("ordered", True))
+        chain_quality = _clip01(_safe_float(event_chain.get("quality"), 0.0))
+        action_conf = _clip01(_safe_float((action or {}).get("confidence"), 0.0))
+        notes: List[str] = []
+        for name in ("bfc", "ffc", "release"):
+            event = (events or {}).get(name) or {}
+            if event.get("frame") is None:
+                notes.append(f"{name}_missing")
+        if not ordered:
+            notes.append("event_chain_unordered")
+        if chain_quality < 0.20:
+            notes.append("event_chain_low_quality")
+        elif chain_quality < 0.40:
+            notes.append("event_chain_weak_quality")
+        if action_conf < 0.25:
+            notes.append("action_confidence_too_low")
+        elif action_conf < 0.40:
+            notes.append("action_confidence_weak")
+
+        if not ordered or chain_quality < 0.20 or action_conf < 0.25:
+            status = "UNUSABLE"
+        elif chain_quality < 0.40 or action_conf < 0.40:
+            status = "WEAK"
+        else:
+            status = "USABLE"
+
+        return {
+            "version": "capture_quality_v1",
+            "status": status,
+            "notes": notes,
+            "event_chain_quality": metrics["event_chain_quality"]["value"],
+            "action_confidence": metrics["action_confidence"]["value"],
+        }
+
+    def _build_mechanics_evidence_payload(
+        self,
+        *,
+        events: Dict[str, Any],
+        symptoms: List[Dict[str, Any]],
+        metrics: Dict[str, Any],
+        capture_quality: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        derived_metrics = {
+            "runup_build_score": metrics["approach_momentum_score"]["value"],
+            "transfer_efficiency": metrics["transfer_efficiency_score"]["value"],
+            "late_thrust_dependence": metrics["terminal_impulse_score"]["value"],
+            "dissipation_burden": metrics["dissipation_burden_score"]["value"],
+        }
+        confidences = [
+            _safe_float((metric or {}).get("confidence"), 0.0)
+            for metric in (
+                metrics.get("approach_momentum_score"),
+                metrics.get("transfer_efficiency_score"),
+                metrics.get("terminal_impulse_score"),
+                metrics.get("dissipation_burden_score"),
+            )
+            if isinstance(metric, dict)
+        ]
+        evidence_completeness = _round3(_average(confidences, default=0.0))
+        serialized_events = {}
+        for event_name in ("bfc", "ffc", "uah", "release"):
+            event = (events or {}).get(event_name) or {}
+            serialized_events[event_name] = {
+                "frame": event.get("frame"),
+                "confidence": _safe_float(event.get("confidence"), 0.0),
+            }
+        return {
+            "version": "mechanics_evidence_v1",
+            "knowledge_pack_version": self._pack["pack_version"],
+            "capture_quality": capture_quality,
+            "events": serialized_events,
+            "symptoms": [
+                {
+                    "id": symptom["id"],
+                    "severity_band": symptom["severity"],
+                    "score": symptom["score"],
+                }
+                for symptom in symptoms
+                if symptom.get("present")
+            ],
+            "derived_metrics": derived_metrics,
+            "evidence_completeness": evidence_completeness,
+        }
+
+    def _capture_quality_short_circuit_selection(
+        self,
+        capture_quality: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        return {
+            "diagnosis_status": "no_match",
+            "ambiguous": False,
+            "primary_mechanism_id": None,
+            "primary_mechanism_title": None,
+            "overall_confidence": 0.0,
+            "primary": None,
+            "secondary": [],
+            "selected_mechanism_ids": [],
+            "selected_trajectory_ids": [],
+            "selected_prescription_ids": [],
+            "selected_render_story_ids": [],
+            "no_match_reason": (
+                "Capture quality is too weak for deterministic mechanism scoring."
+            ),
+            "capture_quality_status": capture_quality.get("status"),
         }
 
     def _build_metrics(
@@ -685,9 +818,35 @@ class DeterministicExpertSystem:
         hypotheses: List[Dict[str, Any]],
         selection: Dict[str, Any],
         *,
+        capture_quality: Dict[str, Any],
         archetype: Optional[Dict[str, Any]],
         history_context: Dict[str, Any],
     ) -> Dict[str, Any]:
+        if capture_quality.get("status") == "UNUSABLE":
+            return {
+                "version": "kinetic_chain_v1",
+                "knowledge_pack_version": self._pack["pack_version"],
+                "diagnosis_status": selection["diagnosis_status"],
+                "confidence": 0.0,
+                "capture_quality": capture_quality,
+                "archetype": None,
+                "approach_build": None,
+                "gather_and_organize": None,
+                "transfer": None,
+                "block": None,
+                "release_generation": None,
+                "dissipation": None,
+                "pace_translation": {},
+                "internal_metrics": {},
+                "derived_indices": {},
+                "mechanism_hypotheses": [],
+                "historical_context": {
+                    "prior_run_count": history_context["prior_run_count"],
+                    "recent_dominant_mechanism_id": history_context["dominant_mechanism_id"],
+                    "recent_dominant_archetype_id": history_context["dominant_archetype_id"],
+                },
+                "selected_render_story_ids": [],
+            }
         approach = metrics["approach_momentum_score"]
         gather = _combine_metrics(
             [
@@ -775,6 +934,7 @@ class DeterministicExpertSystem:
             "knowledge_pack_version": self._pack["pack_version"],
             "diagnosis_status": selection["diagnosis_status"],
             "confidence": selection["overall_confidence"],
+            "capture_quality": capture_quality,
             "archetype": archetype,
             "approach_build": self._phase_payload("approach_build", approach, metrics),
             "gather_and_organize": self._phase_payload("gather_and_organize", gather, metrics),

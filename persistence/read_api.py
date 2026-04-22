@@ -28,6 +28,7 @@ from app.persistence.models import (
     AccountPlayerLink,
     AnalysisRun,
     AnalysisResultRaw,
+    AnalysisExplanationTrace,
     LearningCase,
 )
 from app.common.auth import get_current_account
@@ -377,6 +378,38 @@ def _extract_history_plan_summary(result_json: Optional[Dict[str, Any]]) -> Opti
             for story in render_stories
             if isinstance(story, dict) and story.get("id")
         ],
+    }
+
+
+def _explanation_trace_summary(trace_row: Optional[AnalysisExplanationTrace]) -> Optional[Dict[str, Any]]:
+    if trace_row is None:
+        return None
+    return {
+        "diagnosis_status": trace_row.diagnosis_status,
+        "primary_mechanism_id": trace_row.primary_mechanism_id,
+        "matched_symptom_ids": list(trace_row.matched_symptom_ids or []),
+        "selected_render_story_ids": list(trace_row.selected_render_story_ids or []),
+        "selected_history_binding_ids": list(trace_row.selected_history_binding_ids or []),
+    }
+
+
+def _explanation_trace_payload(trace_row: Optional[AnalysisExplanationTrace]) -> Optional[Dict[str, Any]]:
+    if trace_row is None:
+        return None
+    return {
+        "knowledge_pack_id": trace_row.knowledge_pack_id,
+        "knowledge_pack_version": trace_row.knowledge_pack_version,
+        "diagnosis_status": trace_row.diagnosis_status,
+        "primary_mechanism_id": trace_row.primary_mechanism_id,
+        "matched_symptom_ids": list(trace_row.matched_symptom_ids or []),
+        "candidate_mechanisms": list(trace_row.candidate_mechanisms or []),
+        "supporting_evidence": dict(trace_row.supporting_evidence or {}),
+        "contradictions_triggered": list(trace_row.contradictions_triggered or []),
+        "selected_trajectory_ids": list(trace_row.selected_trajectory_ids or []),
+        "selected_prescription_ids": list(trace_row.selected_prescription_ids or []),
+        "selected_render_story_ids": list(trace_row.selected_render_story_ids or []),
+        "selected_history_binding_ids": list(trace_row.selected_history_binding_ids or []),
+        "trace": dict(trace_row.explanation_trace_json or {}),
     }
 
 
@@ -1251,6 +1284,14 @@ def list_analysis_runs(
     if run_ids:
         raw_rows = db.query(AnalysisResultRaw).filter(AnalysisResultRaw.run_id.in_(run_ids)).all()
         raw_by_run_id = {row.run_id: row for row in raw_rows}
+    trace_by_run_id: Dict[Any, AnalysisExplanationTrace] = {}
+    if run_ids:
+        trace_rows = (
+            db.query(AnalysisExplanationTrace)
+            .filter(AnalysisExplanationTrace.run_id.in_(run_ids))
+            .all()
+        )
+        trace_by_run_id = {row.run_id: row for row in trace_rows}
     runtime_learning_cases_by_run: Dict[Any, List[str]] = {}
     if run_ids:
         runtime_learning_cases = (
@@ -1292,6 +1333,7 @@ def list_analysis_runs(
             "visual_walkthrough": _extract_visual_walkthrough(raw.result_json if raw else None),
             "kinetic_chain_summary_v1": _extract_kinetic_chain_summary(raw.result_json if raw else None),
             "history_plan_summary_v1": _extract_history_plan_summary(raw.result_json if raw else None),
+            "explanation_trace_summary_v1": _explanation_trace_summary(trace_by_run_id.get(r.run_id)),
             "history_uncertainty_flag": history_uncertainty["pattern_still_being_understood"],
         }
         items.append(item)
@@ -1357,6 +1399,7 @@ def get_analysis_run(
         raise HTTPException(status_code=403, detail="Access denied")
 
     raw = db.query(AnalysisResultRaw).filter_by(run_id=run_id).first()
+    trace = db.query(AnalysisExplanationTrace).filter_by(run_id=run_id).first()
     recent_runs = (
         db.query(AnalysisRun)
         .filter_by(player_id=run.player_id)
@@ -1395,6 +1438,7 @@ def get_analysis_run(
         "deterministic_archetype_id": run.deterministic_archetype_id,
         "coach_notes": run.coach_notes,
         "history_uncertainty": history_uncertainty,
+        "explanation_trace_v1": _explanation_trace_payload(trace),
         "visual_walkthrough": _extract_visual_walkthrough(raw.result_json if raw else None),
         "result": raw.result_json if raw else None,
     }

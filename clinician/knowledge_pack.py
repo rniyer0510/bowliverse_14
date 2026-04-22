@@ -10,6 +10,7 @@ from typing import Any, Dict, Iterable, List, Mapping, Optional
 DEFAULT_KNOWLEDGE_PACK_ID = "actionlab_deterministic_expert"
 DEFAULT_KNOWLEDGE_PACK_VERSION = "2026-04-22.v1"
 KNOWLEDGE_PACK_ENV_VAR = "ACTIONLAB_KNOWLEDGE_PACK_VERSION"
+ACTIONLAB_EXPERT_ENGINE_VERSION = "1.0.0"
 
 _KNOWLEDGE_PACK_LOCK = threading.Lock()
 _KNOWLEDGE_PACK_CACHE: Dict[str, Dict[str, Any]] = {}
@@ -139,6 +140,7 @@ def _load_yaml_document(path: Path, label: str) -> Dict[str, Any]:
 
 
 def _validate_manifest(requested_version: str, manifest: Mapping[str, Any]) -> Dict[str, str]:
+    _require_string(manifest, "schema_version", "pack manifest")
     pack_id = _require_string(manifest, "pack_id", "pack manifest")
     if pack_id != DEFAULT_KNOWLEDGE_PACK_ID:
         raise ValueError(f"Unexpected knowledge pack id: {pack_id}")
@@ -154,6 +156,21 @@ def _validate_manifest(requested_version: str, manifest: Mapping[str, Any]) -> D
         raise ValueError("Knowledge pack runtime.static_at_runtime must be true")
     if runtime.get("deterministic_only") is not True:
         raise ValueError("Knowledge pack runtime.deterministic_only must be true")
+    release_date = str(manifest.get("release_date") or "").strip()
+    if not release_date:
+        raise ValueError("pack manifest must define release_date")
+    min_engine_version = _require_string(manifest, "min_engine_version", "pack manifest")
+    if _compare_semver(min_engine_version, ACTIONLAB_EXPERT_ENGINE_VERSION) > 0:
+        raise ValueError(
+            "Knowledge pack requires engine version "
+            f"{min_engine_version}, but this runtime is {ACTIONLAB_EXPERT_ENGINE_VERSION}"
+        )
+    if not isinstance(manifest.get("breaking_changes"), bool):
+        raise ValueError("pack manifest breaking_changes must be a boolean")
+    supersedes = manifest.get("supersedes")
+    if supersedes is not None and not isinstance(supersedes, str):
+        raise ValueError("pack manifest supersedes must be a string or null")
+    _require_string(manifest, "changelog_ref", "pack manifest")
 
     index = _require_mapping(manifest, "index", "pack manifest")
     missing = [key for key in _REQUIRED_INDEX_KEYS if key not in index]
@@ -166,7 +183,30 @@ def _validate_manifest(requested_version: str, manifest: Mapping[str, Any]) -> D
     normalized: Dict[str, str] = {}
     for key in _REQUIRED_INDEX_KEYS:
         normalized[key] = _require_string(index, key, "pack manifest index")
+    normalized["min_engine_version"] = min_engine_version
+    normalized["changelog_ref"] = _require_string(manifest, "changelog_ref", "pack manifest")
     return normalized
+
+
+def _compare_semver(left: str, right: str) -> int:
+    left_parts = _parse_semver(left)
+    right_parts = _parse_semver(right)
+    if left_parts < right_parts:
+        return -1
+    if left_parts > right_parts:
+        return 1
+    return 0
+
+
+def _parse_semver(value: str) -> tuple[int, int, int]:
+    text = str(value or "").strip()
+    pieces = text.split(".")
+    if len(pieces) != 3:
+        raise ValueError(f"Invalid semantic version: {text}")
+    try:
+        return int(pieces[0]), int(pieces[1]), int(pieces[2])
+    except Exception as exc:
+        raise ValueError(f"Invalid semantic version: {text}") from exc
 
 
 def _validate_knowledge_pack_documents(

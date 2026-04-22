@@ -1,7 +1,9 @@
 import unittest
 
 from app.clinician.knowledge_pack import (
+    ACTIONLAB_EXPERT_ENGINE_VERSION,
     DEFAULT_KNOWLEDGE_PACK_VERSION,
+    _validate_manifest,
     clear_knowledge_pack_cache,
     load_knowledge_pack,
     validate_default_knowledge_pack,
@@ -34,6 +36,11 @@ class KnowledgePackLoaderTests(unittest.TestCase):
             pack["prescriptions"]["stack_over_landing_leg"]["review_window_type"],
             "next_3_runs",
         )
+        self.assertEqual(
+            pack["manifest"]["min_engine_version"],
+            ACTIONLAB_EXPERT_ENGINE_VERSION,
+        )
+        self.assertFalse(pack["manifest"]["breaking_changes"])
 
     def test_render_and_history_links_are_resolved(self):
         pack = load_knowledge_pack(DEFAULT_KNOWLEDGE_PACK_VERSION)
@@ -62,6 +69,39 @@ class KnowledgePackLoaderTests(unittest.TestCase):
 
     def test_validate_default_pack_succeeds(self):
         validate_default_knowledge_pack()
+
+    def test_manifest_rejects_newer_engine_requirement(self):
+        with self.assertRaises(ValueError):
+            _validate_manifest(
+                DEFAULT_KNOWLEDGE_PACK_VERSION,
+                {
+                    "schema_version": "actionlab.knowledge_pack.manifest.v1",
+                    "pack_id": "actionlab_deterministic_expert",
+                    "pack_version": DEFAULT_KNOWLEDGE_PACK_VERSION,
+                    "release_date": "2026-04-22",
+                    "min_engine_version": "9.9.9",
+                    "breaking_changes": False,
+                    "supersedes": None,
+                    "changelog_ref": "docs/fake.md",
+                    "runtime": {
+                        "static_at_runtime": True,
+                        "deterministic_only": True,
+                    },
+                    "index": {
+                        "globals": "globals.yaml",
+                        "mechanism_families": "mechanism_families.yaml",
+                        "symptoms": "symptoms.yaml",
+                        "mechanisms": "mechanisms.yaml",
+                        "archetypes": "archetypes.yaml",
+                        "trajectories": "trajectories.yaml",
+                        "prescriptions": "prescriptions.yaml",
+                        "followup_checks": "followup_checks.yaml",
+                        "render_stories": "render_stories.yaml",
+                        "history_bindings": "history_bindings.yaml",
+                        "wording": "wording.yaml",
+                    },
+                },
+            )
 
 
 if __name__ == "__main__":

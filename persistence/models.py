@@ -341,6 +341,34 @@ class AnalysisResultRaw(Base):
     result_json: Mapped[dict] = mapped_column(JSONB, nullable=False)
 
 
+class AnalysisExplanationTrace(Base):
+    __tablename__ = "analysis_explanation_trace"
+
+    run_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("analysis_run.run_id"),
+        primary_key=True,
+    )
+    knowledge_pack_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    knowledge_pack_version: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    diagnosis_status: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    primary_mechanism_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    matched_symptom_ids: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    candidate_mechanisms: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    supporting_evidence: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    contradictions_triggered: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    selected_trajectory_ids: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    selected_prescription_ids: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    selected_render_story_ids: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    selected_history_binding_ids: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    explanation_trace_json: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    created_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True),
+        default=datetime.utcnow,
+        nullable=False,
+    )
+
+
 class LearningCaseCluster(Base):
     __tablename__ = "learning_case_cluster"
 

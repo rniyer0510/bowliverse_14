@@ -18,6 +18,16 @@ LEARNING_CASE_EVENT_NAME = "actionlab.learning_case.v1"
 _OPEN_CLUSTER_STATUSES = {"OPEN", "CLUSTERED", "QUEUED", "UNDER_REVIEW"}
 
 _CASE_RULES = {
+    "capture_quality_unusable": {
+        "case_type": "LOW_CONFIDENCE",
+        "priority_key": "single_run_low_confidence",
+        "priority_fallback": "D",
+        "suggested_gap_type": "capture_quality",
+        "renderer_mode": "event_only",
+        "trigger_reason": (
+            "Capture quality was unusable, so deterministic mechanism scoring was short-circuited."
+        ),
+    },
     "no_match": {
         "case_type": "NO_MATCH",
         "priority_key": "no_match_recurring",
@@ -93,7 +103,12 @@ def build_learning_case_event(
     selection = deterministic.get("selection") or {}
     if not isinstance(selection, dict):
         return None
+    capture_quality = deterministic.get("capture_quality_v1") or {}
+    if not isinstance(capture_quality, dict):
+        capture_quality = {}
     diagnosis_status = str(selection.get("diagnosis_status") or "").strip().lower()
+    if str(capture_quality.get("status") or "").upper() == "UNUSABLE":
+        diagnosis_status = "capture_quality_unusable"
     rule = _CASE_RULES.get(diagnosis_status)
     if not rule:
         return None

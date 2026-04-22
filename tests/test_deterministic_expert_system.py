@@ -222,6 +222,29 @@ class DeterministicExpertSystemTests(unittest.TestCase):
             2,
         )
 
+    def test_unusable_capture_quality_short_circuits_mechanism_scoring(self):
+        payload = self.engine.build(
+            events={
+                "event_chain": {"quality": 0.12, "ordered": False},
+                "release": {"frame": None, "confidence": 0.1},
+            },
+            action={"action": "SEMI_OPEN", "intent": "semi_open", "confidence": 0.2},
+            risks=[],
+            basics={},
+            interpretation={"linear_flow": {"flow_state": "FRAGMENTED", "confidence": 0.2, "contributors": []}},
+            estimated_release_speed={"available": False, "confidence": 0.0, "debug": {}},
+        )
+
+        self.assertEqual(payload["capture_quality_v1"]["status"], "UNUSABLE")
+        self.assertEqual(payload["selection"]["diagnosis_status"], "no_match")
+        self.assertEqual(payload["mechanism_hypotheses"], [])
+        self.assertEqual(payload["kinetic_chain_v1"]["mechanism_hypotheses"], [])
+        self.assertEqual(payload["prescription_plan_v1"]["prescriptions"], [])
+        self.assertEqual(
+            payload["selection"]["capture_quality_status"],
+            "UNUSABLE",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

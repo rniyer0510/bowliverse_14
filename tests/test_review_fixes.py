@@ -220,6 +220,7 @@ class AnalyzePersistenceFallbackTests(unittest.TestCase):
 class WriterSessionOwnershipTests(unittest.TestCase):
     def test_write_analysis_with_external_session_flushes_without_committing(self):
         from app.persistence import writer
+        from app.persistence.models import AnalysisExplanationTrace
 
         db = MagicMock()
         db.get.return_value = SimpleNamespace(season=2026, age_group="U16")
@@ -258,6 +259,12 @@ class WriterSessionOwnershipTests(unittest.TestCase):
         self.assertEqual(
             created_run.deterministic_primary_mechanism_id,
             "soft_block_with_trunk_carry",
+        )
+        self.assertTrue(
+            any(
+                isinstance(call.args[0], AnalysisExplanationTrace)
+                for call in db.add.call_args_list
+            )
         )
         self.assertEqual(
             created_run.deterministic_archetype_id,

@@ -30,6 +30,11 @@ class LearningCaseBuilderTests(unittest.TestCase):
             "deterministic_expert_v1": {
                 "knowledge_pack_id": "actionlab_deterministic_expert",
                 "knowledge_pack_version": "2026-04-22.v1",
+                "capture_quality_v1": {
+                    "version": "capture_quality_v1",
+                    "status": "USABLE",
+                    "notes": [],
+                },
                 "symptoms": [
                     {
                         "id": "late_trunk_drift",
@@ -105,6 +110,18 @@ class LearningCaseBuilderTests(unittest.TestCase):
         )
 
         self.assertIsNone(event)
+
+    def test_build_learning_case_event_uses_capture_quality_gap_when_unusable(self):
+        result = self._result("no_match")
+        result["deterministic_expert_v1"]["capture_quality_v1"]["status"] = "UNUSABLE"
+
+        event = build_learning_case_event(
+            result=result,
+            account_id="33333333-3333-3333-3333-333333333333",
+        )
+
+        self.assertEqual(event["suggested_gap_type"], "capture_quality")
+        self.assertEqual(event["renderer_mode"], "event_only")
 
     def test_symptom_bundle_hash_is_order_independent(self):
         symptoms_a = [

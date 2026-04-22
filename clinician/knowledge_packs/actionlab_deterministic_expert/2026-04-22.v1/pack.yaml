@@ -2,6 +2,10 @@ schema_version: actionlab.knowledge_pack.manifest.v1
 pack_id: actionlab_deterministic_expert
 pack_version: 2026-04-22.v1
 release_date: 2026-04-22
+min_engine_version: 1.0.0
+breaking_changes: false
+supersedes: null
+changelog_ref: docs/actionlab_deterministic_expert_2026-04-22.v1.md
 runtime:
   static_at_runtime: true
   deterministic_only: true

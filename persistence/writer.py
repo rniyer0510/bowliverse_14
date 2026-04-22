@@ -5,6 +5,7 @@ from app.persistence.session import SessionLocal
 from app.persistence.models import (
     AnalysisRun,
     AnalysisResultRaw,
+    AnalysisExplanationTrace,
     EventAnchor,
     BiomechSignal,
     RiskMeasurement,
@@ -98,6 +99,86 @@ def _deterministic_summary(result: Dict[str, Any]) -> Dict[str, Optional[str]]:
             if isinstance(archetype.get("id"), str)
             else None
         ),
+    }
+
+
+def _deterministic_trace(result: Dict[str, Any]) -> Dict[str, Any]:
+    deterministic = result.get("deterministic_expert_v1") or {}
+    if not isinstance(deterministic, dict):
+        deterministic = {}
+
+    selection = deterministic.get("selection") or {}
+    if not isinstance(selection, dict):
+        selection = {}
+
+    symptoms = deterministic.get("symptoms") or []
+    if not isinstance(symptoms, list):
+        symptoms = []
+
+    hypotheses = deterministic.get("mechanism_hypotheses") or []
+    if not isinstance(hypotheses, list):
+        hypotheses = []
+
+    primary = selection.get("primary") or {}
+    if not isinstance(primary, dict):
+        primary = {}
+
+    explanation = result.get("mechanism_explanation_v1") or {}
+    if not isinstance(explanation, dict):
+        explanation = {}
+
+    matched_symptom_ids = [
+        str(symptom.get("id"))
+        for symptom in symptoms
+        if isinstance(symptom, dict) and symptom.get("present") and symptom.get("id")
+    ]
+    supporting_evidence = {
+        "winner_required_symptom_ids": list(primary.get("required_symptom_ids") or []),
+        "winner_supporting_symptom_ids": list(primary.get("supporting_symptom_ids") or []),
+        "winner_matched_symptom_ids": list(primary.get("matched_symptom_ids") or []),
+        "primary_summary": primary.get("summary"),
+    }
+    candidate_mechanisms = []
+    for hypothesis in hypotheses[:5]:
+        if not isinstance(hypothesis, dict):
+            continue
+        candidate_mechanisms.append(
+            {
+                "id": hypothesis.get("id"),
+                "title": hypothesis.get("title"),
+                "overall_confidence": hypothesis.get("overall_confidence"),
+                "support_score": hypothesis.get("support_score"),
+                "contradiction_penalty": hypothesis.get("contradiction_penalty"),
+                "evidence_completeness": hypothesis.get("evidence_completeness"),
+            }
+        )
+
+    trace_json = {
+        "capture_quality": dict(deterministic.get("capture_quality_v1") or {}),
+        "matched_symptom_ids": matched_symptom_ids,
+        "candidate_mechanisms": candidate_mechanisms,
+        "supporting_evidence": supporting_evidence,
+        "contradictions_triggered": list(primary.get("contradiction_notes") or []),
+        "selected_trajectory_ids": list(selection.get("selected_trajectory_ids") or []),
+        "selected_prescription_ids": list(selection.get("selected_prescription_ids") or []),
+        "selected_render_story_ids": list(selection.get("selected_render_story_ids") or []),
+        "selected_history_binding_ids": list(explanation.get("selected_history_binding_ids") or []),
+    }
+
+    return {
+        "knowledge_pack_id": deterministic.get("knowledge_pack_id") if isinstance(deterministic.get("knowledge_pack_id"), str) else None,
+        "knowledge_pack_version": deterministic.get("knowledge_pack_version") if isinstance(deterministic.get("knowledge_pack_version"), str) else None,
+        "diagnosis_status": selection.get("diagnosis_status") if isinstance(selection.get("diagnosis_status"), str) else None,
+        "primary_mechanism_id": selection.get("primary_mechanism_id") if isinstance(selection.get("primary_mechanism_id"), str) else None,
+        "matched_symptom_ids": matched_symptom_ids,
+        "candidate_mechanisms": candidate_mechanisms,
+        "supporting_evidence": supporting_evidence,
+        "contradictions_triggered": list(primary.get("contradiction_notes") or []),
+        "selected_trajectory_ids": list(selection.get("selected_trajectory_ids") or []),
+        "selected_prescription_ids": list(selection.get("selected_prescription_ids") or []),
+        "selected_render_story_ids": list(selection.get("selected_render_story_ids") or []),
+        "selected_history_binding_ids": list(explanation.get("selected_history_binding_ids") or []),
+        "explanation_trace_json": trace_json,
     }
 
 
@@ -287,6 +368,26 @@ def write_analysis(result: dict, db: Optional[Session] = None, **kwargs) -> str:
             AnalysisResultRaw(
                 run_id=run_id,
                 result_json=result,
+            )
+        )
+
+        explanation_trace = _deterministic_trace(result)
+        db.add(
+            AnalysisExplanationTrace(
+                run_id=run_id,
+                knowledge_pack_id=explanation_trace["knowledge_pack_id"],
+                knowledge_pack_version=explanation_trace["knowledge_pack_version"],
+                diagnosis_status=explanation_trace["diagnosis_status"],
+                primary_mechanism_id=explanation_trace["primary_mechanism_id"],
+                matched_symptom_ids=explanation_trace["matched_symptom_ids"],
+                candidate_mechanisms=explanation_trace["candidate_mechanisms"],
+                supporting_evidence=explanation_trace["supporting_evidence"],
+                contradictions_triggered=explanation_trace["contradictions_triggered"],
+                selected_trajectory_ids=explanation_trace["selected_trajectory_ids"],
+                selected_prescription_ids=explanation_trace["selected_prescription_ids"],
+                selected_render_story_ids=explanation_trace["selected_render_story_ids"],
+                selected_history_binding_ids=explanation_trace["selected_history_binding_ids"],
+                explanation_trace_json=explanation_trace["explanation_trace_json"],
             )
         )
 
