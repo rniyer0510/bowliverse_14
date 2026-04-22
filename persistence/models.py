@@ -341,6 +341,83 @@ class AnalysisResultRaw(Base):
     result_json: Mapped[dict] = mapped_column(JSONB, nullable=False)
 
 
+class LearningCase(Base):
+    __tablename__ = "learning_case"
+
+    learning_case_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+
+    run_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("analysis_run.run_id"),
+        nullable=False,
+    )
+
+    player_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("player.player_id"),
+        nullable=False,
+    )
+
+    account_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("account.account_id"),
+        nullable=True,
+    )
+
+    event_name: Mapped[str] = mapped_column(String, nullable=False)
+    knowledge_pack_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    knowledge_pack_version: Mapped[str] = mapped_column(String, nullable=False)
+    case_type: Mapped[str] = mapped_column(String, nullable=False)
+    priority: Mapped[str] = mapped_column(String, nullable=False)
+    status: Mapped[str] = mapped_column(String, nullable=False, default="OPEN")
+    suggested_gap_type: Mapped[str] = mapped_column(String, nullable=False)
+    trigger_reason: Mapped[str] = mapped_column(Text, nullable=False)
+    symptom_bundle_hash: Mapped[str] = mapped_column(String, nullable=False)
+    chosen_mechanism_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    renderer_mode: Mapped[str] = mapped_column(String, nullable=False)
+    prescription_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    followup_outcome: Mapped[str] = mapped_column(
+        String,
+        nullable=False,
+        default="NOT_YET_DUE",
+    )
+    clip_metadata: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    detected_symptoms: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    candidate_mechanisms: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    confidence_breakdown: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    contradictions_triggered: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    event_payload: Mapped[dict] = mapped_column(JSONB, nullable=False)
+
+    created_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True),
+        default=datetime.utcnow,
+        nullable=False,
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "case_type IN ('NO_MATCH','AMBIGUOUS_MATCH','LOW_CONFIDENCE')",
+            name="ck_learning_case_type",
+        ),
+        CheckConstraint(
+            "priority IN ('A','B','C','D','E')",
+            name="ck_learning_case_priority",
+        ),
+        CheckConstraint(
+            "status IN ('OPEN','CLUSTERED','QUEUED','UNDER_REVIEW','RESOLVED','SUPERSEDED','EXPIRED','REJECTED')",
+            name="ck_learning_case_status",
+        ),
+        CheckConstraint(
+            "followup_outcome IN ('NOT_YET_DUE','IMPROVING','NO_CLEAR_CHANGE','WORSENING','INSUFFICIENT_DATA')",
+            name="ck_learning_case_followup_outcome",
+        ),
+    )
+
+
 # ------------------------------------------------------------
 # Phase 1 Auth - User Model
 # ------------------------------------------------------------

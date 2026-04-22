@@ -49,6 +49,10 @@ from app.clinician.knowledge_pack import validate_default_knowledge_pack
 from app.clinician.interpreter import ClinicianInterpreter
 
 # Persistence
+from app.persistence.learning_cases import (
+    build_learning_case_event,
+    write_learning_case,
+)
 from app.persistence.writer import write_analysis
 from app.persistence.session import SessionLocal
 from app.persistence.models import (
@@ -315,6 +319,35 @@ def _load_recent_expert_history(
             }
         )
     return history
+
+
+def _persist_learning_case_best_effort(
+    *,
+    request_id: str,
+    run_id: str,
+    result: Dict[str, Any],
+    account_id: Optional[str],
+) -> None:
+    try:
+        event_payload = build_learning_case_event(
+            result=result,
+            account_id=account_id,
+        )
+        if not event_payload:
+            logger.info(
+                "[learning_case] request_id=%s run_id=%s skipped=no_gap_trigger",
+                request_id,
+                run_id,
+            )
+            return
+        write_learning_case(event_payload=event_payload)
+    except Exception as exc:
+        logger.error(
+            "[learning_case] request_id=%s run_id=%s persisted=false error=%s",
+            request_id,
+            run_id,
+            exc,
+        )
 
 
 def _reject_with_code(
@@ -976,7 +1009,7 @@ def analyze(
         # ------------------------------------------------------------
         # Persist
         # ------------------------------------------------------------
-        _persist_analysis_result(
+        persistence_status = _persist_analysis_result(
             request_id=request_id,
             run_id=run_id,
             result=result,
@@ -986,6 +1019,14 @@ def analyze(
             effective_age_group=effective_age_group,
             effective_season=effective_season,
         )
+        if isinstance(persistence_status, dict) and persistence_status.get("persisted"):
+            background_tasks.add_task(
+                _persist_learning_case_best_effort,
+                request_id=request_id,
+                run_id=run_id,
+                result=result,
+                account_id=str(current_account.account_id),
+            )
 
         logger.info(
             f"[analyze:success] request_id={request_id} run_id={run_id} "
