@@ -53,6 +53,7 @@ from app.persistence.learning_cases import (
     build_learning_case_event,
     write_learning_case,
 )
+from app.persistence.prescription_followups import sync_prescription_followups_for_run
 from app.persistence.writer import write_analysis
 from app.persistence.session import SessionLocal
 from app.persistence.models import (
@@ -344,6 +345,30 @@ def _persist_learning_case_best_effort(
     except Exception as exc:
         logger.error(
             "[learning_case] request_id=%s run_id=%s persisted=false error=%s",
+            request_id,
+            run_id,
+            exc,
+        )
+
+
+def _sync_prescription_followups_best_effort(
+    *,
+    request_id: str,
+    run_id: str,
+) -> None:
+    try:
+        summary = sync_prescription_followups_for_run(run_id=run_id)
+        logger.info(
+            "[prescription_followup] request_id=%s run_id=%s created=%s updated=%s non_response_cases=%s",
+            request_id,
+            run_id,
+            summary.get("created", 0),
+            summary.get("updated", 0),
+            summary.get("non_response_cases", 0),
+        )
+    except Exception as exc:
+        logger.error(
+            "[prescription_followup] request_id=%s run_id=%s persisted=false error=%s",
             request_id,
             run_id,
             exc,
@@ -1026,6 +1051,11 @@ def analyze(
                 run_id=run_id,
                 result=result,
                 account_id=str(current_account.account_id),
+            )
+            background_tasks.add_task(
+                _sync_prescription_followups_best_effort,
+                request_id=request_id,
+                run_id=run_id,
             )
 
         logger.info(

@@ -28,6 +28,12 @@ class KnowledgePackLoaderTests(unittest.TestCase):
         self.assertIn("hedges", pack["wording"])
         self.assertIn("surfaces", pack["wording"])
         self.assertIn("internal_metrics", pack["globals"])
+        self.assertIn("followup_defaults", pack["globals"])
+        self.assertIn("history_uncertainty", pack["globals"])
+        self.assertEqual(
+            pack["prescriptions"]["stack_over_landing_leg"]["review_window_type"],
+            "next_3_runs",
+        )
 
     def test_render_and_history_links_are_resolved(self):
         pack = load_knowledge_pack(DEFAULT_KNOWLEDGE_PACK_VERSION)

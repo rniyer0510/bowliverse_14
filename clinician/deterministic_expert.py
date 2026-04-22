@@ -1068,6 +1068,7 @@ class DeterministicExpertSystem:
                     "why_this_first": cfg["why_this_first"],
                     "coach_check": cfg["coach_check"],
                     "reassess_after": cfg["reassess_after"],
+                    "review_window_type": cfg["review_window_type"],
                     "followup_metric_targets": list(cfg["followup_metric_targets"]),
                     "avoid_for_now": list(cfg["avoid_for_now"]),
                 }

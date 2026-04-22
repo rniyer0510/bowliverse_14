@@ -23,6 +23,31 @@ evidence_bands:
   supporting: { min: 0.55 }
   weak: { min: 0.35 }
 
+cluster_priority_defaults:
+  no_match_recurring: A
+  ambiguous_recurring: B
+  prescription_non_response: C
+  single_run_low_confidence: D
+  renderer_weak_evidence_cluster: E
+  coach_feedback_wrong_mechanism: B
+  coach_feedback_wrong_prescription: C
+  coach_feedback_wording: D
+  coach_feedback_renderer: E
+  coach_feedback_capture_quality: C
+
+followup_defaults:
+  insufficient_data_status: INSUFFICIENT_DATA
+  default_window_type: next_3_runs
+  min_valid_runs:
+    next_3_runs: 2
+    next_session: 1
+    next_2_weeks: 2
+
+history_uncertainty:
+  unresolved_min_runs: 3
+  unresolved_window_runs: 8
+  unresolved_rate_min: 0.35
+
 internal_metrics:
   - runup_build_score
   - delivery_stride_transfer_score

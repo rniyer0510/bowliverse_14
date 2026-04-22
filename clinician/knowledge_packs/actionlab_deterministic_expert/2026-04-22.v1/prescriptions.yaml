@@ -15,6 +15,7 @@ prescriptions:
       - "The release looks less rescued and more carried."
     coach_check: "On the next few balls, check whether the final strides arrive with intent before the arm speeds up."
     reassess_after: "Review after the next 3 to 5 deliveries and again after the next session."
+    review_window_type: next_3_runs
     works_best_when:
       - "Weak approach build and high terminal thrust travel together."
       - "The bowler looks calm enough to accept a rhythm cue."
@@ -40,6 +41,7 @@ prescriptions:
       - "Transfer into the front foot looks more organized."
     coach_check: "Watch whether the body arrives to landing in a calmer line over the next few balls."
     reassess_after: "Review over the next 3 deliveries, then again after 1 to 2 sessions."
+    review_window_type: next_3_runs
     works_best_when:
       - "Unstable gather is visible before the main landing leak."
       - "The bowler is drifting sideways into the crease."
@@ -65,6 +67,7 @@ prescriptions:
       - "The front leg looks more supportive without forcing stiffness."
     coach_check: "Check whether the chest stops travelling so far past landing on the next few deliveries."
     reassess_after: "Review on the next 3 balls and again after 1 session."
+    review_window_type: next_3_runs
     works_best_when:
       - "Front-leg softening and late trunk drift are travelling together."
       - "Landing confidence is strong enough to trust a transfer story."
@@ -90,6 +93,7 @@ prescriptions:
       - "The action carries through without the chest spilling so far forward."
     coach_check: "Check whether landing support improves without the stride suddenly getting longer."
     reassess_after: "Review within the same session and again after the next spell."
+    review_window_type: next_session
     works_best_when:
       - "Soft-block carry is the main story."
       - "The bowler can feel the landing base but is not overstriding."
@@ -115,6 +119,7 @@ prescriptions:
       - "The arm no longer needs such a visible late rescue."
     coach_check: "Watch whether the arm looks less rushed relative to trunk rotation over the next few balls."
     reassess_after: "Review after the next 3 deliveries and again after 1 session."
+    review_window_type: next_3_runs
     works_best_when:
       - "Arm chase is persistent and the gather is at least readable."
       - "The bowler can repeat the same intent level across a short set."
@@ -140,6 +145,7 @@ prescriptions:
       - "Follow-through looks less abrupt and more balanced."
     coach_check: "Check whether the finish looks less violent without losing overall carry into the ball."
     reassess_after: "Review after one short set and again after the next session."
+    review_window_type: next_session
     works_best_when:
       - "Terminal thrust and dissipation burden are both elevated."
       - "The bowler already shows enough intent and does not need more aggression."

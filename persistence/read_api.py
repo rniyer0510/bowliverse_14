@@ -21,12 +21,14 @@ from typing import Any, Dict, List, Optional
 
 from sqlalchemy.orm import Session
 
+from app.clinician.knowledge_pack import load_knowledge_pack
 from app.persistence.session import get_db
 from app.persistence.models import (
     Player,
     AccountPlayerLink,
     AnalysisRun,
     AnalysisResultRaw,
+    LearningCase,
 )
 from app.common.auth import get_current_account
 
@@ -375,6 +377,60 @@ def _extract_history_plan_summary(result_json: Optional[Dict[str, Any]]) -> Opti
             for story in render_stories
             if isinstance(story, dict) and story.get("id")
         ],
+    }
+
+
+def _history_uncertainty_thresholds() -> Dict[str, Any]:
+    try:
+        globals_cfg = load_knowledge_pack()["globals"]
+    except Exception:
+        return {
+            "unresolved_min_runs": 3,
+            "unresolved_window_runs": 8,
+            "unresolved_rate_min": 0.35,
+        }
+    cfg = globals_cfg.get("history_uncertainty") or {}
+    return {
+        "unresolved_min_runs": int(cfg.get("unresolved_min_runs") or 3),
+        "unresolved_window_runs": int(cfg.get("unresolved_window_runs") or 8),
+        "unresolved_rate_min": float(cfg.get("unresolved_rate_min") or 0.35),
+    }
+
+
+def _build_history_uncertainty_summary(
+    runs: List[AnalysisRun],
+    runtime_learning_cases_by_run: Dict[Any, List[str]],
+) -> Dict[str, Any]:
+    thresholds = _history_uncertainty_thresholds()
+    window_runs = max(1, int(thresholds["unresolved_window_runs"]))
+    recent = list(runs[:window_runs])
+    if not recent:
+        return {
+            "pattern_still_being_understood": False,
+            "unresolved_runs": 0,
+            "window_runs": 0,
+            "unresolved_rate": 0.0,
+        }
+
+    unresolved_count = 0
+    for run in recent:
+        diagnosis_status = str(run.deterministic_diagnosis_status or "").strip().lower()
+        runtime_case_statuses = runtime_learning_cases_by_run.get(run.run_id) or []
+        if diagnosis_status in {"no_match", "ambiguous_match", "weak_match"}:
+            unresolved_count += 1
+            continue
+        if any(status in {"OPEN", "CLUSTERED", "QUEUED", "UNDER_REVIEW"} for status in runtime_case_statuses):
+            unresolved_count += 1
+
+    rate = unresolved_count / len(recent)
+    return {
+        "pattern_still_being_understood": (
+            unresolved_count >= int(thresholds["unresolved_min_runs"])
+            and rate >= float(thresholds["unresolved_rate_min"])
+        ),
+        "unresolved_runs": unresolved_count,
+        "window_runs": len(recent),
+        "unresolved_rate": round(rate, 3),
     }
 
 
@@ -1195,9 +1251,25 @@ def list_analysis_runs(
     if run_ids:
         raw_rows = db.query(AnalysisResultRaw).filter(AnalysisResultRaw.run_id.in_(run_ids)).all()
         raw_by_run_id = {row.run_id: row for row in raw_rows}
+    runtime_learning_cases_by_run: Dict[Any, List[str]] = {}
+    if run_ids:
+        runtime_learning_cases = (
+            db.query(LearningCase)
+            .filter(
+                LearningCase.run_id.in_(run_ids),
+                LearningCase.source_type == "runtime_gap",
+            )
+            .all()
+        )
+        for row in runtime_learning_cases:
+            runtime_learning_cases_by_run.setdefault(row.run_id, []).append(str(row.status))
 
     items = []
     heatmap_entries = []
+    history_uncertainty = _build_history_uncertainty_summary(
+        runs=runs,
+        runtime_learning_cases_by_run=runtime_learning_cases_by_run,
+    )
     for r in runs:
         raw = raw_by_run_id.get(r.run_id)
         score_summary = _extract_score_summary(raw.result_json if raw else None)
@@ -1220,6 +1292,7 @@ def list_analysis_runs(
             "visual_walkthrough": _extract_visual_walkthrough(raw.result_json if raw else None),
             "kinetic_chain_summary_v1": _extract_kinetic_chain_summary(raw.result_json if raw else None),
             "history_plan_summary_v1": _extract_history_plan_summary(raw.result_json if raw else None),
+            "history_uncertainty_flag": history_uncertainty["pattern_still_being_understood"],
         }
         items.append(item)
         heatmap_entries.append(
@@ -1255,6 +1328,7 @@ def list_analysis_runs(
                 for r in runs
             ]
         ),
+        "history_uncertainty": history_uncertainty,
     }
 
 
@@ -1283,6 +1357,29 @@ def get_analysis_run(
         raise HTTPException(status_code=403, detail="Access denied")
 
     raw = db.query(AnalysisResultRaw).filter_by(run_id=run_id).first()
+    recent_runs = (
+        db.query(AnalysisRun)
+        .filter_by(player_id=run.player_id)
+        .order_by(AnalysisRun.created_at.desc())
+        .limit(_history_uncertainty_thresholds()["unresolved_window_runs"])
+        .all()
+    )
+    recent_run_ids = [row.run_id for row in recent_runs]
+    runtime_learning_cases_by_run: Dict[Any, List[str]] = {}
+    if recent_run_ids:
+        for case_row in (
+            db.query(LearningCase)
+            .filter(
+                LearningCase.run_id.in_(recent_run_ids),
+                LearningCase.source_type == "runtime_gap",
+            )
+            .all()
+        ):
+            runtime_learning_cases_by_run.setdefault(case_row.run_id, []).append(str(case_row.status))
+    history_uncertainty = _build_history_uncertainty_summary(
+        runs=recent_runs,
+        runtime_learning_cases_by_run=runtime_learning_cases_by_run,
+    )
 
     return {
         "run_id": str(run.run_id),
@@ -1297,6 +1394,7 @@ def get_analysis_run(
         "deterministic_primary_mechanism_id": run.deterministic_primary_mechanism_id,
         "deterministic_archetype_id": run.deterministic_archetype_id,
         "coach_notes": run.coach_notes,
+        "history_uncertainty": history_uncertainty,
         "visual_walkthrough": _extract_visual_walkthrough(raw.result_json if raw else None),
         "result": raw.result_json if raw else None,
     }

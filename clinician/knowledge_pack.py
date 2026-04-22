@@ -284,6 +284,94 @@ def _validate_globals(document: Mapping[str, Any]) -> Dict[str, Any]:
     for band_name in ("strong", "supporting", "weak"):
         band_cfg = _require_mapping(evidence_bands, band_name, "knowledge pack globals")
         _require_float(band_cfg, "min", f"knowledge pack globals evidence band {band_name}")
+    cluster_priority_defaults = _require_mapping(
+        document,
+        "cluster_priority_defaults",
+        "knowledge pack globals",
+    )
+    for key in (
+        "no_match_recurring",
+        "ambiguous_recurring",
+        "prescription_non_response",
+        "single_run_low_confidence",
+        "renderer_weak_evidence_cluster",
+        "coach_feedback_wrong_mechanism",
+        "coach_feedback_wrong_prescription",
+        "coach_feedback_wording",
+        "coach_feedback_renderer",
+        "coach_feedback_capture_quality",
+    ):
+        value = _require_string(cluster_priority_defaults, key, "knowledge pack globals")
+        if value not in {"A", "B", "C", "D", "E"}:
+            raise ValueError(
+                f"knowledge pack globals cluster priority default {key} must be one of A-E"
+            )
+    followup_defaults = _require_mapping(
+        document,
+        "followup_defaults",
+        "knowledge pack globals",
+    )
+    insufficient_data_status = _require_string(
+        followup_defaults,
+        "insufficient_data_status",
+        "knowledge pack globals",
+    )
+    if insufficient_data_status != "INSUFFICIENT_DATA":
+        raise ValueError(
+            "knowledge pack globals followup insufficient_data_status must be INSUFFICIENT_DATA"
+        )
+    default_window_type = _require_string(
+        followup_defaults,
+        "default_window_type",
+        "knowledge pack globals",
+    )
+    if default_window_type not in {"next_3_runs", "next_session", "next_2_weeks"}:
+        raise ValueError(
+            "knowledge pack globals followup default_window_type must be a supported review window"
+        )
+    min_valid_runs = _require_mapping(
+        followup_defaults,
+        "min_valid_runs",
+        "knowledge pack globals",
+    )
+    for key in ("next_3_runs", "next_session", "next_2_weeks"):
+        minimum = _require_int(min_valid_runs, key, "knowledge pack globals")
+        if minimum <= 0:
+            raise ValueError(
+                f"knowledge pack globals followup min_valid_runs {key} must be > 0"
+            )
+    history_uncertainty = _require_mapping(
+        document,
+        "history_uncertainty",
+        "knowledge pack globals",
+    )
+    unresolved_min_runs = _require_int(
+        history_uncertainty,
+        "unresolved_min_runs",
+        "knowledge pack globals",
+    )
+    unresolved_window_runs = _require_int(
+        history_uncertainty,
+        "unresolved_window_runs",
+        "knowledge pack globals",
+    )
+    unresolved_rate_min = _require_float(
+        history_uncertainty,
+        "unresolved_rate_min",
+        "knowledge pack globals",
+    )
+    if unresolved_min_runs <= 0 or unresolved_window_runs <= 0:
+        raise ValueError(
+            "knowledge pack globals history uncertainty run thresholds must be > 0"
+        )
+    if unresolved_min_runs > unresolved_window_runs:
+        raise ValueError(
+            "knowledge pack globals unresolved_min_runs cannot exceed unresolved_window_runs"
+        )
+    if not (0.0 <= unresolved_rate_min <= 1.0):
+        raise ValueError(
+            "knowledge pack globals unresolved_rate_min must be between 0 and 1"
+        )
     internal_metrics = _require_str_list(document, "internal_metrics", "knowledge pack globals")
     derived_indices = _require_str_list(document, "derived_indices", "knowledge pack globals")
 
@@ -293,6 +381,17 @@ def _validate_globals(document: Mapping[str, Any]) -> Dict[str, Any]:
         "match_thresholds": dict(thresholds),
         "history_window_defaults": dict(history_defaults),
         "evidence_bands": dict(evidence_bands),
+        "cluster_priority_defaults": dict(cluster_priority_defaults),
+        "followup_defaults": {
+            "insufficient_data_status": insufficient_data_status,
+            "default_window_type": default_window_type,
+            "min_valid_runs": dict(min_valid_runs),
+        },
+        "history_uncertainty": {
+            "unresolved_min_runs": unresolved_min_runs,
+            "unresolved_window_runs": unresolved_window_runs,
+            "unresolved_rate_min": unresolved_rate_min,
+        },
         "internal_metrics": internal_metrics,
         "derived_indices": derived_indices,
     }
@@ -505,6 +604,11 @@ def _validate_prescriptions(document: Mapping[str, Any]) -> Dict[str, Dict[str, 
         _require_str_list(prescription, "expected_change", label)
         _require_string(prescription, "coach_check", label)
         _require_string(prescription, "reassess_after", label)
+        review_window_type = _require_string(prescription, "review_window_type", label)
+        if review_window_type not in {"next_3_runs", "next_session", "next_2_weeks"}:
+            raise ValueError(
+                f"{label} review_window_type must be one of next_3_runs, next_session, next_2_weeks"
+            )
         _require_str_list(prescription, "works_best_when", label)
         _require_str_list(prescription, "contraindicated_when", label)
         _require_str_list(prescription, "followup_metric_targets", label)

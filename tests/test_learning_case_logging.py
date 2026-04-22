@@ -1,11 +1,15 @@
 import unittest
+import uuid
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 from app.persistence.learning_cases import (
     LEARNING_CASE_EVENT_NAME,
     build_learning_case_event,
+    build_coach_feedback_learning_case_event,
     symptom_bundle_hash,
     write_learning_case,
+    _cluster_key_hash,
 )
 
 
@@ -87,6 +91,7 @@ class LearningCaseBuilderTests(unittest.TestCase):
         self.assertEqual(event["case_type"], "NO_MATCH")
         self.assertEqual(event["priority"], "A")
         self.assertEqual(event["renderer_mode"], "event_only")
+        self.assertEqual(event["source_type"], "runtime_gap")
         self.assertEqual(event["followup_outcome"], "NOT_YET_DUE")
         self.assertEqual(
             event["detected_symptoms"],
@@ -110,6 +115,41 @@ class LearningCaseBuilderTests(unittest.TestCase):
 
         self.assertEqual(symptom_bundle_hash(symptoms_a), symptom_bundle_hash(symptoms_b))
 
+    def test_cluster_key_hash_is_order_independent_for_candidate_ids(self):
+        event_a = {
+            "source_type": "runtime_gap",
+            "knowledge_pack_version": "2026-04-22.v1",
+            "case_type": "AMBIGUOUS_MATCH",
+            "suggested_gap_type": "weak_distinction_rules",
+            "symptom_bundle_hash": "c7c7a0b8",
+            "renderer_mode": "partial_evidence",
+            "prescription_id": "stack_over_landing_leg",
+            "chosen_mechanism": "soft_block_with_trunk_carry",
+            "candidate_mechanisms": [
+                {"id": "soft_block_with_trunk_carry"},
+                {"id": "gather_disorganization_before_block"},
+            ],
+        }
+        event_b = dict(event_a)
+        event_b["candidate_mechanisms"] = list(reversed(event_a["candidate_mechanisms"]))
+
+        self.assertEqual(_cluster_key_hash(event_a), _cluster_key_hash(event_b))
+
+    def test_build_coach_feedback_learning_case_event(self):
+        event = build_coach_feedback_learning_case_event(
+            result=self._result("partial_match"),
+            account_id="33333333-3333-3333-3333-333333333333",
+            coach_flag_type="wrong_mechanism",
+            notes="The block leak is being overstated here.",
+            flagged_mechanism_id="soft_block_with_trunk_carry",
+        )
+
+        self.assertIsNotNone(event)
+        self.assertEqual(event["case_type"], "COACH_FEEDBACK")
+        self.assertEqual(event["source_type"], "coach_feedback")
+        self.assertEqual(event["suggested_gap_type"], "coach_wrong_mechanism")
+        self.assertEqual(event["coach_flag_type"], "wrong_mechanism")
+
 
 class LearningCaseWriterTests(unittest.TestCase):
     def test_write_learning_case_with_external_session_flushes_without_committing(self):
@@ -123,9 +163,10 @@ class LearningCaseWriterTests(unittest.TestCase):
             "run_id": "22222222-2222-2222-2222-222222222222",
             "player_id": "11111111-1111-1111-1111-111111111111",
             "account_id": "33333333-3333-3333-3333-333333333333",
+            "source_type": "runtime_gap",
             "case_type": "NO_MATCH",
             "priority": "A",
-            "status": "OPEN",
+            "status": "CLUSTERED",
             "symptom_bundle_hash": "c7c7a0b8",
             "clip_metadata": {"fps": 30.0},
             "detected_symptoms": ["front_leg_softening"],
@@ -145,10 +186,20 @@ class LearningCaseWriterTests(unittest.TestCase):
             "suggested_gap_type": "missing_mechanism",
         }
 
-        learning_case_id = write_learning_case(event_payload=event, db=db)
+        cluster_id = uuid.UUID("55555555-5555-5555-5555-555555555555")
+        with patch(
+            "app.persistence.learning_cases._get_or_create_cluster",
+            return_value=SimpleNamespace(
+                learning_case_cluster_id=cluster_id,
+                representative_learning_case_id=None,
+                updated_at=None,
+            ),
+        ):
+            stored = write_learning_case(event_payload=event, db=db)
 
-        self.assertEqual(learning_case_id, "44444444-4444-4444-4444-444444444444")
-        db.flush.assert_called_once()
+        self.assertEqual(stored["learning_case_id"], "44444444-4444-4444-4444-444444444444")
+        self.assertEqual(stored["learning_case_cluster_id"], str(cluster_id))
+        self.assertGreaterEqual(db.flush.call_count, 1)
         db.commit.assert_not_called()
 
 

@@ -341,6 +341,82 @@ class AnalysisResultRaw(Base):
     result_json: Mapped[dict] = mapped_column(JSONB, nullable=False)
 
 
+class LearningCaseCluster(Base):
+    __tablename__ = "learning_case_cluster"
+
+    learning_case_cluster_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+
+    cluster_key_hash: Mapped[str] = mapped_column(
+        String,
+        nullable=False,
+        unique=True,
+    )
+    knowledge_pack_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    knowledge_pack_version: Mapped[str] = mapped_column(String, nullable=False)
+    source_type: Mapped[str] = mapped_column(String, nullable=False, default="runtime_gap")
+    case_type: Mapped[str] = mapped_column(String, nullable=False)
+    priority: Mapped[str] = mapped_column(String, nullable=False)
+    status: Mapped[str] = mapped_column(String, nullable=False, default="OPEN")
+    suggested_gap_type: Mapped[str] = mapped_column(String, nullable=False)
+    trigger_reason: Mapped[str] = mapped_column(Text, nullable=False)
+    symptom_bundle_hash: Mapped[str] = mapped_column(String, nullable=False)
+    renderer_mode: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    chosen_mechanism_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    prescription_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    candidate_mechanism_ids: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    cluster_payload: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    case_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    coach_flag_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    first_run_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("analysis_run.run_id"),
+        nullable=True,
+    )
+    latest_run_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("analysis_run.run_id"),
+        nullable=True,
+    )
+    representative_learning_case_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("learning_case.learning_case_id"),
+        nullable=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True),
+        default=datetime.utcnow,
+        nullable=False,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True),
+        default=datetime.utcnow,
+        nullable=False,
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "source_type IN ('runtime_gap','coach_feedback','prescription_followup')",
+            name="ck_learning_case_cluster_source_type",
+        ),
+        CheckConstraint(
+            "case_type IN ('NO_MATCH','AMBIGUOUS_MATCH','LOW_CONFIDENCE','COACH_FEEDBACK','PRESCRIPTION_NON_RESPONSE')",
+            name="ck_learning_case_cluster_type",
+        ),
+        CheckConstraint(
+            "priority IN ('A','B','C','D','E')",
+            name="ck_learning_case_cluster_priority",
+        ),
+        CheckConstraint(
+            "status IN ('OPEN','CLUSTERED','QUEUED','UNDER_REVIEW','RESOLVED','SUPERSEDED','EXPIRED','REJECTED')",
+            name="ck_learning_case_cluster_status",
+        ),
+    )
+
+
 class LearningCase(Base):
     __tablename__ = "learning_case"
 
@@ -367,10 +443,16 @@ class LearningCase(Base):
         ForeignKey("account.account_id"),
         nullable=True,
     )
+    learning_case_cluster_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("learning_case_cluster.learning_case_cluster_id"),
+        nullable=True,
+    )
 
     event_name: Mapped[str] = mapped_column(String, nullable=False)
     knowledge_pack_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     knowledge_pack_version: Mapped[str] = mapped_column(String, nullable=False)
+    source_type: Mapped[str] = mapped_column(String, nullable=False, default="runtime_gap")
     case_type: Mapped[str] = mapped_column(String, nullable=False)
     priority: Mapped[str] = mapped_column(String, nullable=False)
     status: Mapped[str] = mapped_column(String, nullable=False, default="OPEN")
@@ -400,7 +482,11 @@ class LearningCase(Base):
 
     __table_args__ = (
         CheckConstraint(
-            "case_type IN ('NO_MATCH','AMBIGUOUS_MATCH','LOW_CONFIDENCE')",
+            "source_type IN ('runtime_gap','coach_feedback','prescription_followup')",
+            name="ck_learning_case_source_type",
+        ),
+        CheckConstraint(
+            "case_type IN ('NO_MATCH','AMBIGUOUS_MATCH','LOW_CONFIDENCE','COACH_FEEDBACK','PRESCRIPTION_NON_RESPONSE')",
             name="ck_learning_case_type",
         ),
         CheckConstraint(
@@ -414,6 +500,138 @@ class LearningCase(Base):
         CheckConstraint(
             "followup_outcome IN ('NOT_YET_DUE','IMPROVING','NO_CLEAR_CHANGE','WORSENING','INSUFFICIENT_DATA')",
             name="ck_learning_case_followup_outcome",
+        ),
+    )
+
+
+class CoachFlag(Base):
+    __tablename__ = "coach_flag"
+
+    coach_flag_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+
+    run_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("analysis_run.run_id"),
+        nullable=False,
+    )
+    player_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("player.player_id"),
+        nullable=False,
+    )
+    account_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("account.account_id"),
+        nullable=False,
+    )
+    knowledge_pack_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    knowledge_pack_version: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    flag_type: Mapped[str] = mapped_column(String, nullable=False)
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    flagged_mechanism_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    flagged_prescription_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    learning_case_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("learning_case.learning_case_id"),
+        nullable=True,
+    )
+    learning_case_cluster_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("learning_case_cluster.learning_case_cluster_id"),
+        nullable=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True),
+        default=datetime.utcnow,
+        nullable=False,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True),
+        default=datetime.utcnow,
+        nullable=False,
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "flag_type IN ('wrong_mechanism','wrong_prescription','right_mechanism_wrong_wording','renderer_story_misleading','capture_quality_bad')",
+            name="ck_coach_flag_type",
+        ),
+    )
+
+
+class PrescriptionFollowup(Base):
+    __tablename__ = "prescription_followup"
+
+    prescription_followup_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    prescription_assigned_at_run_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("analysis_run.run_id"),
+        nullable=False,
+    )
+    player_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("player.player_id"),
+        nullable=False,
+    )
+    knowledge_pack_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    knowledge_pack_version: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    prescription_id: Mapped[str] = mapped_column(String, nullable=False)
+    review_window_type: Mapped[str] = mapped_column(String, nullable=False)
+    followup_metrics: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    expected_direction_of_change: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    actual_direction_of_change: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    response_status: Mapped[str] = mapped_column(
+        String,
+        nullable=False,
+        default="NOT_YET_DUE",
+    )
+    valid_followup_run_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    window_closed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    latest_followup_run_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("analysis_run.run_id"),
+        nullable=True,
+    )
+    learning_case_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("learning_case.learning_case_id"),
+        nullable=True,
+    )
+    window_due_at: Mapped[Optional[datetime]] = mapped_column(
+        TIMESTAMP(timezone=True),
+        nullable=True,
+    )
+    resolved_at: Mapped[Optional[datetime]] = mapped_column(
+        TIMESTAMP(timezone=True),
+        nullable=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True),
+        default=datetime.utcnow,
+        nullable=False,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True),
+        default=datetime.utcnow,
+        nullable=False,
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "review_window_type IN ('next_3_runs','next_session','next_2_weeks')",
+            name="ck_prescription_followup_review_window_type",
+        ),
+        CheckConstraint(
+            "response_status IN ('NOT_YET_DUE','IMPROVING','NO_CLEAR_CHANGE','WORSENING','INSUFFICIENT_DATA')",
+            name="ck_prescription_followup_response_status",
         ),
     )
 
