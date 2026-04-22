@@ -9,13 +9,24 @@ from sqlalchemy.orm import Session
 
 from app.clinician.knowledge_pack import load_knowledge_pack
 from app.common.logger import get_logger
-from app.persistence.models import LearningCase, LearningCaseCluster
+from app.persistence.models import LearningCase, LearningCaseCluster, LearningCaseReviewEvent
 from app.persistence.session import SessionLocal
 
 logger = get_logger(__name__)
 
 LEARNING_CASE_EVENT_NAME = "actionlab.learning_case.v1"
 _OPEN_CLUSTER_STATUSES = {"OPEN", "CLUSTERED", "QUEUED", "UNDER_REVIEW"}
+_TERMINAL_STATUSES = {"RESOLVED", "SUPERSEDED", "EXPIRED", "REJECTED"}
+_REVIEW_ACTION_TO_STATUS = {
+    "triage": "CLUSTERED",
+    "queue": "QUEUED",
+    "start_review": "UNDER_REVIEW",
+    "resolve": "RESOLVED",
+    "reject": "REJECTED",
+    "reopen": "OPEN",
+    "supersede": "SUPERSEDED",
+    "expire": "EXPIRED",
+}
 
 _CASE_RULES = {
     "capture_quality_unusable": {
@@ -360,6 +371,109 @@ def increment_cluster_coach_flag_count(
     db.flush()
 
 
+def apply_cluster_review_action(
+    *,
+    cluster_row: LearningCaseCluster,
+    case_rows: List[LearningCase],
+    action: str,
+    account_id: Optional[str],
+    notes: Optional[str],
+    db: Session,
+    metadata: Optional[Dict[str, Any]] = None,
+) -> LearningCaseReviewEvent:
+    action_norm = _normalize_review_action(action)
+    target_status = _review_target_status(action_norm)
+    now = datetime.utcnow()
+
+    from_status = str(cluster_row.status or "OPEN")
+    cluster_row.status = target_status
+    cluster_row.updated_at = now
+    cluster_row.cluster_payload = _merge_review_payload(
+        dict(cluster_row.cluster_payload or {}),
+        action=action_norm,
+        target_status=target_status,
+        account_id=account_id,
+        notes=notes,
+        metadata=metadata,
+        created_at=now,
+    )
+
+    for row in case_rows:
+        row.status = target_status
+
+    event = LearningCaseReviewEvent(
+        learning_case_review_event_id=uuid.uuid4(),
+        learning_case_cluster_id=cluster_row.learning_case_cluster_id,
+        learning_case_id=None,
+        account_id=_parse_uuid(account_id),
+        action=action_norm,
+        from_status=from_status,
+        to_status=target_status,
+        notes=_safe_str(notes),
+        metadata_json=dict(metadata or {}),
+        created_at=now,
+    )
+    db.add(event)
+    db.flush()
+    return event
+
+
+def apply_learning_case_review_action(
+    *,
+    cluster_row: LearningCaseCluster,
+    case_row: LearningCase,
+    sibling_case_rows: List[LearningCase],
+    action: str,
+    account_id: Optional[str],
+    notes: Optional[str],
+    db: Session,
+    metadata: Optional[Dict[str, Any]] = None,
+) -> LearningCaseReviewEvent:
+    action_norm = _normalize_review_action(action)
+    target_status = _review_target_status(action_norm)
+    now = datetime.utcnow()
+
+    from_status = str(case_row.status or "OPEN")
+    case_row.status = target_status
+    cluster_status = _derive_cluster_status_from_cases(sibling_case_rows)
+    cluster_row.status = cluster_status
+    cluster_row.updated_at = now
+    cluster_row.cluster_payload = _merge_review_payload(
+        dict(cluster_row.cluster_payload or {}),
+        action=action_norm,
+        target_status=cluster_status,
+        account_id=account_id,
+        notes=notes,
+        metadata=metadata,
+        created_at=now,
+        learning_case_id=str(case_row.learning_case_id),
+    )
+
+    event = LearningCaseReviewEvent(
+        learning_case_review_event_id=uuid.uuid4(),
+        learning_case_cluster_id=cluster_row.learning_case_cluster_id,
+        learning_case_id=case_row.learning_case_id,
+        account_id=_parse_uuid(account_id),
+        action=action_norm,
+        from_status=from_status,
+        to_status=target_status,
+        notes=_safe_str(notes),
+        metadata_json=dict(metadata or {}),
+        created_at=now,
+    )
+    db.add(event)
+    db.flush()
+    return event
+
+
+def review_target_status(action: str) -> str:
+    return _review_target_status(_normalize_review_action(action))
+
+
+def derive_cluster_status_from_case_statuses(statuses: List[str]) -> str:
+    return _derive_cluster_status_from_case_statuses(statuses)
+
+
 def _base_event_payload(
     *,
     result: Dict[str, Any],
@@ -410,6 +524,68 @@ def _base_event_payload(
         "trigger_reason": trigger_reason,
         "suggested_gap_type": suggested_gap_type,
     }
+
+
+def _normalize_review_action(action: str) -> str:
+    action_norm = str(action or "").strip().lower()
+    if action_norm not in _REVIEW_ACTION_TO_STATUS:
+        raise ValueError(f"Unsupported review action: {action}")
+    return action_norm
+
+
+def _review_target_status(action: str) -> str:
+    target_status = _REVIEW_ACTION_TO_STATUS.get(action)
+    if not target_status:
+        raise ValueError(f"Unsupported review action: {action}")
+    return target_status
+
+
+def _derive_cluster_status_from_cases(case_rows: List[LearningCase]) -> str:
+    statuses = [str(getattr(row, "status", "") or "").strip().upper() for row in case_rows]
+    return _derive_cluster_status_from_case_statuses(statuses)
+
+
+def _derive_cluster_status_from_case_statuses(statuses: List[str]) -> str:
+    normalized = [status for status in statuses if status]
+    if not normalized:
+        return "OPEN"
+    unique = set(normalized)
+    if len(unique) == 1:
+        return normalized[0]
+    if "UNDER_REVIEW" in unique:
+        return "UNDER_REVIEW"
+    if "QUEUED" in unique:
+        return "QUEUED"
+    if "OPEN" in unique:
+        return "OPEN"
+    if "CLUSTERED" in unique:
+        return "CLUSTERED"
+    if unique.issubset(_TERMINAL_STATUSES):
+        return "UNDER_REVIEW"
+    return "OPEN"
+
+
+def _merge_review_payload(
+    cluster_payload: Dict[str, Any],
+    *,
+    action: str,
+    target_status: str,
+    account_id: Optional[str],
+    notes: Optional[str],
+    metadata: Optional[Dict[str, Any]],
+    created_at: datetime,
+    learning_case_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    cluster_payload["latest_review"] = {
+        "action": action,
+        "target_status": target_status,
+        "account_id": _safe_str(account_id),
+        "notes": _safe_str(notes),
+        "metadata": dict(metadata or {}),
+        "created_at": created_at.isoformat(),
+        "learning_case_id": learning_case_id,
+    }
+    return cluster_payload
 
 
 def _get_or_create_cluster(
@@ -645,3 +821,13 @@ def _safe_str(value: Any) -> Optional[str]:
         text = value.strip()
         return text or None
     return None
+
+
+def _parse_uuid(value: Any) -> Optional[uuid.UUID]:
+    text = _safe_str(value)
+    if not text:
+        return None
+    try:
+        return uuid.UUID(text)
+    except Exception:
+        return None

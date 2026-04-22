@@ -528,6 +528,7 @@ def _build_learning_cluster_item(
         "case_statuses": dict(Counter(str(row.status) for row in case_rows)),
         "followup_outcomes": dict(followup_outcomes),
         "coach_flag_types": dict(Counter(str(row.flag_type) for row in coach_flag_rows)),
+        "latest_review": dict((cluster_row.cluster_payload or {}).get("latest_review") or {}),
         "cluster_payload": dict(cluster_row.cluster_payload or {}),
     }
 

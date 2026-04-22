@@ -532,6 +532,56 @@ class LearningCase(Base):
     )
 
 
+class LearningCaseReviewEvent(Base):
+    __tablename__ = "learning_case_review_event"
+
+    learning_case_review_event_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    learning_case_cluster_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("learning_case_cluster.learning_case_cluster_id"),
+        nullable=False,
+    )
+    learning_case_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("learning_case.learning_case_id"),
+        nullable=True,
+    )
+    account_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("account.account_id"),
+        nullable=True,
+    )
+    action: Mapped[str] = mapped_column(String, nullable=False)
+    from_status: Mapped[str] = mapped_column(String, nullable=False)
+    to_status: Mapped[str] = mapped_column(String, nullable=False)
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    metadata_json: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    created_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True),
+        default=datetime.utcnow,
+        nullable=False,
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "action IN ('triage','queue','start_review','resolve','reject','reopen','supersede','expire')",
+            name="ck_learning_case_review_event_action",
+        ),
+        CheckConstraint(
+            "from_status IN ('OPEN','CLUSTERED','QUEUED','UNDER_REVIEW','RESOLVED','SUPERSEDED','EXPIRED','REJECTED')",
+            name="ck_learning_case_review_event_from_status",
+        ),
+        CheckConstraint(
+            "to_status IN ('OPEN','CLUSTERED','QUEUED','UNDER_REVIEW','RESOLVED','SUPERSEDED','EXPIRED','REJECTED')",
+            name="ck_learning_case_review_event_to_status",
+        ),
+    )
+
+
 class CoachFlag(Base):
     __tablename__ = "coach_flag"
 

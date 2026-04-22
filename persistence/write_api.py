@@ -13,6 +13,8 @@ import uuid
 
 from app.persistence.session import get_db
 from app.persistence.learning_cases import (
+    apply_cluster_review_action,
+    apply_learning_case_review_action,
     build_coach_feedback_learning_case_event,
     increment_cluster_coach_flag_count,
     write_learning_case,
@@ -22,6 +24,9 @@ from app.persistence.models import (
     AnalysisResultRaw,
     AccountPlayerLink,
     CoachFlag,
+    LearningCase,
+    LearningCaseCluster,
+    LearningCaseReviewEvent,
 )
 from app.common.logger import get_logger
 from app.common.auth import get_current_account
@@ -41,6 +46,11 @@ class CoachFlagCreate(BaseModel):
     notes: str = ""
     flagged_mechanism_id: str | None = None
     flagged_prescription_id: str | None = None
+
+
+class LearningCaseReviewActionCreate(BaseModel):
+    action: str
+    notes: str = ""
 
 
 @router.patch("/analysis/{run_id}/coach-notes")
@@ -297,6 +307,213 @@ async def list_coach_flags(
     }
 
 
+@router.post("/learning-case-clusters/{learning_case_cluster_id}/review-actions")
+async def create_learning_case_cluster_review_action(
+    learning_case_cluster_id: str,
+    payload: LearningCaseReviewActionCreate,
+    current_account=Depends(get_current_account),
+    db: Session = Depends(get_db),
+):
+    _require_coach_reviewer(current_account)
+    cluster_uuid = _parse_uuid_param(learning_case_cluster_id, "learning_case_cluster_id")
+    cluster_row = (
+        db.query(LearningCaseCluster)
+        .filter(LearningCaseCluster.learning_case_cluster_id == cluster_uuid)
+        .first()
+    )
+    if not cluster_row:
+        raise HTTPException(status_code=404, detail="Learning case cluster not found")
+
+    case_rows = (
+        db.query(LearningCase)
+        .filter(LearningCase.learning_case_cluster_id == cluster_uuid)
+        .order_by(LearningCase.created_at.asc())
+        .all()
+    )
+    if not case_rows:
+        raise HTTPException(status_code=404, detail="Learning case cluster has no cases")
+
+    _ensure_learning_case_access(
+        current_account=current_account,
+        player_id=case_rows[0].player_id,
+        db=db,
+    )
+
+    try:
+        event = apply_cluster_review_action(
+            cluster_row=cluster_row,
+            case_rows=case_rows,
+            action=payload.action,
+            account_id=str(current_account.account_id),
+            notes=payload.notes,
+            metadata={"target_type": "cluster"},
+            db=db,
+        )
+        db.commit()
+        db.refresh(cluster_row)
+        db.refresh(event)
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception:
+        db.rollback()
+        raise
+
+    return {
+        "learning_case_cluster_id": str(cluster_row.learning_case_cluster_id),
+        "status": cluster_row.status,
+        "case_count": len(case_rows),
+        "review_event": _learning_case_review_event_response(event),
+    }
+
+
+@router.get("/learning-case-clusters/{learning_case_cluster_id}/review-actions")
+async def list_learning_case_cluster_review_actions(
+    learning_case_cluster_id: str,
+    current_account=Depends(get_current_account),
+    db: Session = Depends(get_db),
+):
+    cluster_uuid = _parse_uuid_param(learning_case_cluster_id, "learning_case_cluster_id")
+    cluster_row = (
+        db.query(LearningCaseCluster)
+        .filter(LearningCaseCluster.learning_case_cluster_id == cluster_uuid)
+        .first()
+    )
+    if not cluster_row:
+        raise HTTPException(status_code=404, detail="Learning case cluster not found")
+
+    case_row = (
+        db.query(LearningCase)
+        .filter(LearningCase.learning_case_cluster_id == cluster_uuid)
+        .order_by(LearningCase.created_at.asc())
+        .first()
+    )
+    if not case_row:
+        raise HTTPException(status_code=404, detail="Learning case cluster has no cases")
+
+    _ensure_learning_case_access(
+        current_account=current_account,
+        player_id=case_row.player_id,
+        db=db,
+    )
+
+    rows = (
+        db.query(LearningCaseReviewEvent)
+        .filter(LearningCaseReviewEvent.learning_case_cluster_id == cluster_uuid)
+        .order_by(LearningCaseReviewEvent.created_at.desc())
+        .all()
+    )
+    return {
+        "learning_case_cluster_id": learning_case_cluster_id,
+        "items": [_learning_case_review_event_response(row) for row in rows],
+    }
+
+
+@router.post("/learning-cases/{learning_case_id}/review-actions")
+async def create_learning_case_review_action(
+    learning_case_id: str,
+    payload: LearningCaseReviewActionCreate,
+    current_account=Depends(get_current_account),
+    db: Session = Depends(get_db),
+):
+    _require_coach_reviewer(current_account)
+    case_uuid = _parse_uuid_param(learning_case_id, "learning_case_id")
+    case_row = (
+        db.query(LearningCase)
+        .filter(LearningCase.learning_case_id == case_uuid)
+        .first()
+    )
+    if not case_row:
+        raise HTTPException(status_code=404, detail="Learning case not found")
+
+    _ensure_learning_case_access(
+        current_account=current_account,
+        player_id=case_row.player_id,
+        db=db,
+    )
+
+    if case_row.learning_case_cluster_id is None:
+        raise HTTPException(status_code=400, detail="Learning case is not attached to a cluster")
+
+    cluster_row = (
+        db.query(LearningCaseCluster)
+        .filter(LearningCaseCluster.learning_case_cluster_id == case_row.learning_case_cluster_id)
+        .first()
+    )
+    if not cluster_row:
+        raise HTTPException(status_code=404, detail="Learning case cluster not found")
+
+    sibling_case_rows = (
+        db.query(LearningCase)
+        .filter(LearningCase.learning_case_cluster_id == case_row.learning_case_cluster_id)
+        .order_by(LearningCase.created_at.asc())
+        .all()
+    )
+
+    try:
+        event = apply_learning_case_review_action(
+            cluster_row=cluster_row,
+            case_row=case_row,
+            sibling_case_rows=sibling_case_rows,
+            action=payload.action,
+            account_id=str(current_account.account_id),
+            notes=payload.notes,
+            metadata={"target_type": "case"},
+            db=db,
+        )
+        db.commit()
+        db.refresh(case_row)
+        db.refresh(cluster_row)
+        db.refresh(event)
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception:
+        db.rollback()
+        raise
+
+    return {
+        "learning_case_id": str(case_row.learning_case_id),
+        "learning_case_cluster_id": str(cluster_row.learning_case_cluster_id),
+        "status": case_row.status,
+        "cluster_status": cluster_row.status,
+        "review_event": _learning_case_review_event_response(event),
+    }
+
+
+@router.get("/learning-cases/{learning_case_id}/review-actions")
+async def list_learning_case_review_actions(
+    learning_case_id: str,
+    current_account=Depends(get_current_account),
+    db: Session = Depends(get_db),
+):
+    case_uuid = _parse_uuid_param(learning_case_id, "learning_case_id")
+    case_row = (
+        db.query(LearningCase)
+        .filter(LearningCase.learning_case_id == case_uuid)
+        .first()
+    )
+    if not case_row:
+        raise HTTPException(status_code=404, detail="Learning case not found")
+
+    _ensure_learning_case_access(
+        current_account=current_account,
+        player_id=case_row.player_id,
+        db=db,
+    )
+
+    rows = (
+        db.query(LearningCaseReviewEvent)
+        .filter(LearningCaseReviewEvent.learning_case_id == case_uuid)
+        .order_by(LearningCaseReviewEvent.created_at.desc())
+        .all()
+    )
+    return {
+        "learning_case_id": learning_case_id,
+        "items": [_learning_case_review_event_response(row) for row in rows],
+    }
+
+
 def _minimal_result_for_run(analysis_run: AnalysisRun) -> dict:
     return {
         "run_id": str(analysis_run.run_id),
@@ -311,6 +528,31 @@ def _minimal_result_for_run(analysis_run: AnalysisRun) -> dict:
             "total_frames": analysis_run.total_frames,
         },
     }
+
+
+def _require_coach_reviewer(current_account) -> None:
+    if str(getattr(current_account, "role", "")).lower() != "coach":
+        raise HTTPException(status_code=403, detail="Learning-case review is only available to coach accounts")
+
+
+def _ensure_learning_case_access(*, current_account, player_id: uuid.UUID, db: Session) -> None:
+    link = (
+        db.query(AccountPlayerLink)
+        .filter(
+            AccountPlayerLink.account_id == current_account.account_id,
+            AccountPlayerLink.player_id == player_id,
+        )
+        .first()
+    )
+    if not link:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+
+def _parse_uuid_param(value: str, field_name: str) -> uuid.UUID:
+    try:
+        return uuid.UUID(value)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Invalid {field_name} format")
 
 
 def _coach_flag_response(row: CoachFlag, *, deduped: bool) -> dict:
@@ -331,4 +573,19 @@ def _coach_flag_response(row: CoachFlag, *, deduped: bool) -> dict:
         "created_at": row.created_at,
         "updated_at": row.updated_at,
         "deduped": deduped,
+    }
+
+
+def _learning_case_review_event_response(row: LearningCaseReviewEvent) -> dict:
+    return {
+        "learning_case_review_event_id": str(row.learning_case_review_event_id),
+        "learning_case_cluster_id": str(row.learning_case_cluster_id),
+        "learning_case_id": str(row.learning_case_id) if row.learning_case_id else None,
+        "account_id": str(row.account_id) if row.account_id else None,
+        "action": row.action,
+        "from_status": row.from_status,
+        "to_status": row.to_status,
+        "notes": row.notes or "",
+        "metadata": dict(row.metadata_json or {}),
+        "created_at": row.created_at,
     }
