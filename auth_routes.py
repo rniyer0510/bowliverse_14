@@ -59,6 +59,7 @@ def normalize_handedness(value: str):
 
 def _record_login_audit(
     *,
+    db: Session,
     username: str,
     request: Request,
     success: bool,
@@ -67,31 +68,45 @@ def _record_login_audit(
 ) -> None:
     client_ip = request.client.host if request.client else None
     device = request.headers.get("user-agent")
+    audit_payload = {
+        "user_id": getattr(user, "user_id", None),
+        "account_id": getattr(user, "account_id", None),
+        "username": username or None,
+        "ip_address": client_ip,
+        "device": device,
+        "success": success,
+        "failure_reason": failure_reason,
+    }
 
-    audit = LoginAudit(
-        user_id=getattr(user, "user_id", None),
-        account_id=getattr(user, "account_id", None),
-        username=username or None,
-        ip_address=client_ip,
-        device=device,
-        success=success,
-        failure_reason=failure_reason,
-    )
-
-    audit_db = SessionLocal()
-    try:
-        audit_db.add(audit)
-        audit_db.commit()
-    except Exception as exc:
-        audit_db.rollback()
+    has_pending_state = bool(db.new or db.dirty or db.deleted)
+    audit_db = db
+    owns_audit_session = False
+    if has_pending_state:
+        owns_audit_session = True
+        audit_db = SessionLocal()
         logger.warning(
-            "[login:audit_failed] username=%s success=%s error=%s",
+            "[login:audit_isolated_session] username=%s reason=pending_request_state",
             username,
-            success,
-            exc,
         )
+
+    try:
+        for attempt in (1, 2):
+            try:
+                audit_db.add(LoginAudit(**audit_payload))
+                audit_db.commit()
+                return
+            except Exception as exc:
+                audit_db.rollback()
+                logger.warning(
+                    "[login:audit_failed] username=%s success=%s attempt=%s error=%s",
+                    username,
+                    success,
+                    attempt,
+                    exc,
+                )
     finally:
-        audit_db.close()
+        if owns_audit_session:
+            audit_db.close()
 
 # ------------------------------------------------------------
 # Register
@@ -196,6 +211,7 @@ def login(
 
     if not username or not password:
         _record_login_audit(
+            db=db,
             username=username,
             request=request,
             success=False,
@@ -207,6 +223,7 @@ def login(
 
     if not user or not verify_password(password, user.password_hash):
         _record_login_audit(
+            db=db,
             username=username,
             request=request,
             success=False,
@@ -215,6 +232,7 @@ def login(
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
     _record_login_audit(
+        db=db,
         username=username,
         request=request,
         success=True,

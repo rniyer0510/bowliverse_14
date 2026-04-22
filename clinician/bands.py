@@ -4,7 +4,10 @@ from typing import Dict, Any
 
 from app.clinician.loader import load_yaml
 
-_GLOBALS = load_yaml("globals.yaml")
+
+def _globals() -> Dict[str, Any]:
+    data = load_yaml("globals.yaml")
+    return data if isinstance(data, dict) else {}
 
 def _pick_band(value: float, bands: Dict[str, Dict[str, Any]], default: str) -> str:
     for key, cfg in bands.items():
@@ -15,13 +18,13 @@ def _pick_band(value: float, bands: Dict[str, Dict[str, Any]], default: str) -> 
     return default
 
 def severity_band(signal_strength: float) -> str:
-    key = _pick_band(float(signal_strength), _GLOBALS["severity_bands"], "low")
+    key = _pick_band(float(signal_strength), _globals()["severity_bands"], "low")
     return key.upper()
 
 def confidence_band(confidence: float) -> str:
     # confidence bands are descending thresholds in globals.yaml (high -> medium -> low)
     conf = float(confidence)
-    bands = _GLOBALS["confidence_bands"]
+    bands = _globals()["confidence_bands"]
     for key in ("high", "medium", "low"):
         if conf >= float(bands[key]["min"]):
             return key.upper()

@@ -8,10 +8,6 @@ from app.clinician.bands import confidence_band, severity_band
 from app.clinician.comprehensive_why import generate_comprehensive_why
 from app.clinician.loader import load_yaml
 
-ELBOW = load_yaml("elbow.yaml") or {}
-RISKS = load_yaml("risks.yaml") or {}
-GLOBALS = load_yaml("globals.yaml") or {}
-
 SEVERITY_POINTS = {
     "LOW": 0.0,
     "MODERATE": 1.0,
@@ -394,20 +390,12 @@ def _reporting_lines_for_risk(risk_id: str, severity: str) -> Dict[str, str]:
 
 
 class ClinicianInterpreter:
-    BENCHMARK_GUARDRAIL_MIN_RATING = (
-        (GLOBALS.get("benchmark_guardrail_min_rating") or {})
-        if isinstance(GLOBALS, dict)
-        else {}
-    ) or {
+    DEFAULT_BENCHMARK_GUARDRAIL_MIN_RATING = {
         "SEMI_OPEN": 60,
         "SIDE_ON": 55,
     }
 
-    BENCHMARK_RATING_FLOORS = (
-        (GLOBALS.get("benchmark_rating_floors") or {})
-        if isinstance(GLOBALS, dict)
-        else {}
-    ) or {
+    DEFAULT_BENCHMARK_RATING_FLOORS = {
         "SEMI_OPEN": {
             "overall": 90,
             "upper_body_alignment": 84,
@@ -425,6 +413,22 @@ class ClinicianInterpreter:
             "safety": 88,
         },
     }
+
+    def __init__(self) -> None:
+        self._elbow = self._load_mapping("elbow.yaml")
+        self._risks = self._load_mapping("risks.yaml")
+        self._globals = self._load_mapping("globals.yaml")
+        self.BENCHMARK_GUARDRAIL_MIN_RATING = (
+            self._globals.get("benchmark_guardrail_min_rating") or {}
+        ) or dict(self.DEFAULT_BENCHMARK_GUARDRAIL_MIN_RATING)
+        self.BENCHMARK_RATING_FLOORS = (
+            self._globals.get("benchmark_rating_floors") or {}
+        ) or copy.deepcopy(self.DEFAULT_BENCHMARK_RATING_FLOORS)
+
+    @staticmethod
+    def _load_mapping(filename: str) -> Dict[str, Any]:
+        data = load_yaml(filename)
+        return data if isinstance(data, dict) else {}
 
     def _feature_lookup(self, features: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
         return {
@@ -1008,7 +1012,7 @@ class ClinicianInterpreter:
             if not rid:
                 continue
 
-            spec = RISKS.get(rid) or {}
+            spec = self._risks.get(rid) or {}
             sev = severity_band(f(r.get("signal_strength")))
             conf = confidence_band(f(r.get("confidence")))
 

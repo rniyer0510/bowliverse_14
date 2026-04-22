@@ -1,5 +1,6 @@
 import importlib
 import os
+import tempfile
 import unittest
 from datetime import datetime
 from types import SimpleNamespace
@@ -70,6 +71,29 @@ class SessionConfigTests(unittest.TestCase):
         ):
             importlib.reload(module)
 
+    def test_session_engine_uses_bounded_pool_defaults(self):
+        module = importlib.import_module("app.persistence.session")
+
+        with patch.dict(
+            os.environ,
+            {"ACTIONLAB_LOCAL_DB_URL": "postgresql+psycopg2://actionlab@localhost/actionlab"},
+            clear=True,
+        ), patch("sqlalchemy.create_engine") as create_engine_mock:
+            importlib.reload(module)
+
+        create_engine_mock.assert_called_once()
+        kwargs = create_engine_mock.call_args.kwargs
+        self.assertEqual(kwargs["pool_size"], 10)
+        self.assertEqual(kwargs["max_overflow"], 20)
+        self.assertEqual(kwargs["pool_timeout"], 30)
+        self.assertEqual(kwargs["pool_recycle"], 1800)
+        with patch.dict(
+            os.environ,
+            {"ACTIONLAB_LOCAL_DB_URL": "postgresql+psycopg2://actionlab@localhost/actionlab"},
+            clear=True,
+        ):
+            importlib.reload(module)
+
 
 class ReleaseDebugTests(unittest.TestCase):
     def test_release_uah_debug_defaults_off(self):
@@ -96,40 +120,157 @@ class RiskWorkerFixTests(unittest.TestCase):
             self.assertIsNone(risk_worker._benchmark_percentile(0.9))
 
 
-class VisualGeometryCacheTests(unittest.TestCase):
-    def test_subject_geometry_cached_per_video_frame(self):
-        from app.workers.risk import visual_utils
+class ClinicianYamlValidationTests(unittest.TestCase):
+    def test_globals_yaml_requires_confidence_and_severity_bands(self):
+        from app.clinician import loader
 
-        visual_utils._SUBJECT_GEOMETRY_CACHE.clear()
-        frame = np.zeros((120, 160, 3), dtype=np.uint8)
+        with self.assertRaises(ValueError):
+            loader._validate_yaml_payload("globals.yaml", {"confidence_bands": {}})
 
-        with patch.object(visual_utils, "_read_frame", return_value=frame), patch(
-            "app.workers.risk.visual_utils.os.path.exists",
-            return_value=True,
+    def test_risks_yaml_requires_explanations_mapping(self):
+        from app.clinician import loader
+
+        with self.assertRaises(ValueError):
+            loader._validate_yaml_payload(
+                "risks.yaml",
+                {"trunk_rotation_snap": {"title": "Body Turn"}},
+            )
+
+    def test_clinician_modules_do_not_load_yaml_at_import_time(self):
+        from app.clinician import bands, interpreter, loader
+
+        with patch.object(loader, "load_yaml") as load_yaml_mock:
+            importlib.reload(bands)
+            importlib.reload(interpreter)
+
+        load_yaml_mock.assert_not_called()
+        importlib.reload(bands)
+        importlib.reload(interpreter)
+
+
+class AnalyzePersistenceFallbackTests(unittest.TestCase):
+    def test_persist_analysis_result_returns_warning_after_retries_fail(self):
+        from app.orchestrator import orchestrator
+
+        result = {"run_id": "run-1"}
+        first_session = MagicMock()
+        second_session = MagicMock()
+
+        with patch.object(
+            orchestrator,
+            "SessionLocal",
+            side_effect=[first_session, second_session],
         ), patch.object(
-            visual_utils,
-            "_estimate_subject_geometry",
-            return_value=(80, 60),
-        ) as estimate_mock, patch(
-            "app.workers.risk.visual_utils.cv2.imwrite",
-            return_value=True,
+            orchestrator,
+            "write_analysis",
+            side_effect=[RuntimeError("db down"), RuntimeError("db still down")],
         ):
-            result_a = visual_utils.draw_and_save_visual(
-                video_path="/tmp/example.mp4",
-                frame_idx=12,
-                risk_id="front_foot_braking_shock",
+            status = orchestrator._persist_analysis_result(
+                request_id="req-1",
                 run_id="run-1",
-            )
-            result_b = visual_utils.draw_and_save_visual(
-                video_path="/tmp/example.mp4",
-                frame_idx=12,
-                risk_id="knee_brace_failure",
-                run_id="run-1",
+                result=result,
+                video={"path": "/tmp/video.mp4"},
+                bowler_type="pace",
+                actor_obj={"account_id": "acc-1"},
+                effective_age_group="U16",
+                effective_season=2026,
             )
 
-        self.assertIsNotNone(result_a)
-        self.assertIsNotNone(result_b)
-        self.assertEqual(estimate_mock.call_count, 1)
+        self.assertFalse(status["persisted"])
+        self.assertEqual(status["attempts"], 2)
+        self.assertEqual(result["warnings"][0]["code"], "analysis_not_persisted")
+
+    def test_persist_analysis_result_recovers_on_second_attempt(self):
+        from app.orchestrator import orchestrator
+
+        result = {"run_id": "run-1"}
+        first_session = MagicMock()
+        second_session = MagicMock()
+
+        with patch.object(
+            orchestrator,
+            "SessionLocal",
+            side_effect=[first_session, second_session],
+        ), patch.object(
+            orchestrator,
+            "write_analysis",
+            side_effect=[RuntimeError("transient"), "run-1"],
+        ):
+            status = orchestrator._persist_analysis_result(
+                request_id="req-1",
+                run_id="run-1",
+                result=result,
+                video={"path": "/tmp/video.mp4"},
+                bowler_type="pace",
+                actor_obj={"account_id": "acc-1"},
+                effective_age_group="U16",
+                effective_season=2026,
+            )
+
+        self.assertTrue(status["persisted"])
+        self.assertEqual(status["attempts"], 2)
+        self.assertNotIn("warnings", result)
+
+
+class WriterSessionOwnershipTests(unittest.TestCase):
+    def test_write_analysis_with_external_session_flushes_without_committing(self):
+        from app.persistence import writer
+
+        db = MagicMock()
+        db.get.return_value = SimpleNamespace(season=2026, age_group="U16")
+        result = {
+            "input": {"player_id": "11111111-1111-1111-1111-111111111111", "hand": "R"},
+            "video": {"fps": 30.0, "total_frames": 120},
+            "events": {},
+            "elbow": {},
+            "action": {},
+            "risks": [],
+        }
+
+        run_id = "22222222-2222-2222-2222-222222222222"
+        persisted_run_id = writer.write_analysis(
+            result=result,
+            db=db,
+            run_id=run_id,
+            season=2026,
+            age_group="U16",
+        )
+
+        self.assertEqual(persisted_run_id, run_id)
+        db.flush.assert_called()
+        db.commit.assert_not_called()
+        db.rollback.assert_not_called()
+
+
+class TempCleanupTests(unittest.TestCase):
+    def test_loader_cleans_up_stale_prefixed_temp_uploads(self):
+        from app.io import loader
+
+        temp_dir = tempfile.gettempdir()
+        stale_path = os.path.join(temp_dir, f"{loader.TEMP_UPLOAD_PREFIX}stale.mp4")
+        with open(stale_path, "wb") as handle:
+            handle.write(b"video")
+
+        try:
+            old_mtime = datetime.utcnow().timestamp() - (loader.STALE_TEMP_UPLOAD_MAX_AGE_SECONDS + 10)
+            os.utime(stale_path, (old_mtime, old_mtime))
+
+            result = loader.cleanup_stale_temp_uploads(
+                max_age_seconds=loader.STALE_TEMP_UPLOAD_MAX_AGE_SECONDS,
+            )
+
+            self.assertGreaterEqual(result["scanned"], 1)
+            self.assertGreaterEqual(result["removed"], 1)
+            self.assertFalse(os.path.exists(stale_path))
+        finally:
+            if os.path.exists(stale_path):
+                os.remove(stale_path)
+
+    def test_temp_upload_prefix_is_pid_scoped(self):
+        from app.io import loader
+
+        self.assertTrue(loader.TEMP_UPLOAD_PREFIX.startswith(loader.TEMP_UPLOAD_ROOT_PREFIX))
+        self.assertIn("_", loader.TEMP_UPLOAD_PREFIX[len(loader.TEMP_UPLOAD_ROOT_PREFIX):])
 
 
 if __name__ == "__main__":

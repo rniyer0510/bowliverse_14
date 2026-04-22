@@ -12,8 +12,10 @@ Responsibilities:
 """
 
 import cv2
+import os
 import tempfile
 import shutil
+import time
 from typing import List, Dict, Any, Tuple
 
 import mediapipe as mp
@@ -29,6 +31,9 @@ MIN_WINDOW_CONFIDENCE = 0.30
 MIN_WINDOW_SECONDS = 1.6
 LATE_FALLBACK_MIN_SECONDS = 2.6
 LATE_FALLBACK_CLIP_RATIO = 0.38
+TEMP_UPLOAD_ROOT_PREFIX = "actionlab_upload_"
+TEMP_UPLOAD_PREFIX = f"{TEMP_UPLOAD_ROOT_PREFIX}{os.getpid()}_"
+STALE_TEMP_UPLOAD_MAX_AGE_SECONDS = 24 * 60 * 60
 
 
 def _conservative_late_window(video: Dict[str, Any], delivery_window: Dict[str, Any]) -> Dict[str, Any]:
@@ -85,10 +90,44 @@ def _create_pose_tracker():
 
 
 def _save_upload_to_temp_path(upload_file) -> str:
-    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4")
+    tmp = tempfile.NamedTemporaryFile(
+        delete=False,
+        prefix=TEMP_UPLOAD_PREFIX,
+        suffix=".mp4",
+    )
     with tmp as f:
         shutil.copyfileobj(upload_file.file, f)
     return tmp.name
+
+
+def cleanup_stale_temp_uploads(*, max_age_seconds: int = STALE_TEMP_UPLOAD_MAX_AGE_SECONDS) -> Dict[str, int]:
+    scanned = 0
+    removed = 0
+    now = int(time.time())
+    temp_dir = tempfile.gettempdir()
+    try:
+        names = os.listdir(temp_dir)
+    except Exception as exc:
+        logger.warning("[loader] stale_temp_cleanup_failed dir=%s error=%s", temp_dir, exc)
+        return {"scanned": 0, "removed": 0}
+
+    for name in names:
+        if not name.startswith(TEMP_UPLOAD_ROOT_PREFIX):
+            continue
+        path = os.path.join(temp_dir, name)
+        scanned += 1
+        try:
+            stat = os.stat(path)
+            age_seconds = max(0, now - int(stat.st_mtime))
+            if age_seconds >= max_age_seconds:
+                os.remove(path)
+                removed += 1
+        except FileNotFoundError:
+            continue
+        except Exception as exc:
+            logger.warning("[loader] stale_temp_cleanup_failed path=%s error=%s", path, exc)
+
+    return {"scanned": scanned, "removed": removed}
 
 
 def _read_video_metadata(video_path: str) -> Tuple[cv2.VideoCapture, Dict[str, Any]]:

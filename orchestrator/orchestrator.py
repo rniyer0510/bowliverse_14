@@ -9,7 +9,7 @@ from typing import Optional, Tuple
 
 from app.common.logger import get_logger
 from app.common.auth import get_current_account
-from app.io.loader import load_video
+from app.io.loader import cleanup_stale_temp_uploads, load_video
 from app.workers.screening.video_screen import run_preanalysis_screen
 from app.workers.speed.release_speed import estimate_release_speed
 from app.workers.render.coach_video_renderer import render_skeleton_video, RENDER_DIR
@@ -43,6 +43,7 @@ from app.interpretation.interpret_risks import interpret_risks
 from app.workers.efficiency.basic_coaching import analyze_basics
 
 # Clinician
+from app.clinician.loader import validate_known_yaml_files
 from app.clinician.interpreter import ClinicianInterpreter
 
 # Persistence
@@ -75,24 +76,35 @@ if AUTO_CREATE_SCHEMA:
     )
     Base.metadata.create_all(bind=engine)
 logger = get_logger(__name__)
-clinician_engine = ClinicianInterpreter()
+clinician_engine: Optional[ClinicianInterpreter] = None
 RENDERS_DIR = RENDER_DIR
 
 WALKTHROUGH_PAUSE_SECONDS = 3.0
 WALKTHROUGH_SLOW_MOTION_FACTOR = 3.0
 WALKTHROUGH_END_SUMMARY_SECONDS = 2.5
 
-_render_cleanup = cleanup_old_renders(
-    RENDER_DIR,
-    retention_days=render_retention_days(),
-)
-logger.info(
-    "[render_storage] active_dir=%s cleanup_scanned=%s cleanup_removed=%s retention_days=%s",
-    RENDER_DIR,
-    _render_cleanup.get("scanned", 0),
-    _render_cleanup.get("removed", 0),
-    render_retention_days(),
-)
+@app.on_event("startup")
+def _startup_housekeeping() -> None:
+    global clinician_engine
+    validate_known_yaml_files()
+    clinician_engine = ClinicianInterpreter()
+    render_cleanup = cleanup_old_renders(
+        RENDER_DIR,
+        retention_days=render_retention_days(),
+    )
+    logger.info(
+        "[render_storage] active_dir=%s cleanup_scanned=%s cleanup_removed=%s retention_days=%s",
+        RENDER_DIR,
+        render_cleanup.get("scanned", 0),
+        render_cleanup.get("removed", 0),
+        render_retention_days(),
+    )
+    temp_cleanup = cleanup_stale_temp_uploads()
+    logger.info(
+        "[loader] temp_upload_cleanup_scanned=%s removed=%s",
+        temp_cleanup.get("scanned", 0),
+        temp_cleanup.get("removed", 0),
+    )
 
 
 def _compact_header(value: str, limit: int = 120) -> str:
@@ -176,9 +188,82 @@ def _delete_temp_video_safely(path: str):
     try:
         if path and os.path.exists(path):
             os.remove(path)
-    except Exception:
-        # Best effort cleanup only.
-        pass
+    except Exception as exc:
+        logger.warning("[cleanup:temp_video_failed] path=%s error=%s", path, exc)
+
+
+def _persist_analysis_result(
+    *,
+    request_id: str,
+    run_id: str,
+    result: dict,
+    video: dict,
+    bowler_type: Optional[str],
+    actor_obj: dict,
+    effective_age_group: str,
+    effective_season: int,
+) -> dict:
+    last_error = None
+    for attempt in (1, 2):
+        db = SessionLocal()
+        try:
+            write_analysis(
+                db=db,
+                result=result,
+                run_id=run_id,
+                file_path=video.get("path"),
+                bowler_type=bowler_type,
+                actor=actor_obj,
+                age_group=effective_age_group,
+                season=effective_season,
+            )
+            db.commit()
+            if attempt > 1:
+                logger.info(
+                    "[analyze:persistence_recovered] request_id=%s run_id=%s attempt=%s",
+                    request_id,
+                    run_id,
+                    attempt,
+                )
+            return {
+                "persisted": True,
+                "attempts": attempt,
+            }
+        except Exception as exc:
+            db.rollback()
+            last_error = exc
+            logger.error(
+                "[analyze:persistence_failed] request_id=%s run_id=%s attempt=%s error=%s",
+                request_id,
+                run_id,
+                attempt,
+                exc,
+            )
+        finally:
+            db.close()
+
+    warnings = list(result.get("warnings") or [])
+    warnings.append(
+        {
+            "code": "analysis_not_persisted",
+            "detail": "Analysis completed, but saving the result failed. Please retry or contact support if this keeps happening.",
+        }
+    )
+    result["warnings"] = warnings
+    result["persistence"] = {
+        "persisted": False,
+        "attempts": 2,
+        "error": str(last_error) if last_error is not None else "unknown",
+    }
+    return result["persistence"]
+
+
+def _get_clinician_engine() -> ClinicianInterpreter:
+    global clinician_engine
+    if clinician_engine is None:
+        validate_known_yaml_files()
+        clinician_engine = ClinicianInterpreter()
+    return clinician_engine
 
 
 def _reject_with_code(
@@ -770,7 +855,7 @@ def analyze(
         # ------------------------------------------------------------
         # Clinician Layer
         # ------------------------------------------------------------
-        clinician = clinician_engine.build(
+        clinician = _get_clinician_engine().build(
             elbow=elbow,
             risks=risks,
             interpretation=interpretation,
@@ -818,22 +903,16 @@ def analyze(
         # ------------------------------------------------------------
         # Persist
         # ------------------------------------------------------------
-        try:
-            write_analysis(
-                result=result,
-                run_id=run_id,
-                file_path=video.get("path"),
-                bowler_type=bowler_type,
-                actor=actor_obj,
-                age_group=effective_age_group,
-                season=effective_season,
-            )
-        except Exception as e:
-            logger.error(
-                f"[analyze:persistence_failed] request_id={request_id} "
-                f"run_id={run_id} error={e}"
-            )
-            raise HTTPException(status_code=500, detail="Analysis persistence failed")
+        _persist_analysis_result(
+            request_id=request_id,
+            run_id=run_id,
+            result=result,
+            video=video,
+            bowler_type=bowler_type,
+            actor_obj=actor_obj,
+            effective_age_group=effective_age_group,
+            effective_season=effective_season,
+        )
 
         logger.info(
             f"[analyze:success] request_id={request_id} run_id={run_id} "

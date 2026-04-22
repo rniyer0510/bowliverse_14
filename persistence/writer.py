@@ -11,6 +11,7 @@ from app.persistence.models import (
     Player,
 )
 from app.common.logger import get_logger
+from sqlalchemy.orm import Session
 
 logger = get_logger(__name__)
 
@@ -62,7 +63,7 @@ def _as_int(x: Any) -> Optional[int]:
 # Main Persistence
 # ------------------------------------------------------------
 
-def write_analysis(result: dict, **kwargs) -> str:
+def write_analysis(result: dict, db: Optional[Session] = None, **kwargs) -> str:
     """
     Persist a completed ActionLab analysis.
 
@@ -72,7 +73,8 @@ def write_analysis(result: dict, **kwargs) -> str:
     - Authorization already enforced at orchestrator level
     """
 
-    db = SessionLocal()
+    owns_session = db is None
+    db = db or SessionLocal()
 
     try:
         # --------------------------------------------------------
@@ -240,15 +242,20 @@ def write_analysis(result: dict, **kwargs) -> str:
             )
         )
 
-        db.commit()
+        if owns_session:
+            db.commit()
+        else:
+            db.flush()
         logger.info(f"Analysis persisted: run_id={run_id}")
 
         return str(run_id)
 
     except Exception as e:
         logger.warning(f"Persistence failed (rollback): {e}")
-        db.rollback()
+        if owns_session:
+            db.rollback()
         raise
 
     finally:
-        db.close()
+        if owns_session:
+            db.close()

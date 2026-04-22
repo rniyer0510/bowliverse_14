@@ -12,7 +12,6 @@ from app.workers.risk.hip_shoulder_mismatch import compute_hip_shoulder_mismatch
 from app.workers.risk.lateral_trunk_lean import compute_lateral_trunk_lean
 from app.workers.risk.foot_line_deviation import compute_foot_line_deviation
 
-from app.workers.risk.visual_utils import draw_and_save_visual
 from app.workers.risk.benchmarks import attach_deviation_and_impact
 
 logger = get_logger(__name__)
@@ -20,16 +19,6 @@ logger = get_logger(__name__)
 ENABLE_SYNTHETIC_BENCHMARK_PERCENTILES = (
     os.getenv("ACTIONLAB_ENABLE_SYNTHETIC_BENCHMARK_PERCENTILES", "").strip().lower()
     == "true"
-)
-
-FULL_BODY_GUIDANCE_MESSAGE = (
-    "For better assessment, please record from the front-side angle "
-    "with the full body visible."
-)
-EVENT_CHAIN_GUIDANCE_MESSAGE = (
-    "Visual not rendered because this clip did not provide a reliable "
-    "release-to-landing sequence. Please retake from the front-side angle "
-    "with the full body visible throughout the action."
 )
 
 # ---------------------------------------------------------------------
@@ -56,12 +45,6 @@ PRIMARY_LOAD_OVERRIDE: Dict[str, str] = {
     "trunk_rotation_snap": "lower back",
     "lateral_trunk_lean": "lower back",
 }
-
-# Pose landmarks
-LS, LE, LW = 11, 13, 15
-RS, RE, RW = 12, 14, 16
-LH, RH = 23, 24
-MIN_VIS = 0.25
 
 # ---------------------------------------------------------------------
 # Helpers
@@ -124,294 +107,6 @@ def _load_level_from_band(band: Optional[int]) -> Optional[str]:
     return "high"
 
 
-def _is_visible(lm: Optional[Dict[str, Any]]) -> bool:
-    if not isinstance(lm, dict):
-        return False
-    return _f(lm.get("visibility"), 0.0) >= MIN_VIS
-
-
-def _get_landmark(landmarks: List[Dict[str, Any]], idx: int) -> Optional[Dict[str, Any]]:
-    if idx < 0 or idx >= len(landmarks):
-        return None
-    val = landmarks[idx]
-    return val if isinstance(val, dict) else None
-
-
-def _is_rear_view_capture(pose_frames: List[Dict[str, Any]]) -> bool:
-    """
-    Heuristic for rear-view only:
-    - Torso (shoulders + hips) is visible in enough frames.
-    - Wrists are mostly not visible while torso remains visible.
-    """
-    torso_tracked = 0
-    wrist_visible = 0
-    elbow_visible = 0
-
-    for frame in pose_frames or []:
-        landmarks = (frame or {}).get("landmarks")
-        if not isinstance(landmarks, list) or not landmarks:
-            continue
-
-        ls = _get_landmark(landmarks, LS)
-        rs = _get_landmark(landmarks, RS)
-        lh = _get_landmark(landmarks, LH)
-        rh = _get_landmark(landmarks, RH)
-
-        shoulders_ok = _is_visible(ls) and _is_visible(rs)
-        hips_ok = _is_visible(lh) and _is_visible(rh)
-        if not (shoulders_ok and hips_ok):
-            continue
-
-        torso_tracked += 1
-
-        lw = _get_landmark(landmarks, LW)
-        rw = _get_landmark(landmarks, RW)
-        if _is_visible(lw) or _is_visible(rw):
-            wrist_visible += 1
-
-        le = _get_landmark(landmarks, LE)
-        re = _get_landmark(landmarks, RE)
-        if _is_visible(le) or _is_visible(re):
-            elbow_visible += 1
-
-    if torso_tracked < 20:
-        return False
-
-    wrist_ratio = wrist_visible / float(torso_tracked)
-    elbow_ratio = elbow_visible / float(torso_tracked)
-
-    # Rear-view signature: torso/elbows visible, wrists mostly occluded.
-    return wrist_ratio < 0.20 and elbow_ratio >= 0.55
-
-
-# ---------------------------------------------------------------------
-# Visual anchoring (EVENT-DRIVEN, LOCKED)
-# ---------------------------------------------------------------------
-def _pick_visual_anchor_frame(
-    risk_id: str,
-    events: Dict[str, Any],
-) -> Optional[int]:
-    """
-    VISUAL ANCHORS:
-    - Front Foot Braking Shock -> FFC
-    - Knee Brace Failure       -> FFC
-    - Trunk Rotation Snap      -> UAH (else Release)
-    - Hip-Shoulder Mismatch    -> UAH (else Release)
-    - Lateral Trunk Lean       -> Release (else FFC)
-    - Foot-Line Deviation      -> UAH when reliable, else FFC + 1
-    """
-    ffc = _event_frame(events, "ffc")
-    bfc = _event_frame(events, "bfc")
-    uah = _event_frame(events, "uah")
-    rel = _event_frame(events, "release")
-
-    if risk_id in ("front_foot_braking_shock", "knee_brace_failure"):
-        return ffc
-
-    if risk_id in ("trunk_rotation_snap", "hip_shoulder_mismatch"):
-        return uah if uah is not None else rel
-
-    if risk_id == "lateral_trunk_lean":
-        return rel if rel is not None else ffc
-
-    if risk_id == "foot_line_deviation":
-        if _has_reliable_uah(events) and uah is not None:
-            return uah
-        if ffc is not None:
-            return ffc + 1
-        return rel
-
-    return rel or ffc or bfc or uah
-
-
-def _has_weak_uah(events: Dict[str, Any]) -> bool:
-    uah_method = str(_event_value(events, "uah", "method", "") or "")
-    release_frame = _event_frame(events, "release")
-    uah_frame = _event_frame(events, "uah")
-    return uah_method == "release_minus_one_fallback" or (
-        release_frame is not None
-        and uah_frame is not None
-        and uah_frame >= release_frame - 1
-    )
-
-
-def _has_reliable_uah(events: Dict[str, Any]) -> bool:
-    uah = events.get("uah") or {}
-    if _has_weak_uah(events):
-        return False
-    try:
-        conf = float(uah.get("confidence") or 0.0)
-    except Exception:
-        conf = 0.0
-    return conf >= 0.45
-
-
-def _should_suppress_visual_for_event_chain(
-    risk_id: str,
-    events: Dict[str, Any],
-) -> bool:
-    release_method = str(_event_value(events, "release", "method", "") or "")
-    ffc_method = str(_event_value(events, "ffc", "method", "") or "")
-
-    weak_release = release_method in {"peak_plus_offset", "window_start"}
-    weak_uah = _has_weak_uah(events)
-    weak_ffc = ffc_method in {"ultimate_fallback", "no_foot_data_fallback"}
-    weak_foot_line_ffc = weak_ffc or ffc_method == "single_foot_fallback"
-
-    if risk_id in ("trunk_rotation_snap", "hip_shoulder_mismatch"):
-        return weak_release and weak_uah
-
-    if risk_id == "lateral_trunk_lean":
-        return weak_release and (weak_uah or weak_ffc)
-
-    if risk_id in ("front_foot_braking_shock", "knee_brace_failure"):
-        return weak_release and weak_ffc
-
-    if risk_id == "foot_line_deviation":
-        return weak_release and weak_foot_line_ffc
-
-    return False
-
-
-def _visual_window_for_anchor(
-    anchor: int,
-    fps: float,
-    pre_s: float = 0.20,
-    post_s: float = 0.20,
-) -> Dict[str, int]:
-    pre = max(1, int(round(pre_s * max(1.0, fps))))
-    post = max(1, int(round(post_s * max(1.0, fps))))
-    return {
-        "start": max(0, anchor - pre),
-        "end": max(0, anchor + post),
-    }
-
-
-def _attach_visual(
-    risk: Dict[str, Any],
-    *,
-    pose_frames: List[Dict[str, Any]],
-    video: Dict[str, Any],
-    events: Dict[str, Any],
-    run_id: Optional[str],
-    rear_view_only: bool,
-) -> Dict[str, Any]:
-    """
-    Attach visual evidence using EVENT-derived anchor.
-    """
-    if not isinstance(risk, dict):
-        return risk
-
-    if rear_view_only:
-        risk["capture_feedback"] = {
-            "view": "rear",
-            "message": FULL_BODY_GUIDANCE_MESSAGE,
-        }
-        risk["visual_unavailable_reason"] = risk["capture_feedback"]["message"]
-        return risk
-
-    video_path = video.get("path") or video.get("file_path")
-    if not video_path:
-        risk["visual_unavailable_reason"] = (
-            "Video evidence could not be generated because the uploaded video path was missing."
-        )
-        logger.warning("[risk_worker] Missing video path; skipping visual.")
-        return risk
-
-    fps = float(video.get("fps") or 25.0)
-    rid = str(risk.get("risk_id") or "")
-
-    if _should_suppress_visual_for_event_chain(rid, events):
-        risk["capture_feedback"] = {
-            "view": "front_or_unknown",
-            "issue": "weak_event_chain",
-            "message": EVENT_CHAIN_GUIDANCE_MESSAGE,
-        }
-        risk["visual_unavailable_reason"] = EVENT_CHAIN_GUIDANCE_MESSAGE
-        logger.info(f"[risk_worker] Weak event chain for {rid}; skipping visual.")
-        return risk
-
-    anchor = _pick_visual_anchor_frame(rid, events)
-    if anchor is None:
-        risk["visual_unavailable_reason"] = (
-            "Video evidence could not be generated because a representative event frame was not found."
-        )
-        logger.warning(f"[risk_worker] No anchor for {rid}; skipping visual.")
-        return risk
-
-    anchor = max(0, min(int(anchor), len(pose_frames) - 1))
-    window = _visual_window_for_anchor(anchor, fps)
-
-    strength = float(risk.get("signal_strength", 0.0))
-    if strength >= 0.6:
-        visual_band = "HIGH"
-    elif strength >= 0.3:
-        visual_band = "MEDIUM"
-    else:
-        visual_band = "LOW"
-
-    # -----------------------------------------------------------------
-    # Footer load information (SAFE, OPTIONAL)
-    # -----------------------------------------------------------------
-    load_body: Optional[str] = None
-    load_level: Optional[str] = None
-
-    deviation = risk.get("deviation", {})
-    band = deviation.get("band")
-    load_level = _load_level_from_band(band)
-
-    # Prefer semantic override for known "force-leak / sequencing" risks
-    if rid in PRIMARY_LOAD_OVERRIDE:
-        load_body = PRIMARY_LOAD_OVERRIDE[rid]
-    else:
-        impact = risk.get("impact", {})
-        primary = impact.get("primary") or []
-        if primary:
-            load_body = str(primary[0]).lower()
-
-    candidate_frames = []
-    for frame_idx in (anchor, anchor + 1, anchor - 1, anchor + 2, anchor - 2):
-        bounded = max(0, min(int(frame_idx), len(pose_frames) - 1))
-        if bounded not in candidate_frames:
-            candidate_frames.append(bounded)
-
-    visual = None
-    chosen_frame = anchor
-    for frame_idx in candidate_frames:
-        visual = draw_and_save_visual(
-            video_path=video_path,
-            frame_idx=frame_idx,
-            risk_id=rid,
-            pose_frames=pose_frames,
-            visual_confidence=visual_band,
-            run_id=run_id,
-            load_body=load_body,
-            load_level=load_level,
-        )
-        if visual:
-            chosen_frame = frame_idx
-            break
-
-    if visual:
-        risk["visual"] = visual
-        if chosen_frame != anchor:
-            logger.info(
-                f"[risk_worker] Visual frame adjusted for {rid}: "
-                f"anchor={anchor} chosen={chosen_frame} run_id={run_id}"
-            )
-        risk["visual_window"] = window
-    else:
-        risk["visual_unavailable_reason"] = (
-            "Video evidence could not be generated from the representative frame for this risk."
-        )
-        logger.warning(
-            f"[risk_worker] Visual render failed for {rid}; "
-            f"anchor={anchor} candidates={candidate_frames} run_id={run_id}"
-        )
-
-    return risk
-
-
 # ---------------------------------------------------------------------
 # Percentile mapping (TEMPORARY, PHASE-2)
 # ---------------------------------------------------------------------
@@ -452,8 +147,6 @@ def run_risk_worker(
     bfc = _event_frame(events, "bfc")
     uah = _event_frame(events, "uah")
     rel = _event_frame(events, "release")
-
-    rear_view_only = _is_rear_view_capture(pose_frames)
 
     raw = [
         _emit(
@@ -505,16 +198,6 @@ def run_risk_worker(
             risk_id=r["risk_id"],
             percentile=percentile,
         )
-
-        out.append(
-            _attach_visual(
-                r,
-                pose_frames=pose_frames,
-                video=video,
-                events=events,
-                run_id=run_id,
-                rear_view_only=rear_view_only,
-            )
-        )
+        out.append(r)
 
     return out

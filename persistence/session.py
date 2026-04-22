@@ -23,6 +23,18 @@ DATABASE_URL = (
     or DEFAULT_LOCAL_DB_URL
 )
 
+
+def _env_int(name: str, default: int) -> int:
+    raw = os.getenv(name)
+    if raw is None or not str(raw).strip():
+        return int(default)
+    try:
+        value = int(str(raw).strip())
+    except Exception:
+        logger.warning("[db] Invalid %s=%r; using default=%s", name, raw, default)
+        return int(default)
+    return max(0, value)
+
 if not _EXPLICIT_DATABASE_URL:
     logger.warning(
         "[db] No explicit ACTIONLAB_LOCAL_DB_URL/ACTIONLAB_DB_URL set; using local fallback %s",
@@ -33,12 +45,17 @@ engine = create_engine(
     DATABASE_URL,
     echo=False,
     pool_pre_ping=True,
+    pool_size=_env_int("ACTIONLAB_DB_POOL_SIZE", 10),
+    max_overflow=_env_int("ACTIONLAB_DB_MAX_OVERFLOW", 20),
+    pool_timeout=_env_int("ACTIONLAB_DB_POOL_TIMEOUT_SECONDS", 30),
+    pool_recycle=_env_int("ACTIONLAB_DB_POOL_RECYCLE_SECONDS", 1800),
 )
 
 SessionLocal = sessionmaker(
     bind=engine,
     autoflush=False,
     autocommit=False,
+    expire_on_commit=False,
 )
 
 
