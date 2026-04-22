@@ -699,6 +699,109 @@ class KnowledgePackReleaseEvent(Base):
     )
 
 
+class KnowledgePackRegressionRun(Base):
+    __tablename__ = "knowledge_pack_regression_run"
+
+    knowledge_pack_regression_run_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    knowledge_pack_release_candidate_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("knowledge_pack_release_candidate.knowledge_pack_release_candidate_id"),
+        nullable=False,
+    )
+    baseline_pack_version: Mapped[str] = mapped_column(String, nullable=False)
+    candidate_pack_version: Mapped[str] = mapped_column(String, nullable=False)
+    status: Mapped[str] = mapped_column(String, nullable=False, default="COMPLETED")
+    total_cases: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    expected_change_cases: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    stable_cases: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    passed_cases: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    failed_cases: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    validated_regression_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    validated_regression_rate: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    expected_change_success_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    expected_change_success_rate: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    summary_json: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    created_by_account_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("account.account_id"),
+        nullable=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True),
+        default=datetime.utcnow,
+        nullable=False,
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('COMPLETED','FAILED')",
+            name="ck_knowledge_pack_regression_run_status",
+        ),
+    )
+
+
+class KnowledgePackRegressionCaseResult(Base):
+    __tablename__ = "knowledge_pack_regression_case_result"
+
+    knowledge_pack_regression_case_result_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    knowledge_pack_regression_run_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("knowledge_pack_regression_run.knowledge_pack_regression_run_id"),
+        nullable=False,
+    )
+    run_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("analysis_run.run_id"),
+        nullable=False,
+    )
+    learning_case_cluster_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("learning_case_cluster.learning_case_cluster_id"),
+        nullable=True,
+    )
+    learning_case_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("learning_case.learning_case_id"),
+        nullable=True,
+    )
+    expected_behavior: Mapped[str] = mapped_column(String, nullable=False)
+    outcome: Mapped[str] = mapped_column(String, nullable=False)
+    baseline_pack_version: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    candidate_pack_version: Mapped[str] = mapped_column(String, nullable=False)
+    baseline_diagnosis_status: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    candidate_diagnosis_status: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    baseline_primary_mechanism_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    candidate_primary_mechanism_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    baseline_renderer_mode: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    candidate_renderer_mode: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    result_json: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    created_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True),
+        default=datetime.utcnow,
+        nullable=False,
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "expected_behavior IN ('CHANGE','PRESERVE')",
+            name="ck_knowledge_pack_regression_case_result_expected_behavior",
+        ),
+        CheckConstraint(
+            "outcome IN ('PASS','FAIL')",
+            name="ck_knowledge_pack_regression_case_result_outcome",
+        ),
+    )
+
+
 class CoachFlag(Base):
     __tablename__ = "coach_flag"
 

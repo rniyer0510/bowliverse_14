@@ -30,6 +30,8 @@ from app.persistence.models import (
     AnalysisRun,
     AnalysisResultRaw,
     AnalysisExplanationTrace,
+    KnowledgePackRegressionCaseResult,
+    KnowledgePackRegressionRun,
     KnowledgePackReleaseCandidate,
     KnowledgePackReleaseEvent,
     LearningCase,
@@ -678,6 +680,51 @@ def _build_release_event_item(row: KnowledgePackReleaseEvent) -> Dict[str, Any]:
         "to_environment": row.to_environment,
         "notes": row.notes or "",
         "metadata": dict(row.metadata_json or {}),
+        "created_at": row.created_at,
+    }
+
+
+def _build_regression_run_item(row: KnowledgePackRegressionRun) -> Dict[str, Any]:
+    return {
+        "knowledge_pack_regression_run_id": str(row.knowledge_pack_regression_run_id),
+        "knowledge_pack_release_candidate_id": str(row.knowledge_pack_release_candidate_id),
+        "baseline_pack_version": row.baseline_pack_version,
+        "candidate_pack_version": row.candidate_pack_version,
+        "status": row.status,
+        "total_cases": int(row.total_cases or 0),
+        "expected_change_cases": int(row.expected_change_cases or 0),
+        "stable_cases": int(row.stable_cases or 0),
+        "passed_cases": int(row.passed_cases or 0),
+        "failed_cases": int(row.failed_cases or 0),
+        "validated_regression_count": int(row.validated_regression_count or 0),
+        "validated_regression_rate": float(row.validated_regression_rate or 0.0),
+        "expected_change_success_count": int(row.expected_change_success_count or 0),
+        "expected_change_success_rate": float(row.expected_change_success_rate or 0.0),
+        "summary": dict(row.summary_json or {}),
+        "created_by_account_id": str(row.created_by_account_id) if row.created_by_account_id else None,
+        "created_at": row.created_at,
+    }
+
+
+def _build_regression_case_result_item(row: KnowledgePackRegressionCaseResult) -> Dict[str, Any]:
+    return {
+        "knowledge_pack_regression_case_result_id": str(row.knowledge_pack_regression_case_result_id),
+        "knowledge_pack_regression_run_id": str(row.knowledge_pack_regression_run_id),
+        "run_id": str(row.run_id),
+        "learning_case_cluster_id": str(row.learning_case_cluster_id) if row.learning_case_cluster_id else None,
+        "learning_case_id": str(row.learning_case_id) if row.learning_case_id else None,
+        "expected_behavior": row.expected_behavior,
+        "outcome": row.outcome,
+        "baseline_pack_version": row.baseline_pack_version,
+        "candidate_pack_version": row.candidate_pack_version,
+        "baseline_diagnosis_status": row.baseline_diagnosis_status,
+        "candidate_diagnosis_status": row.candidate_diagnosis_status,
+        "baseline_primary_mechanism_id": row.baseline_primary_mechanism_id,
+        "candidate_primary_mechanism_id": row.candidate_primary_mechanism_id,
+        "baseline_renderer_mode": row.baseline_renderer_mode,
+        "candidate_renderer_mode": row.candidate_renderer_mode,
+        "reason": row.reason,
+        "result": dict(row.result_json or {}),
         "created_at": row.created_at,
     }
 
@@ -1822,7 +1869,53 @@ def get_knowledge_pack_release_candidate(
         .order_by(KnowledgePackReleaseEvent.created_at.desc())
         .all()
     )
+    regression_runs = (
+        db.query(KnowledgePackRegressionRun)
+        .filter(KnowledgePackRegressionRun.knowledge_pack_release_candidate_id == release_candidate_uuid)
+        .order_by(KnowledgePackRegressionRun.created_at.desc())
+        .all()
+    )
     return {
         "candidate": _build_release_candidate_item(row),
         "events": [_build_release_event_item(event_row) for event_row in events],
+        "regression_runs": [_build_regression_run_item(run_row) for run_row in regression_runs],
+    }
+
+
+@router.get("/knowledge-pack-release-candidates/{release_candidate_id}/regression-runs/{regression_run_id}")
+def get_knowledge_pack_release_regression_run(
+    release_candidate_id: str,
+    regression_run_id: str,
+    current_account=Depends(get_current_account),
+    db: Session = Depends(get_db),
+):
+    if str(getattr(current_account, "role", "")).lower() != "coach":
+        raise HTTPException(status_code=403, detail="Knowledge-pack release workflow is only available to coach accounts")
+
+    try:
+        release_candidate_uuid = uuid.UUID(release_candidate_id)
+        regression_run_uuid = uuid.UUID(regression_run_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid release_candidate_id or regression_run_id format")
+
+    run_row = (
+        db.query(KnowledgePackRegressionRun)
+        .filter(
+            KnowledgePackRegressionRun.knowledge_pack_release_candidate_id == release_candidate_uuid,
+            KnowledgePackRegressionRun.knowledge_pack_regression_run_id == regression_run_uuid,
+        )
+        .first()
+    )
+    if not run_row:
+        raise HTTPException(status_code=404, detail="Knowledge-pack regression run not found")
+
+    case_rows = (
+        db.query(KnowledgePackRegressionCaseResult)
+        .filter(KnowledgePackRegressionCaseResult.knowledge_pack_regression_run_id == regression_run_uuid)
+        .order_by(KnowledgePackRegressionCaseResult.created_at.asc())
+        .all()
+    )
+    return {
+        "regression_run": _build_regression_run_item(run_row),
+        "cases": [_build_regression_case_result_item(row) for row in case_rows],
     }

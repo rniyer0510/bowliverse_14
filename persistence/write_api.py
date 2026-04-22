@@ -23,11 +23,13 @@ from app.persistence.knowledge_pack_releases import (
     apply_release_action,
     create_release_candidate,
 )
+from app.persistence.knowledge_pack_regressions import run_release_candidate_regression
 from app.persistence.models import (
     AnalysisRun,
     AnalysisResultRaw,
     AccountPlayerLink,
     CoachFlag,
+    KnowledgePackRegressionRun,
     KnowledgePackReleaseCandidate,
     KnowledgePackReleaseEvent,
     LearningCase,
@@ -635,6 +637,44 @@ async def create_knowledge_pack_release_action(
     }
 
 
+@router.post("/knowledge-pack-release-candidates/{release_candidate_id}/run-regression-suite")
+async def run_knowledge_pack_release_regression_suite(
+    release_candidate_id: str,
+    current_account=Depends(get_current_account),
+    db: Session = Depends(get_db),
+):
+    _require_coach_reviewer(current_account)
+    release_candidate_uuid = _parse_uuid_param(release_candidate_id, "release_candidate_id")
+    candidate = (
+        db.query(KnowledgePackReleaseCandidate)
+        .filter(KnowledgePackReleaseCandidate.knowledge_pack_release_candidate_id == release_candidate_uuid)
+        .first()
+    )
+    if not candidate:
+        raise HTTPException(status_code=404, detail="Knowledge-pack release candidate not found")
+
+    try:
+        regression_run = run_release_candidate_regression(
+            candidate_row=candidate,
+            account_id=str(current_account.account_id),
+            db=db,
+        )
+        db.commit()
+        db.refresh(candidate)
+        db.refresh(regression_run)
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception:
+        db.rollback()
+        raise
+
+    return {
+        "release_candidate": _knowledge_pack_release_candidate_response(candidate),
+        "regression_run": _knowledge_pack_regression_run_response(regression_run),
+    }
+
+
 def _minimal_result_for_run(analysis_run: AnalysisRun) -> dict:
     return {
         "run_id": str(analysis_run.run_id),
@@ -752,5 +792,27 @@ def _knowledge_pack_release_event_response(row: KnowledgePackReleaseEvent) -> di
         "to_environment": row.to_environment,
         "notes": row.notes or "",
         "metadata": dict(row.metadata_json or {}),
+        "created_at": row.created_at,
+    }
+
+
+def _knowledge_pack_regression_run_response(row: KnowledgePackRegressionRun) -> dict:
+    return {
+        "knowledge_pack_regression_run_id": str(row.knowledge_pack_regression_run_id),
+        "knowledge_pack_release_candidate_id": str(row.knowledge_pack_release_candidate_id),
+        "baseline_pack_version": row.baseline_pack_version,
+        "candidate_pack_version": row.candidate_pack_version,
+        "status": row.status,
+        "total_cases": int(row.total_cases or 0),
+        "expected_change_cases": int(row.expected_change_cases or 0),
+        "stable_cases": int(row.stable_cases or 0),
+        "passed_cases": int(row.passed_cases or 0),
+        "failed_cases": int(row.failed_cases or 0),
+        "validated_regression_count": int(row.validated_regression_count or 0),
+        "validated_regression_rate": float(row.validated_regression_rate or 0.0),
+        "expected_change_success_count": int(row.expected_change_success_count or 0),
+        "expected_change_success_rate": float(row.expected_change_success_rate or 0.0),
+        "summary": dict(row.summary_json or {}),
+        "created_by_account_id": str(row.created_by_account_id) if row.created_by_account_id else None,
         "created_at": row.created_at,
     }
