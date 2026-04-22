@@ -303,6 +303,7 @@ def _extract_kinetic_chain_summary(result_json: Optional[Dict[str, Any]]) -> Opt
     kinetic_chain = result_json.get("kinetic_chain_v1")
     explanation = result_json.get("mechanism_explanation_v1")
     prescription_plan = result_json.get("prescription_plan_v1")
+    render_reasoning = result_json.get("render_reasoning_v1")
     if not isinstance(kinetic_chain, dict):
         return None
 
@@ -329,6 +330,11 @@ def _extract_kinetic_chain_summary(result_json: Optional[Dict[str, Any]]) -> Opt
         "primary_mechanism": (explanation or {}).get("primary_mechanism") if isinstance(explanation, dict) else None,
         "first_intervention": (explanation or {}).get("first_intervention") if isinstance(explanation, dict) else None,
         "primary_prescription_title": prescription_title,
+        "renderer_mode": (
+            render_reasoning.get("renderer_mode")
+            if isinstance(render_reasoning, dict)
+            else None
+        ),
         "approach_build": phase_summary("approach_build"),
         "transfer": phase_summary("transfer"),
         "block": phase_summary("block"),

@@ -512,6 +512,11 @@ def _priority_from_pack(priority_key: str, *, fallback: str) -> str:
 
 
 def _renderer_mode_from_result(result: Dict[str, Any]) -> str:
+    render_reasoning = result.get("render_reasoning_v1") or {}
+    if isinstance(render_reasoning, dict):
+        explicit_mode = _safe_str(render_reasoning.get("renderer_mode"))
+        if explicit_mode:
+            return explicit_mode
     deterministic = _deterministic_payload(result)
     selection = deterministic.get("selection") or {}
     diagnosis_status = str((selection or {}).get("diagnosis_status") or "").strip().lower()

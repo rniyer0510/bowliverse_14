@@ -126,6 +126,9 @@ def _deterministic_trace(result: Dict[str, Any]) -> Dict[str, Any]:
     explanation = result.get("mechanism_explanation_v1") or {}
     if not isinstance(explanation, dict):
         explanation = {}
+    render_reasoning = result.get("render_reasoning_v1") or {}
+    if not isinstance(render_reasoning, dict):
+        render_reasoning = {}
 
     matched_symptom_ids = [
         str(symptom.get("id"))
@@ -155,6 +158,7 @@ def _deterministic_trace(result: Dict[str, Any]) -> Dict[str, Any]:
 
     trace_json = {
         "capture_quality": dict(deterministic.get("capture_quality_v1") or {}),
+        "render_reasoning": dict(render_reasoning),
         "matched_symptom_ids": matched_symptom_ids,
         "candidate_mechanisms": candidate_mechanisms,
         "supporting_evidence": supporting_evidence,

@@ -324,6 +324,38 @@ def _validate_globals(document: Mapping[str, Any]) -> Dict[str, Any]:
     for band_name in ("strong", "supporting", "weak"):
         band_cfg = _require_mapping(evidence_bands, band_name, "knowledge pack globals")
         _require_float(band_cfg, "min", f"knowledge pack globals evidence band {band_name}")
+    presentation_rules = _require_mapping(
+        document,
+        "presentation_downgrade_rules",
+        "knowledge pack globals",
+    )
+    allowed_statuses = {
+        "confident_match",
+        "partial_match",
+        "weak_match",
+        "no_match",
+        "ambiguous_match",
+    }
+    for key in (
+        "full_causal_story_requires",
+        "partial_evidence_requires",
+        "event_only_below",
+        "prescription_suppressed_below",
+    ):
+        value = _require_string(presentation_rules, key, "knowledge pack globals")
+        if value not in allowed_statuses:
+            raise ValueError(
+                f"knowledge pack globals presentation rule {key} must be one of {sorted(allowed_statuses)}"
+            )
+    full_min_evidence = _require_float(
+        presentation_rules,
+        "full_causal_story_min_evidence_completeness",
+        "knowledge pack globals",
+    )
+    if not (0.0 <= full_min_evidence <= 1.0):
+        raise ValueError(
+            "knowledge pack globals full_causal_story_min_evidence_completeness must be between 0 and 1"
+        )
     cluster_priority_defaults = _require_mapping(
         document,
         "cluster_priority_defaults",
@@ -421,6 +453,7 @@ def _validate_globals(document: Mapping[str, Any]) -> Dict[str, Any]:
         "match_thresholds": dict(thresholds),
         "history_window_defaults": dict(history_defaults),
         "evidence_bands": dict(evidence_bands),
+        "presentation_downgrade_rules": dict(presentation_rules),
         "cluster_priority_defaults": dict(cluster_priority_defaults),
         "followup_defaults": {
             "insufficient_data_status": insufficient_data_status,

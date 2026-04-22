@@ -80,6 +80,15 @@ class DeterministicExpertSystemTests(unittest.TestCase):
             "late_arm_chase",
             payload["kinetic_chain_v1"]["pace_translation"],
         )
+        self.assertEqual(
+            payload["render_reasoning_v1"]["renderer_mode"],
+            "partial_evidence",
+        )
+        self.assertEqual(
+            payload["render_reasoning_v1"]["selected_story_id"],
+            "soft_block_trunk_carry_story",
+        )
+        self.assertFalse(payload["prescription_plan_v1"]["suppressed"])
 
     def test_returns_no_match_when_pattern_is_clean(self):
         payload = self.engine.build(
@@ -221,6 +230,11 @@ class DeterministicExpertSystemTests(unittest.TestCase):
             payload["history_plan_v1"]["prior_run_count"],
             2,
         )
+        self.assertEqual(
+            payload["render_reasoning_v1"]["renderer_mode"],
+            "event_only",
+        )
+        self.assertTrue(payload["prescription_plan_v1"]["suppressed"])
 
     def test_unusable_capture_quality_short_circuits_mechanism_scoring(self):
         payload = self.engine.build(
@@ -244,6 +258,11 @@ class DeterministicExpertSystemTests(unittest.TestCase):
             payload["selection"]["capture_quality_status"],
             "UNUSABLE",
         )
+        self.assertEqual(
+            payload["render_reasoning_v1"]["renderer_mode"],
+            "event_only",
+        )
+        self.assertTrue(payload["prescription_plan_v1"]["suppressed"])
 
 
 if __name__ == "__main__":

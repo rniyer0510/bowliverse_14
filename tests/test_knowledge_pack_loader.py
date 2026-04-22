@@ -32,6 +32,7 @@ class KnowledgePackLoaderTests(unittest.TestCase):
         self.assertIn("internal_metrics", pack["globals"])
         self.assertIn("followup_defaults", pack["globals"])
         self.assertIn("history_uncertainty", pack["globals"])
+        self.assertIn("presentation_downgrade_rules", pack["globals"])
         self.assertEqual(
             pack["prescriptions"]["stack_over_landing_leg"]["review_window_type"],
             "next_3_runs",

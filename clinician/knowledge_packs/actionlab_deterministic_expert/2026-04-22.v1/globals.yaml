@@ -23,6 +23,13 @@ evidence_bands:
   supporting: { min: 0.55 }
   weak: { min: 0.35 }
 
+presentation_downgrade_rules:
+  full_causal_story_requires: confident_match
+  full_causal_story_min_evidence_completeness: 0.55
+  partial_evidence_requires: partial_match
+  event_only_below: partial_match
+  prescription_suppressed_below: partial_match
+
 cluster_priority_defaults:
   no_match_recurring: A
   ambiguous_recurring: B

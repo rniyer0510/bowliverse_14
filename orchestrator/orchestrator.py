@@ -1016,6 +1016,7 @@ def analyze(
             "capture_quality_v1": deterministic_expert.get("capture_quality_v1"),
             "mechanics_evidence_v1": deterministic_expert.get("mechanics_evidence_v1"),
             "kinetic_chain_v1": deterministic_expert.get("kinetic_chain_v1"),
+            "render_reasoning_v1": deterministic_expert.get("render_reasoning_v1"),
             "mechanism_explanation_v1": deterministic_expert.get("mechanism_explanation_v1"),
             "prescription_plan_v1": deterministic_expert.get("prescription_plan_v1"),
             "history_plan_v1": deterministic_expert.get("history_plan_v1"),

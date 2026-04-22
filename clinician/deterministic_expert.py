@@ -121,6 +121,15 @@ def _basic_lookup(basics: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
     }
 
 
+_PRESENTATION_STATUS_RANK = {
+    "no_match": 0,
+    "weak_match": 1,
+    "partial_match": 2,
+    "ambiguous_match": 2,
+    "confident_match": 3,
+}
+
+
 def _status_score(status: str) -> float:
     normalized = str(status or "").strip().lower()
     if normalized in {"ok", "aligned"}:
@@ -206,6 +215,11 @@ class DeterministicExpertSystem:
                 selection=selection,
                 history_context=history_context,
             )
+        render_reasoning = self._build_render_reasoning(
+            selection=selection,
+            hypotheses=hypotheses,
+            capture_quality=capture_quality,
+        )
         kinetic_chain = self._build_kinetic_chain_payload(
             metrics,
             hypotheses,
@@ -222,7 +236,10 @@ class DeterministicExpertSystem:
             account_role=account_role,
             history_context=history_context,
         )
-        prescription_plan = self._build_prescription_plan(selection)
+        prescription_plan = self._build_prescription_plan(
+            selection,
+            prescription_allowed=render_reasoning["prescription_allowed"],
+        )
         history_plan = self._build_history_plan(
             selection,
             metrics=metrics,
@@ -245,6 +262,7 @@ class DeterministicExpertSystem:
             "history_context_v1": history_context,
             "archetype_v1": archetype,
             "kinetic_chain_v1": kinetic_chain,
+            "render_reasoning_v1": render_reasoning,
             "mechanism_explanation_v1": mechanism_explanation,
             "prescription_plan_v1": prescription_plan,
             "history_plan_v1": history_plan,
@@ -362,6 +380,115 @@ class DeterministicExpertSystem:
                 "Capture quality is too weak for deterministic mechanism scoring."
             ),
             "capture_quality_status": capture_quality.get("status"),
+        }
+
+    def _build_render_reasoning(
+        self,
+        *,
+        selection: Dict[str, Any],
+        hypotheses: List[Dict[str, Any]],
+        capture_quality: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        rules = self._pack["globals"]["presentation_downgrade_rules"]
+        diagnosis_status = str(selection.get("diagnosis_status") or "no_match")
+        status_rank = _PRESENTATION_STATUS_RANK.get(diagnosis_status, 0)
+        full_rank = _PRESENTATION_STATUS_RANK.get(
+            str(rules.get("full_causal_story_requires") or "confident_match"),
+            3,
+        )
+        partial_rank = _PRESENTATION_STATUS_RANK.get(
+            str(rules.get("partial_evidence_requires") or "partial_match"),
+            2,
+        )
+        event_only_below_rank = _PRESENTATION_STATUS_RANK.get(
+            str(rules.get("event_only_below") or "partial_match"),
+            2,
+        )
+        prescription_floor_rank = _PRESENTATION_STATUS_RANK.get(
+            str(rules.get("prescription_suppressed_below") or "partial_match"),
+            2,
+        )
+        full_min_evidence = _safe_float(
+            rules.get("full_causal_story_min_evidence_completeness"),
+            0.55,
+        )
+
+        primary = selection.get("primary") or {}
+        if not isinstance(primary, dict):
+            primary = {}
+        evidence_completeness = _safe_float(primary.get("evidence_completeness"), 0.0)
+        selected_story_ids = list(selection.get("selected_render_story_ids") or [])
+        history_binding_ids = self._history_binding_ids(selection)
+        matched_symptom_ids = list(primary.get("matched_symptom_ids") or [])
+        contradictions = list(primary.get("contradiction_notes") or [])
+        capture_quality_status = str(capture_quality.get("status") or "").upper()
+
+        if capture_quality_status == "UNUSABLE":
+            renderer_mode = "event_only"
+            downgrade_reason = "capture_quality_unusable"
+        elif status_rank < event_only_below_rank:
+            renderer_mode = "event_only"
+            downgrade_reason = "below_event_only_threshold"
+        elif not selected_story_ids:
+            renderer_mode = "event_only"
+            downgrade_reason = "no_render_story_selected"
+        elif status_rank >= full_rank and evidence_completeness >= full_min_evidence:
+            renderer_mode = "full_causal_story"
+            downgrade_reason = "full_causal_rules_satisfied"
+        elif status_rank >= partial_rank:
+            renderer_mode = "partial_evidence"
+            downgrade_reason = "downgraded_from_full_due_to_confidence_or_evidence"
+        else:
+            renderer_mode = "event_only"
+            downgrade_reason = "fell_through_to_event_only"
+
+        prescription_allowed = (
+            capture_quality_status != "UNUSABLE"
+            and status_rank >= prescription_floor_rank
+        )
+
+        return {
+            "version": "render_reasoning_v1",
+            "knowledge_pack_version": self._pack["pack_version"],
+            "diagnosis_status": diagnosis_status,
+            "renderer_mode": renderer_mode,
+            "selected_story_id": (
+                selected_story_ids[0]
+                if renderer_mode != "event_only" and selected_story_ids
+                else None
+            ),
+            "selected_story_ids": (
+                selected_story_ids
+                if renderer_mode != "event_only"
+                else []
+            ),
+            "suppressed_story_ids": (
+                selected_story_ids
+                if renderer_mode == "event_only"
+                else []
+            ),
+            "downgrade_reason": downgrade_reason,
+            "prescription_allowed": prescription_allowed,
+            "overall_confidence": _safe_float(selection.get("overall_confidence"), 0.0),
+            "evidence_completeness": _round3(evidence_completeness),
+            "capture_quality_status": capture_quality_status,
+            "primary_mechanism_id": selection.get("primary_mechanism_id"),
+            "matched_symptom_ids": matched_symptom_ids,
+            "contradictions_triggered": contradictions,
+            "candidate_mechanisms": [
+                {
+                    "id": item.get("id"),
+                    "confidence": item.get("overall_confidence"),
+                }
+                for item in hypotheses[:3]
+            ],
+            "causal_chain": {
+                "mechanism_id": selection.get("primary_mechanism_id"),
+                "trajectory_ids": list(selection.get("selected_trajectory_ids") or []),
+                "prescription_ids": list(selection.get("selected_prescription_ids") or []),
+                "render_story_ids": selected_story_ids,
+                "history_binding_ids": history_binding_ids,
+            },
         }
 
     def _build_metrics(
@@ -1213,7 +1340,20 @@ class DeterministicExpertSystem:
             "history_support_runs": history_support_runs,
         }
 
-    def _build_prescription_plan(self, selection: Dict[str, Any]) -> Dict[str, Any]:
+    def _build_prescription_plan(
+        self,
+        selection: Dict[str, Any],
+        *,
+        prescription_allowed: bool,
+    ) -> Dict[str, Any]:
+        if not prescription_allowed:
+            return {
+                "version": "prescription_plan_v1",
+                "knowledge_pack_version": self._pack["pack_version"],
+                "prescriptions": [],
+                "primary_prescription_id": None,
+                "suppressed": True,
+            }
         prescriptions: List[Dict[str, Any]] = []
         for prescription_id in selection["selected_prescription_ids"]:
             cfg = self._pack["prescriptions"].get(prescription_id)
@@ -1238,6 +1378,7 @@ class DeterministicExpertSystem:
             "knowledge_pack_version": self._pack["pack_version"],
             "prescriptions": prescriptions,
             "primary_prescription_id": prescriptions[0]["id"] if prescriptions else None,
+            "suppressed": False,
         }
 
     def _build_history_plan(
