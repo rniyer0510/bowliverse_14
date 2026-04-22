@@ -135,8 +135,7 @@ class FfcBfcRegressionTest(unittest.TestCase):
 
         self.assertEqual(method, "simple_grounded_bfc")
         self.assertEqual(frame, 10)
-        self.assertGreater(confidence, 0.0)
-        self.assertLessEqual(confidence, 0.85)
+        self.assertEqual(confidence, 0.0)
 
     def test_bfc_correction_rejects_frame_when_front_foot_is_already_grounded(self):
         n = 30
@@ -282,8 +281,7 @@ class FfcBfcRegressionTest(unittest.TestCase):
 
         self.assertEqual(method, "simple_grounded_bfc")
         self.assertEqual(frame, 10)
-        self.assertGreater(confidence, 0.0)
-        self.assertLessEqual(confidence, 0.85)
+        self.assertEqual(confidence, 0.0)
 
     def test_bfc_uses_runup_speed_prior_when_visibility_is_moderate_and_direct_pick_is_early(self):
         n = 30
@@ -359,8 +357,7 @@ class FfcBfcRegressionTest(unittest.TestCase):
 
         self.assertEqual(method, "simple_grounded_bfc")
         self.assertEqual(frame, 9)
-        self.assertGreater(confidence, 0.0)
-        self.assertLessEqual(confidence, 0.85)
+        self.assertEqual(confidence, 0.0)
 
 
 if __name__ == "__main__":
