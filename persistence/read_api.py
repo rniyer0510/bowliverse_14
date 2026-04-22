@@ -15,6 +15,7 @@ SECURITY:
 
 from collections import Counter
 import os
+import uuid
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel, Field
 from typing import Any, Dict, List, Optional
@@ -29,6 +30,8 @@ from app.persistence.models import (
     AnalysisRun,
     AnalysisResultRaw,
     AnalysisExplanationTrace,
+    KnowledgePackReleaseCandidate,
+    KnowledgePackReleaseEvent,
     LearningCase,
     LearningCaseCluster,
     CoachFlag,
@@ -632,6 +635,50 @@ def _coverage_metrics_payload(
     return {
         "overall": overall,
         "by_pack_version": by_pack_version,
+    }
+
+
+def _build_release_candidate_item(row: KnowledgePackReleaseCandidate) -> Dict[str, Any]:
+    return {
+        "knowledge_pack_release_candidate_id": str(row.knowledge_pack_release_candidate_id),
+        "knowledge_pack_id": row.knowledge_pack_id,
+        "base_pack_version": row.base_pack_version,
+        "candidate_pack_version": row.candidate_pack_version,
+        "supersedes_pack_version": row.supersedes_pack_version,
+        "status": row.status,
+        "current_environment": row.current_environment,
+        "summary": row.summary,
+        "change_summary": dict(row.change_summary_json or {}),
+        "motivating_cluster_ids": list(row.motivating_cluster_ids or []),
+        "motivating_case_ids": list(row.motivating_case_ids or []),
+        "tests_added": list(row.tests_added or []),
+        "reinterpret_run_ids": list(row.reinterpret_run_ids or []),
+        "schema_validated": bool(row.schema_validated),
+        "referential_integrity_validated": bool(row.referential_integrity_validated),
+        "regression_suite_passed": bool(row.regression_suite_passed),
+        "staging_evaluation_passed": bool(row.staging_evaluation_passed),
+        "approval_granted": bool(row.approval_granted),
+        "created_by_account_id": str(row.created_by_account_id) if row.created_by_account_id else None,
+        "updated_by_account_id": str(row.updated_by_account_id) if row.updated_by_account_id else None,
+        "promoted_at": row.promoted_at,
+        "created_at": row.created_at,
+        "updated_at": row.updated_at,
+    }
+
+
+def _build_release_event_item(row: KnowledgePackReleaseEvent) -> Dict[str, Any]:
+    return {
+        "knowledge_pack_release_event_id": str(row.knowledge_pack_release_event_id),
+        "knowledge_pack_release_candidate_id": str(row.knowledge_pack_release_candidate_id),
+        "account_id": str(row.account_id) if row.account_id else None,
+        "action": row.action,
+        "from_status": row.from_status,
+        "to_status": row.to_status,
+        "from_environment": row.from_environment,
+        "to_environment": row.to_environment,
+        "notes": row.notes or "",
+        "metadata": dict(row.metadata_json or {}),
+        "created_at": row.created_at,
     }
 
 
@@ -1729,3 +1776,53 @@ def get_learning_coverage(
         followups=followups,
         coach_flags=coach_flags,
     )
+
+
+@router.get("/knowledge-pack-release-candidates")
+def list_knowledge_pack_release_candidates(
+    current_account=Depends(get_current_account),
+    db: Session = Depends(get_db),
+):
+    if str(getattr(current_account, "role", "")).lower() != "coach":
+        raise HTTPException(status_code=403, detail="Knowledge-pack release workflow is only available to coach accounts")
+
+    rows = (
+        db.query(KnowledgePackReleaseCandidate)
+        .order_by(KnowledgePackReleaseCandidate.updated_at.desc())
+        .all()
+    )
+    return {"items": [_build_release_candidate_item(row) for row in rows]}
+
+
+@router.get("/knowledge-pack-release-candidates/{release_candidate_id}")
+def get_knowledge_pack_release_candidate(
+    release_candidate_id: str,
+    current_account=Depends(get_current_account),
+    db: Session = Depends(get_db),
+):
+    if str(getattr(current_account, "role", "")).lower() != "coach":
+        raise HTTPException(status_code=403, detail="Knowledge-pack release workflow is only available to coach accounts")
+
+    try:
+        release_candidate_uuid = uuid.UUID(release_candidate_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid release_candidate_id format")
+
+    row = (
+        db.query(KnowledgePackReleaseCandidate)
+        .filter(KnowledgePackReleaseCandidate.knowledge_pack_release_candidate_id == release_candidate_uuid)
+        .first()
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="Knowledge-pack release candidate not found")
+
+    events = (
+        db.query(KnowledgePackReleaseEvent)
+        .filter(KnowledgePackReleaseEvent.knowledge_pack_release_candidate_id == release_candidate_uuid)
+        .order_by(KnowledgePackReleaseEvent.created_at.desc())
+        .all()
+    )
+    return {
+        "candidate": _build_release_candidate_item(row),
+        "events": [_build_release_event_item(event_row) for event_row in events],
+    }

@@ -19,11 +19,17 @@ from app.persistence.learning_cases import (
     increment_cluster_coach_flag_count,
     write_learning_case,
 )
+from app.persistence.knowledge_pack_releases import (
+    apply_release_action,
+    create_release_candidate,
+)
 from app.persistence.models import (
     AnalysisRun,
     AnalysisResultRaw,
     AccountPlayerLink,
     CoachFlag,
+    KnowledgePackReleaseCandidate,
+    KnowledgePackReleaseEvent,
     LearningCase,
     LearningCaseCluster,
     LearningCaseReviewEvent,
@@ -51,6 +57,24 @@ class CoachFlagCreate(BaseModel):
 class LearningCaseReviewActionCreate(BaseModel):
     action: str
     notes: str = ""
+
+
+class KnowledgePackReleaseCandidateCreate(BaseModel):
+    knowledge_pack_id: str
+    base_pack_version: str
+    candidate_pack_version: str
+    summary: str
+    motivating_cluster_ids: list[str]
+    change_summary: dict = {}
+    tests_added: list[str] = []
+    reinterpret_run_ids: list[str] = []
+    supersedes_pack_version: str | None = None
+
+
+class KnowledgePackReleaseActionCreate(BaseModel):
+    action: str
+    notes: str = ""
+    metadata: dict = {}
 
 
 @router.patch("/analysis/{run_id}/coach-notes")
@@ -514,6 +538,103 @@ async def list_learning_case_review_actions(
     }
 
 
+@router.post("/knowledge-pack-release-candidates")
+async def create_knowledge_pack_release_candidate(
+    payload: KnowledgePackReleaseCandidateCreate,
+    current_account=Depends(get_current_account),
+    db: Session = Depends(get_db),
+):
+    _require_coach_reviewer(current_account)
+    cluster_ids = []
+    for raw_id in payload.motivating_cluster_ids:
+        cluster_ids.append(_parse_uuid_param(raw_id, "motivating_cluster_id"))
+    if not cluster_ids:
+        raise HTTPException(status_code=400, detail="At least one motivating_cluster_id is required")
+
+    cluster_rows = (
+        db.query(LearningCaseCluster)
+        .filter(LearningCaseCluster.learning_case_cluster_id.in_(cluster_ids))
+        .all()
+    )
+    if len(cluster_rows) != len(set(cluster_ids)):
+        raise HTTPException(status_code=404, detail="One or more motivating learning-case clusters were not found")
+
+    case_rows = (
+        db.query(LearningCase)
+        .filter(LearningCase.learning_case_cluster_id.in_(cluster_ids))
+        .order_by(LearningCase.created_at.asc())
+        .all()
+    )
+
+    try:
+        candidate = create_release_candidate(
+            knowledge_pack_id=payload.knowledge_pack_id,
+            base_pack_version=payload.base_pack_version,
+            candidate_pack_version=payload.candidate_pack_version,
+            summary=payload.summary,
+            created_by_account_id=str(current_account.account_id),
+            cluster_rows=cluster_rows,
+            case_rows=case_rows,
+            change_summary=payload.change_summary,
+            tests_added=payload.tests_added,
+            reinterpret_run_ids=payload.reinterpret_run_ids,
+            supersedes_pack_version=payload.supersedes_pack_version,
+            db=db,
+        )
+        db.commit()
+        db.refresh(candidate)
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception:
+        db.rollback()
+        raise
+
+    return _knowledge_pack_release_candidate_response(candidate)
+
+
+@router.post("/knowledge-pack-release-candidates/{release_candidate_id}/actions")
+async def create_knowledge_pack_release_action(
+    release_candidate_id: str,
+    payload: KnowledgePackReleaseActionCreate,
+    current_account=Depends(get_current_account),
+    db: Session = Depends(get_db),
+):
+    _require_coach_reviewer(current_account)
+    release_candidate_uuid = _parse_uuid_param(release_candidate_id, "release_candidate_id")
+    candidate = (
+        db.query(KnowledgePackReleaseCandidate)
+        .filter(KnowledgePackReleaseCandidate.knowledge_pack_release_candidate_id == release_candidate_uuid)
+        .first()
+    )
+    if not candidate:
+        raise HTTPException(status_code=404, detail="Knowledge-pack release candidate not found")
+
+    try:
+        event = apply_release_action(
+            candidate_row=candidate,
+            action=payload.action,
+            account_id=str(current_account.account_id),
+            notes=payload.notes,
+            metadata=payload.metadata,
+            db=db,
+        )
+        db.commit()
+        db.refresh(candidate)
+        db.refresh(event)
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception:
+        db.rollback()
+        raise
+
+    return {
+        "release_candidate": _knowledge_pack_release_candidate_response(candidate),
+        "release_event": _knowledge_pack_release_event_response(event),
+    }
+
+
 def _minimal_result_for_run(analysis_run: AnalysisRun) -> dict:
     return {
         "run_id": str(analysis_run.run_id),
@@ -585,6 +706,50 @@ def _learning_case_review_event_response(row: LearningCaseReviewEvent) -> dict:
         "action": row.action,
         "from_status": row.from_status,
         "to_status": row.to_status,
+        "notes": row.notes or "",
+        "metadata": dict(row.metadata_json or {}),
+        "created_at": row.created_at,
+    }
+
+
+def _knowledge_pack_release_candidate_response(row: KnowledgePackReleaseCandidate) -> dict:
+    return {
+        "knowledge_pack_release_candidate_id": str(row.knowledge_pack_release_candidate_id),
+        "knowledge_pack_id": row.knowledge_pack_id,
+        "base_pack_version": row.base_pack_version,
+        "candidate_pack_version": row.candidate_pack_version,
+        "supersedes_pack_version": row.supersedes_pack_version,
+        "status": row.status,
+        "current_environment": row.current_environment,
+        "summary": row.summary,
+        "change_summary": dict(row.change_summary_json or {}),
+        "motivating_cluster_ids": list(row.motivating_cluster_ids or []),
+        "motivating_case_ids": list(row.motivating_case_ids or []),
+        "tests_added": list(row.tests_added or []),
+        "reinterpret_run_ids": list(row.reinterpret_run_ids or []),
+        "schema_validated": bool(row.schema_validated),
+        "referential_integrity_validated": bool(row.referential_integrity_validated),
+        "regression_suite_passed": bool(row.regression_suite_passed),
+        "staging_evaluation_passed": bool(row.staging_evaluation_passed),
+        "approval_granted": bool(row.approval_granted),
+        "created_by_account_id": str(row.created_by_account_id) if row.created_by_account_id else None,
+        "updated_by_account_id": str(row.updated_by_account_id) if row.updated_by_account_id else None,
+        "promoted_at": row.promoted_at,
+        "created_at": row.created_at,
+        "updated_at": row.updated_at,
+    }
+
+
+def _knowledge_pack_release_event_response(row: KnowledgePackReleaseEvent) -> dict:
+    return {
+        "knowledge_pack_release_event_id": str(row.knowledge_pack_release_event_id),
+        "knowledge_pack_release_candidate_id": str(row.knowledge_pack_release_candidate_id),
+        "account_id": str(row.account_id) if row.account_id else None,
+        "action": row.action,
+        "from_status": row.from_status,
+        "to_status": row.to_status,
+        "from_environment": row.from_environment,
+        "to_environment": row.to_environment,
         "notes": row.notes or "",
         "metadata": dict(row.metadata_json or {}),
         "created_at": row.created_at,

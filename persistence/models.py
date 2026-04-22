@@ -582,6 +582,123 @@ class LearningCaseReviewEvent(Base):
     )
 
 
+class KnowledgePackReleaseCandidate(Base):
+    __tablename__ = "knowledge_pack_release_candidate"
+
+    knowledge_pack_release_candidate_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    knowledge_pack_id: Mapped[str] = mapped_column(String, nullable=False)
+    base_pack_version: Mapped[str] = mapped_column(String, nullable=False)
+    candidate_pack_version: Mapped[str] = mapped_column(String, nullable=False, unique=True)
+    supersedes_pack_version: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    status: Mapped[str] = mapped_column(String, nullable=False, default="DRAFT")
+    current_environment: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    summary: Mapped[str] = mapped_column(Text, nullable=False)
+    change_summary_json: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    motivating_cluster_ids: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    motivating_case_ids: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    tests_added: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    reinterpret_run_ids: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    schema_validated: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    referential_integrity_validated: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    regression_suite_passed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    staging_evaluation_passed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    approval_granted: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    created_by_account_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("account.account_id"),
+        nullable=True,
+    )
+    updated_by_account_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("account.account_id"),
+        nullable=True,
+    )
+    promoted_at: Mapped[Optional[datetime]] = mapped_column(
+        TIMESTAMP(timezone=True),
+        nullable=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True),
+        default=datetime.utcnow,
+        nullable=False,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True),
+        default=datetime.utcnow,
+        nullable=False,
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('DRAFT','IN_DEV','IN_STAGING','APPROVED','PROMOTED','REJECTED','ROLLED_BACK')",
+            name="ck_knowledge_pack_release_candidate_status",
+        ),
+        CheckConstraint(
+            "current_environment IS NULL OR current_environment IN ('dev','staging','production')",
+            name="ck_knowledge_pack_release_candidate_environment",
+        ),
+    )
+
+
+class KnowledgePackReleaseEvent(Base):
+    __tablename__ = "knowledge_pack_release_event"
+
+    knowledge_pack_release_event_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    knowledge_pack_release_candidate_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("knowledge_pack_release_candidate.knowledge_pack_release_candidate_id"),
+        nullable=False,
+    )
+    account_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("account.account_id"),
+        nullable=True,
+    )
+    action: Mapped[str] = mapped_column(String, nullable=False)
+    from_status: Mapped[str] = mapped_column(String, nullable=False)
+    to_status: Mapped[str] = mapped_column(String, nullable=False)
+    from_environment: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    to_environment: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    metadata_json: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    created_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True),
+        default=datetime.utcnow,
+        nullable=False,
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "action IN ('create','record_schema_validation','record_referential_integrity','record_regression_pass','promote_dev','promote_staging','record_staging_evaluation','approve_production','promote_production','reject','rollback')",
+            name="ck_knowledge_pack_release_event_action",
+        ),
+        CheckConstraint(
+            "from_status IN ('NONE','DRAFT','IN_DEV','IN_STAGING','APPROVED','PROMOTED','REJECTED','ROLLED_BACK')",
+            name="ck_knowledge_pack_release_event_from_status",
+        ),
+        CheckConstraint(
+            "to_status IN ('DRAFT','IN_DEV','IN_STAGING','APPROVED','PROMOTED','REJECTED','ROLLED_BACK')",
+            name="ck_knowledge_pack_release_event_to_status",
+        ),
+        CheckConstraint(
+            "from_environment IS NULL OR from_environment IN ('dev','staging','production')",
+            name="ck_knowledge_pack_release_event_from_environment",
+        ),
+        CheckConstraint(
+            "to_environment IS NULL OR to_environment IN ('dev','staging','production')",
+            name="ck_knowledge_pack_release_event_to_environment",
+        ),
+    )
+
+
 class CoachFlag(Base):
     __tablename__ = "coach_flag"
 
