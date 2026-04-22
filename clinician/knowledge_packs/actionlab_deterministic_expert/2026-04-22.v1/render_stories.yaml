@@ -100,3 +100,43 @@ render_stories:
       - phase: followthrough
         overlay: load_hotspot
         cue: "After the release cue fades, show the trunk and front-leg load burden in the follow-through."
+
+  release_window_under_load_story:
+    id: release_window_under_load_story
+    title: "Release-window under-load story"
+    phases:
+      - whip_and_release
+      - dissipation_and_recovery
+    trigger_mechanism_ids:
+      - release_window_instability_under_load
+    focus_regions:
+      - bowling_arm
+      - shoulder_line
+      - trunk
+    storyboard:
+      - phase: release
+        overlay: sequence_marker
+        cue: "Freeze at release and show the window tightening under higher intent."
+      - phase: followthrough
+        overlay: load_hotspot
+        cue: "Then show how the rushed finish leaves a larger late-chain load burden after the ball is gone."
+
+  underused_transfer_late_dump_story:
+    id: underused_transfer_late_dump_story
+    title: "Underused transfer late-dump story"
+    phases:
+      - transfer_and_block
+      - dissipation_and_recovery
+    trigger_mechanism_ids:
+      - underused_transfer_window_with_late_dump
+    focus_regions:
+      - front_leg
+      - trunk
+      - side_body
+    storyboard:
+      - phase: front_foot_contact
+        overlay: transfer_path
+        cue: "Pause at landing and show that the transfer window is visible but underused."
+      - phase: followthrough
+        overlay: load_hotspot
+        cue: "Then show the finish dumping too much deceleration late into the trunk and side body."

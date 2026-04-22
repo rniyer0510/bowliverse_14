@@ -206,8 +206,11 @@ async def create_coach_flag(
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid run_id format")
 
-    if str(getattr(current_account, "role", "")).lower() != "coach":
-        raise HTTPException(status_code=403, detail="Coach feedback is only available to coach accounts")
+    if str(getattr(current_account, "role", "")).lower() not in {"coach", "reviewer", "clinician"}:
+        raise HTTPException(
+            status_code=403,
+            detail="Coach feedback is only available to coach, reviewer, or clinician accounts",
+        )
 
     analysis_run = db.query(AnalysisRun).filter(AnalysisRun.run_id == run_uuid).first()
     if not analysis_run:
@@ -736,8 +739,11 @@ def _minimal_result_for_run(analysis_run: AnalysisRun) -> dict:
 
 
 def _require_coach_reviewer(current_account) -> None:
-    if str(getattr(current_account, "role", "")).lower() != "coach":
-        raise HTTPException(status_code=403, detail="Learning-case review is only available to coach accounts")
+    if str(getattr(current_account, "role", "")).lower() not in {"coach", "reviewer", "clinician"}:
+        raise HTTPException(
+            status_code=403,
+            detail="Learning-case review is only available to coach, reviewer, or clinician accounts",
+        )
 
 
 def _ensure_learning_case_access(*, current_account, player_id: uuid.UUID, db: Session) -> None:

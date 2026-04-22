@@ -90,6 +90,11 @@ class DeterministicExpertSystemTests(unittest.TestCase):
         )
         self.assertFalse(payload["prescription_plan_v1"]["suppressed"])
         self.assertNotIn("evidence_flags", payload["metrics"])
+        self.assertEqual(payload["presentation_payload_v1"]["state"], "MATCH")
+        self.assertEqual(
+            payload["presentation_payload_v1"]["match"]["primary_mechanism_id"],
+            "soft_block_with_trunk_carry",
+        )
 
     def test_returns_no_match_when_pattern_is_clean(self):
         payload = self.engine.build(
@@ -207,7 +212,7 @@ class DeterministicExpertSystemTests(unittest.TestCase):
                     },
                 },
             ],
-            account_role="coach",
+            account_role="reviewer",
         )
 
         self.assertEqual(payload["selection"]["diagnosis_status"], "no_match")
@@ -221,10 +226,10 @@ class DeterministicExpertSystemTests(unittest.TestCase):
         )
         self.assertEqual(
             payload["mechanism_explanation_v1"]["selected_surface"],
-            "coach",
+            "reviewer",
         )
         self.assertIn(
-            "coach",
+            "reviewer",
             payload["mechanism_explanation_v1"]["surface_variants"],
         )
         self.assertEqual(
@@ -236,6 +241,11 @@ class DeterministicExpertSystemTests(unittest.TestCase):
             "event_only",
         )
         self.assertTrue(payload["prescription_plan_v1"]["suppressed"])
+        self.assertEqual(payload["presentation_payload_v1"]["state"], "NO_MATCH")
+        self.assertEqual(
+            payload["presentation_payload_v1"]["selected_surface"],
+            "reviewer",
+        )
 
     def test_unusable_capture_quality_short_circuits_mechanism_scoring(self):
         payload = self.engine.build(
@@ -264,6 +274,11 @@ class DeterministicExpertSystemTests(unittest.TestCase):
             "event_only",
         )
         self.assertTrue(payload["prescription_plan_v1"]["suppressed"])
+        self.assertEqual(payload["presentation_payload_v1"]["state"], "NO_MATCH")
+        self.assertEqual(
+            payload["presentation_payload_v1"]["capture_quality_status"],
+            "UNUSABLE",
+        )
 
 
 if __name__ == "__main__":

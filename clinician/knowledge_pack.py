@@ -284,6 +284,24 @@ def _validate_globals(document: Mapping[str, Any]) -> Dict[str, Any]:
     phase_order = _require_str_list(document, "phase_order", "knowledge pack globals")
     if len(set(phase_order)) != len(phase_order):
         raise ValueError("knowledge pack globals phase_order must not contain duplicates")
+    confidence_bands = _require_mapping(document, "confidence_bands", "knowledge pack globals")
+    for key in ("high", "medium", "low"):
+        band_cfg = _require_mapping(confidence_bands, key, "knowledge pack globals")
+        _require_float(band_cfg, "min", f"knowledge pack globals confidence band {key}")
+    if not (
+        float(confidence_bands["low"]["min"])
+        <= float(confidence_bands["medium"]["min"])
+        <= float(confidence_bands["high"]["min"])
+        <= 1.0
+    ):
+        raise ValueError(
+            "knowledge pack globals confidence bands must satisfy low <= medium <= high within 0..1"
+        )
+    severity_bands = _require_mapping(document, "severity_bands", "knowledge pack globals")
+    for key in ("low", "moderate", "high", "very_high"):
+        band_cfg = _require_mapping(severity_bands, key, "knowledge pack globals")
+        _require_float(band_cfg, "min", f"knowledge pack globals severity band {key}")
+        _require_float(band_cfg, "max", f"knowledge pack globals severity band {key}")
 
     thresholds = _require_mapping(document, "match_thresholds", "knowledge pack globals")
     confident = _require_float(thresholds, "confident_match_min", "knowledge pack globals")
@@ -450,6 +468,8 @@ def _validate_globals(document: Mapping[str, Any]) -> Dict[str, Any]:
     return {
         "version": document["version"],
         "phase_order": phase_order,
+        "confidence_bands": dict(confidence_bands),
+        "severity_bands": dict(severity_bands),
         "match_thresholds": dict(thresholds),
         "history_window_defaults": dict(history_defaults),
         "evidence_bands": dict(evidence_bands),
@@ -774,7 +794,9 @@ def _validate_wording(document: Mapping[str, Any]) -> Dict[str, Any]:
 
     surfaces = _require_mapping(document, "surfaces", "knowledge pack wording")
     normalized_surfaces: Dict[str, Dict[str, str]] = {}
-    for surface_name in ("player", "coach"):
+    required_surfaces = ("player", "coach")
+    optional_surfaces = ("reviewer", "clinician")
+    for surface_name in required_surfaces:
         surface_cfg = _require_mapping(surfaces, surface_name, "knowledge pack wording surfaces")
         normalized_surfaces[surface_name] = {
             "primary_mechanism_prefix": _require_string(
@@ -793,6 +815,32 @@ def _validate_wording(document: Mapping[str, Any]) -> Dict[str, Any]:
                 f"knowledge pack wording surface {surface_name}",
             ),
         }
+    coach_surface = dict(normalized_surfaces["coach"])
+    for surface_name in optional_surfaces:
+        raw_cfg = surfaces.get(surface_name)
+        if raw_cfg is None:
+            normalized_surfaces[surface_name] = dict(coach_surface)
+            continue
+        if not isinstance(raw_cfg, Mapping):
+            raise ValueError(f"knowledge pack wording surface {surface_name} must be a mapping")
+        surface_cfg = dict(raw_cfg)
+        normalized_surfaces[surface_name] = {
+            "primary_mechanism_prefix": _optional_string(
+                surface_cfg,
+                "primary_mechanism_prefix",
+                coach_surface["primary_mechanism_prefix"],
+            ),
+            "performance_prefix": _optional_string(
+                surface_cfg,
+                "performance_prefix",
+                coach_surface["performance_prefix"],
+            ),
+            "load_prefix": _optional_string(
+                surface_cfg,
+                "load_prefix",
+                coach_surface["load_prefix"],
+            ),
+        }
 
     unknown_path_surfaces = _require_mapping(
         document,
@@ -800,7 +848,7 @@ def _validate_wording(document: Mapping[str, Any]) -> Dict[str, Any]:
         "knowledge pack wording",
     )
     normalized_unknown_surfaces: Dict[str, Dict[str, str]] = {}
-    for surface_name in ("player", "coach"):
+    for surface_name in required_surfaces:
         surface_cfg = _require_mapping(
             unknown_path_surfaces,
             surface_name,
@@ -828,6 +876,39 @@ def _validate_wording(document: Mapping[str, Any]) -> Dict[str, Any]:
                 f"knowledge pack wording unknown surface {surface_name}",
             ),
         }
+    coach_unknown_surface = dict(normalized_unknown_surfaces["coach"])
+    for surface_name in optional_surfaces:
+        raw_cfg = unknown_path_surfaces.get(surface_name)
+        if raw_cfg is None:
+            normalized_unknown_surfaces[surface_name] = dict(coach_unknown_surface)
+            continue
+        if not isinstance(raw_cfg, Mapping):
+            raise ValueError(
+                f"knowledge pack wording unknown surface {surface_name} must be a mapping"
+            )
+        surface_cfg = dict(raw_cfg)
+        normalized_unknown_surfaces[surface_name] = {
+            "primary_mechanism": _optional_string(
+                surface_cfg,
+                "primary_mechanism",
+                coach_unknown_surface["primary_mechanism"],
+            ),
+            "performance_impact": _optional_string(
+                surface_cfg,
+                "performance_impact",
+                coach_unknown_surface["performance_impact"],
+            ),
+            "load_impact": _optional_string(
+                surface_cfg,
+                "load_impact",
+                coach_unknown_surface["load_impact"],
+            ),
+            "coach_check": _optional_string(
+                surface_cfg,
+                "coach_check",
+                coach_unknown_surface["coach_check"],
+            ),
+        }
 
     status_leads = _require_mapping(document, "status_leads", "knowledge pack wording")
     normalized_status_leads: Dict[str, Dict[str, str]] = {}
@@ -851,6 +932,12 @@ def _validate_wording(document: Mapping[str, Any]) -> Dict[str, Any]:
                 f"knowledge pack wording status lead {status_name}",
             ),
         }
+        for surface_name in optional_surfaces:
+            normalized_status_leads[status_name][surface_name] = _optional_string(
+                status_cfg,
+                surface_name,
+                normalized_status_leads[status_name]["coach"],
+            )
 
     product_rules = _require_str_list(document, "product_rules", "knowledge pack wording")
     return {
@@ -972,6 +1059,16 @@ def _require_str_list(payload: Mapping[str, Any], key: str, label: str) -> List[
             raise ValueError(f"{label} {key}[{idx}] must be a non-empty string")
         normalized.append(value)
     return normalized
+
+
+def _optional_string(payload: Mapping[str, Any], key: str, default: str) -> str:
+    value = payload.get(key)
+    if value is None:
+        return str(default)
+    if not isinstance(value, str):
+        raise ValueError(f"Optional key {key} must be a string when provided")
+    text = value.strip()
+    return text or str(default)
 
 
 def _require_string(payload: Mapping[str, Any], key: str, label: str) -> str:

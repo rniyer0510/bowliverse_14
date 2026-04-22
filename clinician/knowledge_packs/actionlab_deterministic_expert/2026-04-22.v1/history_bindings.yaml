@@ -58,3 +58,45 @@ history_bindings:
       - trunk_fold_severity
     primary_metric: dissipation_burden_score
     chart_summary: "Tracks whether the body is spreading deceleration load more evenly after release."
+
+  release_window_control:
+    id: release_window_control
+    title: "Release-window control"
+    mechanism_ids:
+      - late_arm_acceleration_due_to_chain_delay
+      - release_window_instability_under_load
+    trajectory_ids:
+      - repeatability_loss_under_fatigue
+      - release_window_fragility_under_load
+    followup_check_ids:
+      - more_stable_release_timing
+      - calmer_release_window_under_load
+    metrics:
+      - release_timing_stability
+      - shoulder_rotation_timing
+      - distal_velocity_rescue
+      - dissipation_burden_score
+    primary_metric: release_timing_stability
+    chart_summary: "Tracks whether the release window stays calm and connected even when the bowler adds intent."
+
+  late_chain_load_cost:
+    id: late_chain_load_cost
+    title: "Late-chain load cost"
+    mechanism_ids:
+      - high_terminal_impulse_with_high_dissipation_burden
+      - release_window_instability_under_load
+      - underused_transfer_window_with_late_dump
+    trajectory_ids:
+      - trunk_and_front_leg_load_accumulation
+      - late_load_dump_after_underused_transfer
+      - release_window_fragility_under_load
+    followup_check_ids:
+      - reduced_dissipation_burden
+      - more_balanced_finish_absorption
+    metrics:
+      - dissipation_burden_score
+      - followthrough_asymmetry
+      - trunk_fold_severity
+      - terminal_impulse_score
+    primary_metric: dissipation_burden_score
+    chart_summary: "Tracks whether late pace creation is still being paid for through a harsh or concentrated finish."

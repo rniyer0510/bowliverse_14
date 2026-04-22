@@ -201,3 +201,83 @@ mechanisms:
       - terminal_impulse_score
       - dissipation_burden_score
       - followthrough_asymmetry
+
+  release_window_instability_under_load:
+    id: release_window_instability_under_load
+    title: "Release-window instability under load"
+    summary: "The action can find the release on calmer balls, but under higher intent the window tightens and the arm has to rescue timing late."
+    family: sequencing_deficit
+    primary_phases:
+      - whip_and_release
+      - dissipation_and_recovery
+    required_symptoms:
+      - release_window_instability
+      - late_chain_load_dump
+    supporting_symptoms:
+      - arm_chase
+    contradictory_symptoms: []
+    required_evidence:
+      - release_timing_stability_low
+      - dissipation_burden_score_elevated
+    supporting_evidence:
+      - shoulder_rotation_timing_late
+      - distal_velocity_rescue_present
+    contradictions:
+      - "A calm release window under high intent weakens this mechanism."
+    performance_effects:
+      - "Timing can look acceptable on easier balls and rushed on harder ones."
+      - "The release window may narrow when pace intent rises."
+    load_effects:
+      - "Late rescue under effort can concentrate more load into the trunk and upper chain."
+    trajectory_ids:
+      - release_window_fragility_under_load
+      - trunk_and_front_leg_load_accumulation
+    prescription_ids:
+      - stabilize_release_window_under_load
+      - quiet_the_end_rush
+    render_story_ids:
+      - release_window_under_load_story
+    history_metrics_to_track:
+      - release_timing_stability
+      - distal_velocity_rescue
+      - dissipation_burden_score
+
+  underused_transfer_window_with_late_dump:
+    id: underused_transfer_window_with_late_dump
+    title: "Underused transfer window with late dump"
+    summary: "The landing window is readable, but too little of it is converted into a calm transfer before the finish dumps load late."
+    family: dissipation_deficit
+    primary_phases:
+      - transfer_and_block
+      - dissipation_and_recovery
+    required_symptoms:
+      - underused_transfer_window
+      - late_chain_load_dump
+    supporting_symptoms:
+      - high_terminal_thrust
+    contradictory_symptoms: []
+    required_evidence:
+      - transfer_efficiency_score_moderate_or_lower
+      - dissipation_burden_score_high
+    supporting_evidence:
+      - front_leg_support_score_low
+      - trunk_fold_severity_elevated
+    contradictions:
+      - "A clearly efficient transfer with a balanced finish weakens this mechanism."
+    performance_effects:
+      - "The action leaves usable transfer on the table and then pays for it late."
+      - "Pace may still appear, but the finish is more expensive than it needs to be."
+    load_effects:
+      - "The trunk, side body, and front leg can end up carrying a harsher finish burden."
+    trajectory_ids:
+      - late_load_dump_after_underused_transfer
+      - trunk_and_front_leg_load_accumulation
+    prescription_ids:
+      - absorb_through_balanced_finish
+      - stack_over_landing_leg
+    render_story_ids:
+      - underused_transfer_late_dump_story
+    history_metrics_to_track:
+      - transfer_efficiency_score
+      - dissipation_burden_score
+      - trunk_fold_severity

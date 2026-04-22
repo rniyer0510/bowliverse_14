@@ -1,3 +1,6 @@
+# Legacy clinician globals remain the source of truth for benchmark rating floors.
+# Generic confidence and severity band semantics are now mirrored from the
+# deterministic knowledge pack and consumed from there first.
 version: actionlab.clinician.v1
 
 confidence_bands:

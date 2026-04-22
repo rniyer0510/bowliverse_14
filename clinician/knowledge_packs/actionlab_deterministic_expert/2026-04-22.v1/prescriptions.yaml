@@ -156,3 +156,55 @@ prescriptions:
       - "terminal_impulse_score down"
       - "dissipation_burden_score down"
       - "followthrough_asymmetry down"
+
+  stabilize_release_window_under_load:
+    id: stabilize_release_window_under_load
+    title: "Stabilize the release window under load"
+    goal: "Keep the release window calmer when pace intent rises so the arm does not have to chase late."
+    primary_cue: "Let the trunk arrive a fraction earlier into the release window so the arm can stay connected instead of rescuing the finish."
+    why_this_first: "It targets timing drift under effort without turning the fix into an arm-only instruction."
+    avoid_for_now:
+      - "Do not ask for more arm speed on top of a rushed release window."
+      - "Do not stack this on the same first rep as a new run-up cue."
+    expected_change:
+      - "Release timing stays calmer when the bowler keeps intent high."
+      - "The finish looks less like a last-second rescue."
+    coach_check: "Check whether higher-intent balls still show the same calm release window over the next short set."
+    reassess_after: "Review after the next 3 to 5 deliveries and again in the next session."
+    review_window_type: next_3_runs
+    works_best_when:
+      - "Release timing looks readable on easy balls but unstable when effort rises."
+      - "Late arm rescue and load dump are travelling together."
+    contraindicated_when:
+      - "The clip quality is too weak to trust the release-window timing story."
+      - "The main issue is clearly at build or landing rather than at release."
+    followup_metric_targets:
+      - "release_timing_stability up"
+      - "distal_velocity_rescue down"
+      - "dissipation_burden_score down"
+
+  absorb_through_balanced_finish:
+    id: absorb_through_balanced_finish
+    title: "Absorb through a balanced finish"
+    goal: "Spread the finish more evenly through the body instead of dumping load abruptly after a late push."
+    primary_cue: "Let the finish keep moving through the ball instead of collapsing sharply into the trunk and side body."
+    why_this_first: "It protects the finish pattern without asking for a larger technical rebuild before the bowler can feel the end shape."
+    avoid_for_now:
+      - "Do not cue a dramatic slow-down through release."
+      - "Do not pair this with a harder bracing cue until the finish is more balanced."
+    expected_change:
+      - "Follow-through looks less abrupt and more shared through the chain."
+      - "Trunk fold and one-sided finish cues soften."
+    coach_check: "Check whether the finish looks more balanced and less dumped over the next session."
+    reassess_after: "Review at the next session and again over the next 2 weeks."
+    review_window_type: next_2_weeks
+    works_best_when:
+      - "Late push and harsh finish absorption are travelling together."
+      - "The bowler already creates enough intent and needs a calmer finish more than more effort."
+    contraindicated_when:
+      - "The main issue is still a clearly disorganized gather or landing entry."
+      - "The finish story is only weakly supported because capture quality is poor."
+    followup_metric_targets:
+      - "dissipation_burden_score down"
+      - "followthrough_asymmetry down"
+      - "trunk_fold_severity down"

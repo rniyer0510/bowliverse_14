@@ -1024,6 +1024,7 @@ def analyze(
             "mechanism_explanation_v1": deterministic_expert.get("mechanism_explanation_v1"),
             "prescription_plan_v1": deterministic_expert.get("prescription_plan_v1"),
             "history_plan_v1": deterministic_expert.get("history_plan_v1"),
+            "presentation_payload_v1": deterministic_expert.get("presentation_payload_v1"),
         }
         result["visual_walkthrough"] = _build_walkthrough_render(
             run_id=run_id,

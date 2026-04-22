@@ -146,3 +146,64 @@ symptoms:
       - trunk
       - front_leg
       - side_body
+
+  release_window_instability:
+    id: release_window_instability
+    title: "Release-window instability"
+    category: "sequencing"
+    phase: whip_and_release
+    description: "The release window looks variable enough that the arm and trunk are arriving under late pressure."
+    evidence_inputs:
+      - release_timing_stability
+      - shoulder_rotation_timing
+      - distal_velocity_rescue
+    related_symptoms:
+      - arm_chase
+      - late_chain_load_dump
+    possible_mechanisms:
+      - release_window_instability_under_load
+    render_focus_regions:
+      - bowling_arm
+      - shoulder_line
+      - trunk
+
+  late_chain_load_dump:
+    id: late_chain_load_dump
+    title: "Late-chain load dump"
+    category: "load"
+    phase: dissipation_and_recovery
+    description: "The follow-through appears to dump deceleration abruptly into the trunk and side-body after a late push through release."
+    evidence_inputs:
+      - dissipation_burden_score
+      - followthrough_asymmetry
+      - trunk_fold_severity
+    related_symptoms:
+      - high_terminal_thrust
+      - release_window_instability
+    possible_mechanisms:
+      - release_window_instability_under_load
+      - underused_transfer_window_with_late_dump
+    render_focus_regions:
+      - trunk
+      - side_body
+      - front_leg
+
+  underused_transfer_window:
+    id: underused_transfer_window
+    title: "Underused transfer window"
+    category: "transfer"
+    phase: transfer_and_block
+    description: "The landing window looks readable, but the action still fails to convert it into a calm transfer before release."
+    evidence_inputs:
+      - transfer_efficiency_score
+      - front_leg_support_score
+      - chest_stack_over_landing
+    related_symptoms:
+      - front_leg_softening
+      - late_chain_load_dump
+    possible_mechanisms:
+      - underused_transfer_window_with_late_dump
+    render_focus_regions:
+      - front_leg
+      - trunk
+      - shoulder_line

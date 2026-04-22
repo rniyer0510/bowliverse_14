@@ -376,6 +376,9 @@ def write_analysis(result: dict, db: Optional[Session] = None, **kwargs) -> str:
         )
 
         explanation_trace = _deterministic_trace(result)
+        existing_trace = db.get(AnalysisExplanationTrace, run_id)
+        if existing_trace is not None:
+            raise ValueError(f"Explanation trace already exists for run_id={run_id}")
         db.add(
             AnalysisExplanationTrace(
                 run_id=run_id,

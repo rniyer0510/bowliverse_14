@@ -60,3 +60,27 @@ followup_checks:
       - "Load concentration remains obvious after release."
     recommended_review_window: "Next session and next spell."
     history_graph_binding: dissipation_profile
+
+  calmer_release_window_under_load:
+    id: calmer_release_window_under_load
+    title: "Calmer release window under load"
+    success_signals:
+      - "The trunk and arm arrive in a calmer sequence even when intent stays high."
+      - "The release looks less rescued late in the action."
+    failure_signals:
+      - "The arm still looks rushed when the bowler adds pace intent."
+      - "Late-chain rescue reappears as soon as effort rises."
+    recommended_review_window: "Next short set, then next session."
+    history_graph_binding: release_window_control
+
+  more_balanced_finish_absorption:
+    id: more_balanced_finish_absorption
+    title: "More balanced finish absorption"
+    success_signals:
+      - "The follow-through looks less like a sudden dump into the side body."
+      - "The trunk and front leg share the finish more evenly."
+    failure_signals:
+      - "The finish still looks abrupt, folded, or heavily one-sided."
+      - "Late push and harsh deceleration continue to travel together."
+    recommended_review_window: "Next session and next 2 weeks."
+    history_graph_binding: late_chain_load_cost

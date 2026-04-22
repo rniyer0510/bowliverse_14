@@ -21,15 +21,24 @@ class KnowledgePackLoaderTests(unittest.TestCase):
         self.assertEqual(pack["pack_id"], "actionlab_deterministic_expert")
         self.assertIn("weak_approach_build", pack["symptoms"])
         self.assertIn("soft_block_with_trunk_carry", pack["mechanisms"])
+        self.assertIn("release_window_instability_under_load", pack["mechanisms"])
         self.assertIn("pace_created_late_and_expensively", pack["trajectories"])
+        self.assertIn("release_window_fragility_under_load", pack["trajectories"])
         self.assertIn("stack_over_landing_leg", pack["prescriptions"])
+        self.assertIn("stabilize_release_window_under_load", pack["prescriptions"])
         self.assertIn("more_stable_release_timing", pack["followup_checks"])
+        self.assertIn("calmer_release_window_under_load", pack["followup_checks"])
         self.assertIn("soft_block_trunk_carry_story", pack["render_stories"])
+        self.assertIn("release_window_under_load_story", pack["render_stories"])
         self.assertIn("transfer_block_stability", pack["history_bindings"])
+        self.assertIn("release_window_control", pack["history_bindings"])
         self.assertIn("soft_block_leakage_bowler", pack["archetypes"])
+        self.assertIn("release_fragility_bowler", pack["archetypes"])
         self.assertIn("hedges", pack["wording"])
         self.assertIn("surfaces", pack["wording"])
         self.assertIn("internal_metrics", pack["globals"])
+        self.assertIn("confidence_bands", pack["globals"])
+        self.assertIn("severity_bands", pack["globals"])
         self.assertIn("followup_defaults", pack["globals"])
         self.assertIn("history_uncertainty", pack["globals"])
         self.assertIn("presentation_downgrade_rules", pack["globals"])
@@ -65,6 +74,14 @@ class KnowledgePackLoaderTests(unittest.TestCase):
         )
         self.assertIn(
             "coach",
+            pack["wording"]["surfaces"],
+        )
+        self.assertIn(
+            "reviewer",
+            pack["wording"]["surfaces"],
+        )
+        self.assertIn(
+            "clinician",
             pack["wording"]["surfaces"],
         )
 

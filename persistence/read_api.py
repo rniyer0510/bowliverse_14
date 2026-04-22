@@ -1868,8 +1868,7 @@ def list_knowledge_pack_release_candidates(
     current_account=Depends(get_current_account),
     db: Session = Depends(get_db),
 ):
-    if str(getattr(current_account, "role", "")).lower() != "coach":
-        raise HTTPException(status_code=403, detail="Knowledge-pack release workflow is only available to coach accounts")
+    _require_release_reviewer(current_account)
 
     rows = (
         db.query(KnowledgePackReleaseCandidate)
@@ -1885,8 +1884,7 @@ def get_knowledge_pack_release_candidate(
     current_account=Depends(get_current_account),
     db: Session = Depends(get_db),
 ):
-    if str(getattr(current_account, "role", "")).lower() != "coach":
-        raise HTTPException(status_code=403, detail="Knowledge-pack release workflow is only available to coach accounts")
+    _require_release_reviewer(current_account)
 
     try:
         release_candidate_uuid = uuid.UUID(release_candidate_id)
@@ -1941,8 +1939,7 @@ def get_knowledge_pack_release_regression_run(
     current_account=Depends(get_current_account),
     db: Session = Depends(get_db),
 ):
-    if str(getattr(current_account, "role", "")).lower() != "coach":
-        raise HTTPException(status_code=403, detail="Knowledge-pack release workflow is only available to coach accounts")
+    _require_release_reviewer(current_account)
 
     try:
         release_candidate_uuid = uuid.UUID(release_candidate_id)
@@ -1979,8 +1976,7 @@ def list_knowledge_pack_monitoring_snapshots(
     current_account=Depends(get_current_account),
     db: Session = Depends(get_db),
 ):
-    if str(getattr(current_account, "role", "")).lower() != "coach":
-        raise HTTPException(status_code=403, detail="Knowledge-pack release workflow is only available to coach accounts")
+    _require_release_reviewer(current_account)
     try:
         release_candidate_uuid = uuid.UUID(release_candidate_id)
     except ValueError:
@@ -2001,8 +1997,7 @@ def list_knowledge_pack_rollback_alerts(
     current_account=Depends(get_current_account),
     db: Session = Depends(get_db),
 ):
-    if str(getattr(current_account, "role", "")).lower() != "coach":
-        raise HTTPException(status_code=403, detail="Knowledge-pack release workflow is only available to coach accounts")
+    _require_release_reviewer(current_account)
     try:
         release_candidate_uuid = uuid.UUID(release_candidate_id)
     except ValueError:
@@ -2015,3 +2010,11 @@ def list_knowledge_pack_rollback_alerts(
         .all()
     )
     return {"items": [_build_rollback_alert_item(row) for row in rows]}
+
+
+def _require_release_reviewer(current_account) -> None:
+    if str(getattr(current_account, "role", "")).lower() not in {"coach", "reviewer", "clinician"}:
+        raise HTTPException(
+            status_code=403,
+            detail="Knowledge-pack release workflow is only available to coach, reviewer, or clinician accounts",
+        )

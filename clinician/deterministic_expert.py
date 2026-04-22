@@ -246,6 +246,15 @@ class DeterministicExpertSystem:
             archetype=archetype,
             history_context=history_context,
         )
+        presentation_payload = self._build_presentation_payload(
+            selection=selection,
+            hypotheses=hypotheses,
+            capture_quality=capture_quality,
+            render_reasoning=render_reasoning,
+            mechanism_explanation=mechanism_explanation,
+            prescription_plan=prescription_plan,
+            archetype=archetype,
+        )
 
         return {
             "version": "deterministic_expert_v1",
@@ -266,6 +275,7 @@ class DeterministicExpertSystem:
             "mechanism_explanation_v1": mechanism_explanation,
             "prescription_plan_v1": prescription_plan,
             "history_plan_v1": history_plan,
+            "presentation_payload_v1": presentation_payload,
         }
 
     def _build_capture_quality(
@@ -1185,7 +1195,7 @@ class DeterministicExpertSystem:
         history_context: Dict[str, Any],
     ) -> Dict[str, Any]:
         wording = self._pack["wording"]
-        selected_surface = "coach" if str(account_role or "").lower() == "coach" else "player"
+        selected_surface = self._wording_surface(account_role, wording)
         primary = selection.get("primary")
         secondary = selection.get("secondary") or []
         if not primary:
@@ -1685,7 +1695,7 @@ class DeterministicExpertSystem:
         surfaces = wording.get("surfaces") or {}
         status_leads = wording.get("status_leads") or {}
         variants: Dict[str, Dict[str, Any]] = {}
-        for surface in ("player", "coach"):
+        for surface in surfaces.keys():
             surface_cfg = surfaces.get(surface) or {}
             lead_cfg = status_leads.get(diagnosis_status) or {}
             lead = str(lead_cfg.get(surface) or "").strip()
@@ -1711,7 +1721,7 @@ class DeterministicExpertSystem:
         legacy = wording["unknown_path"]
         unknown_surfaces = wording.get("unknown_path_surfaces") or {}
         variants: Dict[str, Dict[str, Any]] = {}
-        for surface in ("player", "coach"):
+        for surface in (wording.get("surfaces") or {}).keys():
             surface_cfg = unknown_surfaces.get(surface) or {}
             variants[surface] = {
                 "primary_mechanism": surface_cfg.get("primary_mechanism", legacy["primary_mechanism"]),
@@ -1720,3 +1730,95 @@ class DeterministicExpertSystem:
                 "coach_check": surface_cfg.get("coach_check", legacy["coach_check"]),
             }
         return variants
+
+    def _wording_surface(self, account_role: Optional[str], wording: Dict[str, Any]) -> str:
+        role = str(account_role or "").strip().lower()
+        surfaces = wording.get("surfaces") or {}
+        if role in surfaces:
+            return role
+        if role in {"coach", "reviewer", "clinician"} and "coach" in surfaces:
+            return "coach"
+        return "player"
+
+    def _presentation_state(self, diagnosis_status: str) -> str:
+        if diagnosis_status == "ambiguous_match":
+            return "AMBIGUOUS"
+        if diagnosis_status in {"confident_match", "partial_match", "weak_match"}:
+            return "MATCH"
+        return "NO_MATCH"
+
+    def _build_presentation_payload(
+        self,
+        *,
+        selection: Dict[str, Any],
+        hypotheses: List[Dict[str, Any]],
+        capture_quality: Dict[str, Any],
+        render_reasoning: Dict[str, Any],
+        mechanism_explanation: Dict[str, Any],
+        prescription_plan: Dict[str, Any],
+        archetype: Optional[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        diagnosis_status = str(selection.get("diagnosis_status") or "no_match")
+        state = self._presentation_state(diagnosis_status)
+        payload: Dict[str, Any] = {
+            "version": "presentation_payload_v1",
+            "state": state,
+            "diagnosis_status": diagnosis_status,
+            "knowledge_pack_id": self._pack["pack_id"],
+            "knowledge_pack_version": self._pack["pack_version"],
+            "capture_quality_status": str(capture_quality.get("status") or "WEAK"),
+            "renderer_mode": str(render_reasoning.get("renderer_mode") or "event_only"),
+            "selected_surface": mechanism_explanation.get("selected_surface"),
+            "selected_render_story_ids": list(selection.get("selected_render_story_ids") or []),
+            "selected_history_binding_ids": list(
+                mechanism_explanation.get("selected_history_binding_ids") or []
+            ),
+            "prescription_suppressed": bool(prescription_plan.get("suppressed")),
+            "archetype": (
+                {
+                    "id": archetype.get("id"),
+                    "title": archetype.get("title"),
+                    "short_label": archetype.get("short_label"),
+                }
+                if archetype
+                else None
+            ),
+        }
+        if state == "MATCH":
+            payload["match"] = {
+                "primary_mechanism_id": selection.get("primary_mechanism_id"),
+                "primary_mechanism": mechanism_explanation.get("primary_mechanism"),
+                "primary_mechanism_summary": mechanism_explanation.get("primary_mechanism_summary"),
+                "performance_impact": mechanism_explanation.get("performance_impact"),
+                "load_impact": mechanism_explanation.get("load_impact"),
+                "first_intervention": mechanism_explanation.get("first_intervention"),
+                "coach_check": mechanism_explanation.get("coach_check"),
+                "primary_prescription_id": prescription_plan.get("primary_prescription_id"),
+                "coaching_priority": (prescription_plan.get("prescriptions") or [{}])[0].get("goal")
+                if prescription_plan.get("prescriptions")
+                else None,
+            }
+        elif state == "AMBIGUOUS":
+            payload["ambiguous"] = {
+                "top_candidates": [
+                    {
+                        "id": item.get("id"),
+                        "title": item.get("title"),
+                        "overall_confidence": item.get("overall_confidence"),
+                        "support_score": item.get("support_score"),
+                        "contradiction_penalty": item.get("contradiction_penalty"),
+                    }
+                    for item in hypotheses[:2]
+                    if isinstance(item, dict)
+                ],
+                "holdback_reason": mechanism_explanation.get("performance_impact"),
+                "coach_check": mechanism_explanation.get("coach_check"),
+            }
+        else:
+            payload["no_match"] = {
+                "holdback_reason": mechanism_explanation.get("performance_impact"),
+                "load_holdback_reason": mechanism_explanation.get("load_impact"),
+                "coach_check": mechanism_explanation.get("coach_check"),
+                "selected_render_story_ids": list(selection.get("selected_render_story_ids") or []),
+            }
+        return payload

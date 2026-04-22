@@ -21,6 +21,14 @@ surfaces:
     primary_mechanism_prefix: "Current clip most likely reflects"
     performance_prefix: "Performance implication:"
     load_prefix: "Load implication:"
+  reviewer:
+    primary_mechanism_prefix: "Reviewer view:"
+    performance_prefix: "Performance audit:"
+    load_prefix: "Load audit:"
+  clinician:
+    primary_mechanism_prefix: "Clinical biomechanics view:"
+    performance_prefix: "Functional implication:"
+    load_prefix: "Load concentration implication:"
 
 unknown_path_surfaces:
   player:
@@ -33,23 +41,43 @@ unknown_path_surfaces:
     performance_impact: "The current evidence is not strong enough to attach a firmer causal performance story."
     load_impact: "The current evidence is not strong enough to attach a firmer load concentration story."
     coach_check: "Re-capture a cleaner clip or a short set before coaching a stronger causal change from this pathway."
+  reviewer:
+    primary_mechanism: "Current clip does not clear the deterministic review threshold yet"
+    performance_impact: "The current evidence is not strong enough to lock a firmer causal performance interpretation."
+    load_impact: "The current evidence is not strong enough to lock a firmer load concentration interpretation."
+    coach_check: "Request a cleaner clip or a short repeat set before promoting a stronger review conclusion."
+  clinician:
+    primary_mechanism: "Current clip remains below the deterministic clinician threshold"
+    performance_impact: "The current evidence is not strong enough to attach a firmer functional biomechanics story."
+    load_impact: "The current evidence is not strong enough to attach a firmer load-concentration story."
+    coach_check: "Re-capture a cleaner clip or a short repeated set before escalating the causal interpretation."
 
 status_leads:
   confident_match:
     player: "This clip is one of the clearer deterministic matches."
     coach: "Current clip is clearing the stronger deterministic threshold."
+    reviewer: "Current clip is clearing the stronger deterministic review threshold."
+    clinician: "Current clip is clearing the stronger clinician-level deterministic threshold."
   partial_match:
     player: "This clip has a usable root-cause story, but ActionLab is still keeping some caution."
     coach: "Current clip supports a usable primary mechanism, but the evidence is not fully clean."
+    reviewer: "Current clip supports a usable primary mechanism, but review caution still applies."
+    clinician: "Current clip supports a usable primary mechanism, but the evidence is not yet fully clean."
   weak_match:
     player: "There is an early signal here, but it is still a softer match."
     coach: "Current clip is pointing toward a weak deterministic match only."
+    reviewer: "Current clip is still only a weak deterministic review match."
+    clinician: "Current clip is still only a weak clinician-level deterministic match."
   ambiguous_match:
     player: "Two nearby root-cause stories are still close together on this clip."
     coach: "Current clip is still split between two nearby deterministic mechanisms."
+    reviewer: "Current clip remains split between two nearby deterministic review candidates."
+    clinician: "Current clip remains split between two nearby deterministic clinician candidates."
   no_match:
     player: "This clip does not give ActionLab a strong enough root-cause match yet."
     coach: "Current clip is staying below the deterministic match threshold."
+    reviewer: "Current clip is staying below the deterministic review threshold."
+    clinician: "Current clip is staying below the deterministic clinician threshold."
 
 product_rules:
   - "Mechanism before remedy."
@@ -58,3 +86,4 @@ product_rules:
   - "Use the smallest useful intervention first."
   - "Use biomechanical language, not medical diagnosis language."
   - "Keep wording honest with suggests, appears to, likely, and may."
+  - "Renderer payloads should stay canonical across player, coach, reviewer, and clinician surfaces."

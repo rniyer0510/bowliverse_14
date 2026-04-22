@@ -104,3 +104,38 @@ archetypes:
       - "Front-leg and trunk load can stay elevated."
     history_story_template: "Recent clips keep showing a soft-block leakage pattern at landing."
     coaching_priority_template: "Organize the body over the landing leg before coaching a harder brace."
+
+  release_fragility_bowler:
+    id: release_fragility_bowler
+    title: "Release-Fragility Bowler"
+    short_label: "Release fragility"
+    summary: "The action can look serviceable on calmer balls, but the release window gets fragile once effort and late-chain demand rise."
+    dominant_mechanisms:
+      - release_window_instability_under_load
+    secondary_mechanisms:
+      - late_arm_acceleration_due_to_chain_delay
+    expected_strengths:
+      - "The bowler may still find a good release window on easier or calmer balls."
+    expected_costs:
+      - "Timing can become rushed as intent rises."
+      - "Late-chain load can climb quickly when the release has to be rescued."
+    history_story_template: "Recent clips suggest a release-window pattern that gets more fragile when intent rises."
+    coaching_priority_template: "Stabilize the release window under effort before asking the arm or finish to do more."
+
+  late_load_dump_bowler:
+    id: late_load_dump_bowler
+    title: "Late-Load-Dump Bowler"
+    short_label: "Late load dump"
+    summary: "The action can still carry pace, but too much of the finish is being paid for through a concentrated late-chain dump."
+    dominant_mechanisms:
+      - underused_transfer_window_with_late_dump
+      - high_terminal_impulse_with_high_dissipation_burden
+    secondary_mechanisms:
+      - soft_block_with_trunk_carry
+    expected_strengths:
+      - "The bowler may still produce visible output and intent."
+    expected_costs:
+      - "The finish looks harsher and less distributed than we want."
+      - "Late-chain load can stay concentrated through the trunk, side body, and front leg."
+    history_story_template: "Recent clips suggest the finish is still paying for pace in an expensive late-chain way."
+    coaching_priority_template: "Redistribute the finish burden before pushing for more output."

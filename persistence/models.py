@@ -55,7 +55,7 @@ class Account(Base):
 
     __table_args__ = (
         CheckConstraint(
-            "role IN ('player','coach','parent')",
+            "role IN ('player','coach','parent','reviewer','clinician')",
             name="ck_account_role",
         ),
     )

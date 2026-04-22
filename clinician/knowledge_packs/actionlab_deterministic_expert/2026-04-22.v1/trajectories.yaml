@@ -69,3 +69,29 @@ trajectories:
     followup_signals:
       - reduced_dissipation_burden
       - reduced_trunk_drift_after_ffc
+
+  release_window_fragility_under_load:
+    id: release_window_fragility_under_load
+    title: "Release-window fragility under load"
+    summary: "The action can find the release on calmer balls, but the window gets fragile when effort and late-chain demand rise together."
+    performance_consequence: "Timing can look acceptable on some deliveries and rushed on others."
+    repeatability_consequence: "The release window may drift quickly when pace intent rises."
+    load_consequence: "Late rescue can spill extra load into the upper chain and trunk."
+    severity_modifiers:
+      - "Late arm chase makes this trajectory more likely under pressure."
+      - "High dissipation burden strengthens the under-load fragility story."
+    followup_signals:
+      - calmer_release_window_under_load
+
+  late_load_dump_after_underused_transfer:
+    id: late_load_dump_after_underused_transfer
+    title: "Late load dump after underused transfer"
+    summary: "The landing window is visible, but not enough of it is converted into clean transfer before the body has to dump load late."
+    performance_consequence: "The action can still carry pace, but it does so with a less efficient finish."
+    repeatability_consequence: "Small changes in landing or stack timing can quickly disturb the release."
+    load_consequence: "The finish can become harsh and concentrated through the trunk, side body, and front leg."
+    severity_modifiers:
+      - "Higher trunk fold and follow-through asymmetry make the late-load-dump story more believable."
+      - "Transfer underuse becomes more costly when late thrust stays high."
+    followup_signals:
+      - more_balanced_finish_absorption
