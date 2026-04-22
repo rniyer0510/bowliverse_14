@@ -1,0 +1,203 @@
+version: actionlab.knowledge_pack.mechanisms.v1
+
+mechanisms:
+  low_build_forcing_late_rescue:
+    id: low_build_forcing_late_rescue
+    title: "Low build forcing late rescue"
+    summary: "The approach is not building enough usable momentum, so pace has to be generated close to release."
+    family: build_deficit
+    primary_phases:
+      - approach_build
+      - whip_and_release
+    required_symptoms:
+      - weak_approach_build
+      - high_terminal_thrust
+    supporting_symptoms:
+      - arm_chase
+    contradictory_symptoms: []
+    required_evidence:
+      - approach_momentum_score_low
+      - terminal_impulse_score_high
+    supporting_evidence:
+      - transfer_efficiency_score_moderate_or_lower
+      - runup_rhythm_stability_below_clean
+    contradictions:
+      - "Stable high approach momentum with calm release timing argues against this as the primary story."
+    performance_effects:
+      - "Pace has to be created late rather than carried from the run-up."
+      - "Release timing can become harder to repeat under fatigue."
+    load_effects:
+      - "Late rescue can shift more effort into the trunk and arm."
+    trajectory_ids:
+      - pace_created_late_and_expensively
+      - repeatability_loss_under_fatigue
+    prescription_ids:
+      - build_momentum_earlier
+      - quiet_the_end_rush
+    render_story_ids:
+      - late_rescue_release_story
+    history_metrics_to_track:
+      - approach_momentum_score
+      - terminal_impulse_score
+      - release_timing_stability
+
+  gather_disorganization_before_block:
+    id: gather_disorganization_before_block
+    title: "Gather disorganization before block"
+    summary: "The bowler arrives with intent, but the body is not organized well enough before landing to transfer momentum cleanly."
+    family: gather_deficit
+    primary_phases:
+      - gather_and_organize
+      - transfer_and_block
+    required_symptoms:
+      - unstable_gather
+      - front_leg_softening
+    supporting_symptoms:
+      - late_trunk_drift
+    contradictory_symptoms: []
+    required_evidence:
+      - gather_line_stability_low
+      - front_leg_support_score_low
+    supporting_evidence:
+      - pelvis_trunk_alignment_unstable
+      - trunk_drift_after_ffc_elevated
+    contradictions:
+      - "A consistently stacked gather with clean landing organization weakens this mechanism."
+    performance_effects:
+      - "Momentum is present but leaks before a clean transfer point is created."
+      - "Release can feel rushed because the chain arrives late to the landing leg."
+    load_effects:
+      - "The landing leg and trunk may absorb more load when organization is late."
+    trajectory_ids:
+      - pace_leakage_before_block
+      - pace_leakage_at_block
+    prescription_ids:
+      - organize_the_gather_line
+      - stack_over_landing_leg
+    render_story_ids:
+      - gather_to_block_alignment_story
+    history_metrics_to_track:
+      - gather_line_stability
+      - pelvis_trunk_alignment
+      - transfer_efficiency_score
+
+  soft_block_with_trunk_carry:
+    id: soft_block_with_trunk_carry
+    title: "Soft block with trunk carry"
+    summary: "The landing leg does not become a stable base, so the trunk keeps travelling through the block instead of transferring cleanly."
+    family: block_bracing_deficit
+    primary_phases:
+      - transfer_and_block
+      - whip_and_release
+    required_symptoms:
+      - front_leg_softening
+      - late_trunk_drift
+    supporting_symptoms:
+      - asymmetric_dissipation
+    contradictory_symptoms: []
+    required_evidence:
+      - front_leg_support_score_low
+      - trunk_drift_after_ffc_high
+    supporting_evidence:
+      - chest_stack_over_landing_delayed
+      - dissipation_burden_score_elevated
+    contradictions:
+      - "A stable landing base with early chest stacking argues against soft-block carry as the main cause."
+    performance_effects:
+      - "Pace leaks at the block and release timing becomes less stable."
+      - "The bowler may feel like effort keeps travelling forward rather than up and through the ball."
+    load_effects:
+      - "Load can stay concentrated in the front leg and trunk."
+    trajectory_ids:
+      - pace_leakage_at_block
+      - trunk_and_front_leg_load_accumulation
+    prescription_ids:
+      - stack_over_landing_leg
+      - brace_without_reaching
+    render_story_ids:
+      - soft_block_trunk_carry_story
+    history_metrics_to_track:
+      - front_leg_support_score
+      - trunk_drift_after_ffc
+      - dissipation_burden_score
+
+  late_arm_acceleration_due_to_chain_delay:
+    id: late_arm_acceleration_due_to_chain_delay
+    title: "Late arm acceleration due to chain delay"
+    summary: "Earlier chain segments are late enough that the arm has to chase the release window."
+    family: sequencing_deficit
+    primary_phases:
+      - gather_and_organize
+      - whip_and_release
+    required_symptoms:
+      - arm_chase
+      - unstable_gather
+    supporting_symptoms:
+      - late_trunk_drift
+      - high_terminal_thrust
+    contradictory_symptoms: []
+    required_evidence:
+      - release_timing_stability_low
+      - shoulder_rotation_timing_late
+    supporting_evidence:
+      - distal_velocity_rescue_present
+      - gather_line_stability_low
+    contradictions:
+      - "Calm proximal-to-distal timing without a late velocity rescue makes this less likely."
+    performance_effects:
+      - "The release window becomes harder to repeat and can feel rushed."
+      - "The bowler may lose smooth carry into the ball even when intent is high."
+    load_effects:
+      - "The upper chain may absorb more late stress when the arm has to rescue speed."
+    trajectory_ids:
+      - pace_created_late_and_expensively
+      - repeatability_loss_under_fatigue
+    prescription_ids:
+      - sync_trunk_and_arm_delivery
+      - organize_the_gather_line
+    render_story_ids:
+      - delayed_chain_arm_chase_story
+    history_metrics_to_track:
+      - release_timing_stability
+      - shoulder_rotation_timing
+      - distal_velocity_rescue
+
+  high_terminal_impulse_with_high_dissipation_burden:
+    id: high_terminal_impulse_with_high_dissipation_burden
+    title: "High terminal impulse with high dissipation burden"
+    summary: "The bowler can create pace late, but the cost shows up immediately after release through a concentrated deceleration burden."
+    family: dissipation_deficit
+    primary_phases:
+      - whip_and_release
+      - dissipation_and_recovery
+    required_symptoms:
+      - high_terminal_thrust
+      - asymmetric_dissipation
+    supporting_symptoms:
+      - front_leg_softening
+    contradictory_symptoms: []
+    required_evidence:
+      - terminal_impulse_score_high
+      - dissipation_burden_score_high
+    supporting_evidence:
+      - followthrough_asymmetry_present
+      - trunk_fold_severity_elevated
+    contradictions:
+      - "A calm follow-through with low dissipation burden weakens this mechanism even if pace is good."
+    performance_effects:
+      - "Pace can still be produced, but the action is doing it expensively."
+      - "The pattern may hold in short bursts and drift when volume rises."
+    load_effects:
+      - "Late-chain load is likely concentrated into the trunk, side body, and landing leg."
+    trajectory_ids:
+      - pace_created_late_and_expensively
+      - trunk_and_front_leg_load_accumulation
+    prescription_ids:
+      - quiet_the_end_rush
+      - stack_over_landing_leg
+    render_story_ids:
+      - high_dissipation_followthrough_story
+    history_metrics_to_track:
+      - terminal_impulse_score
+      - dissipation_burden_score
+      - followthrough_asymmetry

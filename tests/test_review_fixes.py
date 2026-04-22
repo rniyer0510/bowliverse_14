@@ -147,6 +147,11 @@ class ClinicianYamlValidationTests(unittest.TestCase):
         importlib.reload(bands)
         importlib.reload(interpreter)
 
+    def test_default_knowledge_pack_validates(self):
+        from app.clinician.knowledge_pack import validate_default_knowledge_pack
+
+        validate_default_knowledge_pack()
+
 
 class AnalyzePersistenceFallbackTests(unittest.TestCase):
     def test_persist_analysis_result_returns_warning_after_retries_fail(self):
@@ -225,6 +230,15 @@ class WriterSessionOwnershipTests(unittest.TestCase):
             "elbow": {},
             "action": {},
             "risks": [],
+            "deterministic_expert_v1": {
+                "knowledge_pack_id": "actionlab_deterministic_expert",
+                "knowledge_pack_version": "2026-04-22.v1",
+                "selection": {
+                    "diagnosis_status": "partial_match",
+                    "primary_mechanism_id": "soft_block_with_trunk_carry",
+                },
+                "archetype_v1": {"id": "soft_block_leakage_bowler"},
+            },
         }
 
         run_id = "22222222-2222-2222-2222-222222222222"
@@ -237,6 +251,18 @@ class WriterSessionOwnershipTests(unittest.TestCase):
         )
 
         self.assertEqual(persisted_run_id, run_id)
+        created_run = db.add.call_args_list[0].args[0]
+        self.assertEqual(created_run.knowledge_pack_id, "actionlab_deterministic_expert")
+        self.assertEqual(created_run.knowledge_pack_version, "2026-04-22.v1")
+        self.assertEqual(created_run.deterministic_diagnosis_status, "partial_match")
+        self.assertEqual(
+            created_run.deterministic_primary_mechanism_id,
+            "soft_block_with_trunk_carry",
+        )
+        self.assertEqual(
+            created_run.deterministic_archetype_id,
+            "soft_block_leakage_bowler",
+        )
         db.flush.assert_called()
         db.commit.assert_not_called()
         db.rollback.assert_not_called()

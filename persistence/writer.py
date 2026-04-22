@@ -59,6 +59,48 @@ def _as_int(x: Any) -> Optional[int]:
         return None
 
 
+def _deterministic_summary(result: Dict[str, Any]) -> Dict[str, Optional[str]]:
+    deterministic = (result.get("deterministic_expert_v1") or {})
+    if not isinstance(deterministic, dict):
+        deterministic = {}
+
+    selection = deterministic.get("selection") or {}
+    if not isinstance(selection, dict):
+        selection = {}
+
+    archetype = deterministic.get("archetype_v1") or {}
+    if not isinstance(archetype, dict):
+        archetype = {}
+
+    return {
+        "knowledge_pack_id": (
+            deterministic.get("knowledge_pack_id")
+            if isinstance(deterministic.get("knowledge_pack_id"), str)
+            else None
+        ),
+        "knowledge_pack_version": (
+            deterministic.get("knowledge_pack_version")
+            if isinstance(deterministic.get("knowledge_pack_version"), str)
+            else None
+        ),
+        "diagnosis_status": (
+            selection.get("diagnosis_status")
+            if isinstance(selection.get("diagnosis_status"), str)
+            else None
+        ),
+        "primary_mechanism_id": (
+            selection.get("primary_mechanism_id")
+            if isinstance(selection.get("primary_mechanism_id"), str)
+            else None
+        ),
+        "archetype_id": (
+            archetype.get("id")
+            if isinstance(archetype.get("id"), str)
+            else None
+        ),
+    }
+
+
 # ------------------------------------------------------------
 # Main Persistence
 # ------------------------------------------------------------
@@ -131,10 +173,16 @@ def write_analysis(result: dict, db: Optional[Session] = None, **kwargs) -> str:
         # --------------------------------------------------------
         # Create AnalysisRun
         # --------------------------------------------------------
+        deterministic_summary = _deterministic_summary(result)
         run = AnalysisRun(
             run_id=run_id,
             player_id=player_id,
             schema_version=str(schema_version),
+            knowledge_pack_id=deterministic_summary["knowledge_pack_id"],
+            knowledge_pack_version=deterministic_summary["knowledge_pack_version"],
+            deterministic_diagnosis_status=deterministic_summary["diagnosis_status"],
+            deterministic_primary_mechanism_id=deterministic_summary["primary_mechanism_id"],
+            deterministic_archetype_id=deterministic_summary["archetype_id"],
             handedness=(result.get("input", {}) or {}).get("hand"),
             fps=_as_float((result.get("video", {}) or {}).get("fps")),
             total_frames=_as_int((result.get("video", {}) or {}).get("total_frames")),

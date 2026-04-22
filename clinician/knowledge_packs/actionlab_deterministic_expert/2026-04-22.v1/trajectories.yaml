@@ -1,0 +1,71 @@
+version: actionlab.knowledge_pack.trajectories.v1
+
+trajectories:
+  pace_created_late_and_expensively:
+    id: pace_created_late_and_expensively
+    title: "Pace created late and expensively"
+    summary: "The bowler can still create output, but too much of the work happens near the end of the chain."
+    performance_consequence: "Pace creation becomes more effort-heavy and less efficient."
+    repeatability_consequence: "Release timing can drift when the bowler tires or chases speed."
+    load_consequence: "Late-chain structures absorb more of the delivery burden."
+    severity_modifiers:
+      - "Terminal impulse rises further when approach build drops."
+      - "Fatigue magnifies the cost of late rescue patterns."
+    followup_signals:
+      - lower_late_thrust_dependence
+      - more_stable_release_timing
+
+  pace_leakage_before_block:
+    id: pace_leakage_before_block
+    title: "Pace leakage before block"
+    summary: "Momentum is being lost before the bowler reaches a stable landing base."
+    performance_consequence: "The action looks energetic but does not translate that energy cleanly into release."
+    repeatability_consequence: "The bowler can show variable release shapes ball to ball."
+    load_consequence: "The landing leg and trunk may have to clean up a disorganized transfer."
+    severity_modifiers:
+      - "Wider gather line or poor pelvis organization increases leakage risk."
+      - "Weak event confidence should suppress overconfident block stories."
+    followup_signals:
+      - cleaner_transfer_score
+      - reduced_trunk_drift_after_ffc
+
+  pace_leakage_at_block:
+    id: pace_leakage_at_block
+    title: "Pace leakage at block"
+    summary: "The bowler reaches landing but does not convert that moment into a clean transfer point."
+    performance_consequence: "The action loses some carry into the ball right at landing."
+    repeatability_consequence: "Release timing and line can become less stable."
+    load_consequence: "Front-leg and trunk loading can rise because the block stays soft."
+    severity_modifiers:
+      - "Higher trunk carry after landing raises the likelihood of repeated leakage."
+      - "Soft-block stories should be held back when front-foot confidence is weak."
+    followup_signals:
+      - cleaner_transfer_score
+      - reduced_trunk_drift_after_ffc
+
+  repeatability_loss_under_fatigue:
+    id: repeatability_loss_under_fatigue
+    title: "Repeatability loss under fatigue"
+    summary: "A late or rushed chain tends to become harder to repeat as effort accumulates."
+    performance_consequence: "Control and release consistency can fluctuate across a spell."
+    repeatability_consequence: "The bowler may need extra effort to find the same timing window."
+    load_consequence: "Fatigue can push more stress into the distal chain."
+    severity_modifiers:
+      - "Arm-chase patterns increase fatigue sensitivity."
+      - "Low-build patterns usually make repeatability drift appear sooner."
+    followup_signals:
+      - more_stable_release_timing
+
+  trunk_and_front_leg_load_accumulation:
+    id: trunk_and_front_leg_load_accumulation
+    title: "Trunk and front-leg load accumulation"
+    summary: "Late drift and soft blocking tend to leave the front leg and trunk carrying more residual load over time."
+    performance_consequence: "The action may still produce pace, but it does so with a more fragile base."
+    repeatability_consequence: "Small landing or trunk changes can quickly alter the release window."
+    load_consequence: "The front leg, trunk, and side body may absorb more deceleration than we want."
+    severity_modifiers:
+      - "High dissipation burden and strong follow-through asymmetry reinforce this trajectory."
+      - "Persistent front-leg softening makes the accumulation story more believable."
+    followup_signals:
+      - reduced_dissipation_burden
+      - reduced_trunk_drift_after_ffc

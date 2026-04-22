@@ -1,0 +1,39 @@
+version: actionlab.knowledge_pack.globals.v1
+
+phase_order:
+  - approach_build
+  - gather_and_organize
+  - transfer_and_block
+  - whip_and_release
+  - dissipation_and_recovery
+
+match_thresholds:
+  confident_match_min: 0.75
+  partial_match_min: 0.55
+  weak_match_min: 0.35
+  ambiguous_match_delta_max: 0.08
+
+history_window_defaults:
+  quick_check_runs: 3
+  reassessment_runs: 8
+  trend_window_runs: 12
+
+evidence_bands:
+  strong: { min: 0.75 }
+  supporting: { min: 0.55 }
+  weak: { min: 0.35 }
+
+internal_metrics:
+  - runup_build_score
+  - delivery_stride_transfer_score
+  - front_leg_transfer_score
+  - late_thrust_score
+  - arm_chase_score
+  - dissipation_burden_score
+  - pace_leakage_score
+
+derived_indices:
+  - pace_translation_efficiency
+  - distributed_load_index
+  - late_chain_dependence_index
+  - terminal_violence_index

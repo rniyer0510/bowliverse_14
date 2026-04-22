@@ -1,0 +1,152 @@
+version: actionlab.knowledge_pack.prescriptions.v1
+
+prescriptions:
+  build_momentum_earlier:
+    id: build_momentum_earlier
+    title: "Build momentum earlier"
+    goal: "Bring more usable momentum into the crease so pace does not have to be rescued at the end."
+    primary_cue: "Let the last few strides arrive with intent before release rather than trying to create the hit right at the end."
+    why_this_first: "A better build gives the rest of the chain a calmer job before we coach finer release details."
+    avoid_for_now:
+      - "Do not cue the bowler to simply bowl harder."
+      - "Do not add a bracing cue before the run-up and gather are cleaner."
+    expected_change:
+      - "Approach momentum rises without a matching jump in terminal rush."
+      - "The release looks less rescued and more carried."
+    coach_check: "On the next few balls, check whether the final strides arrive with intent before the arm speeds up."
+    reassess_after: "Review after the next 3 to 5 deliveries and again after the next session."
+    works_best_when:
+      - "Weak approach build and high terminal thrust travel together."
+      - "The bowler looks calm enough to accept a rhythm cue."
+    contraindicated_when:
+      - "The capture does not show the full run-up clearly."
+      - "Approach build already looks strong and the main leak is at block."
+    followup_metric_targets:
+      - "approach_momentum_score up"
+      - "terminal_impulse_score down"
+      - "release_timing_stability up"
+
+  organize_the_gather_line:
+    id: organize_the_gather_line
+    title: "Organize the gather line"
+    goal: "Arrive at back-foot and landing phases in a cleaner line so momentum can be transferred instead of cleaned up late."
+    primary_cue: "Keep the pelvis and chest arriving on the same line into the crease before trying to add more effort."
+    why_this_first: "A cleaner gather often removes multiple downstream compensations at once."
+    avoid_for_now:
+      - "Do not overload the bowler with separate hips, shoulders, and feet cues on the same ball."
+      - "Do not chase arm-speed fixes before the gather line is calmer."
+    expected_change:
+      - "Landing looks less rushed."
+      - "Transfer into the front foot looks more organized."
+    coach_check: "Watch whether the body arrives to landing in a calmer line over the next few balls."
+    reassess_after: "Review over the next 3 deliveries, then again after 1 to 2 sessions."
+    works_best_when:
+      - "Unstable gather is visible before the main landing leak."
+      - "The bowler is drifting sideways into the crease."
+    contraindicated_when:
+      - "Back-foot and landing views are too weak to judge line."
+      - "The main issue is isolated post-release dissipation without a gather problem."
+    followup_metric_targets:
+      - "gather_line_stability up"
+      - "pelvis_trunk_alignment up"
+      - "transfer_efficiency_score up"
+
+  stack_over_landing_leg:
+    id: stack_over_landing_leg
+    title: "Stack over the landing leg sooner"
+    goal: "Let the chest and pelvis arrive more stacked over the landing base before release."
+    primary_cue: "Feel the chest arrive over the front leg sooner instead of letting it keep travelling past the landing base."
+    why_this_first: "This is a smaller and safer first cue than telling the bowler to brace harder."
+    avoid_for_now:
+      - "Do not cue brace harder before the body is stacked."
+      - "Do not ask for a longer stride while the landing base is already soft."
+    expected_change:
+      - "Trunk drift after front-foot contact reduces."
+      - "The front leg looks more supportive without forcing stiffness."
+    coach_check: "Check whether the chest stops travelling so far past landing on the next few deliveries."
+    reassess_after: "Review on the next 3 balls and again after 1 session."
+    works_best_when:
+      - "Front-leg softening and late trunk drift are travelling together."
+      - "Landing confidence is strong enough to trust a transfer story."
+    contraindicated_when:
+      - "Front-foot contact is poorly detected or visually unclear."
+      - "The bowler is already stacked well and the main issue is approach build."
+    followup_metric_targets:
+      - "trunk_drift_after_ffc down"
+      - "front_leg_support_score up"
+      - "transfer_efficiency_score up"
+
+  brace_without_reaching:
+    id: brace_without_reaching
+    title: "Brace without reaching"
+    goal: "Create a firmer transfer point without forcing an overstride or a stiff, reaching landing."
+    primary_cue: "Let the front leg support the action under the body instead of reaching too far out for the block."
+    why_this_first: "It targets the transfer point while protecting against the common mistake of overreaching for stiffness."
+    avoid_for_now:
+      - "Do not ask the bowler to lock the knee."
+      - "Do not pair this with a bigger stride cue on the same session."
+    expected_change:
+      - "The landing leg supports more cleanly."
+      - "The action carries through without the chest spilling so far forward."
+    coach_check: "Check whether landing support improves without the stride suddenly getting longer."
+    reassess_after: "Review within the same session and again after the next spell."
+    works_best_when:
+      - "Soft-block carry is the main story."
+      - "The bowler can feel the landing base but is not overstriding."
+    contraindicated_when:
+      - "A gather-line problem is still dominating the landing picture."
+      - "The clip suggests the bowler is already reaching for the block."
+    followup_metric_targets:
+      - "front_leg_support_score up"
+      - "trunk_drift_after_ffc down"
+      - "dissipation_burden_score down"
+
+  sync_trunk_and_arm_delivery:
+    id: sync_trunk_and_arm_delivery
+    title: "Sync trunk and arm delivery"
+    goal: "Reduce the feeling that the arm has to chase the release window on its own."
+    primary_cue: "Let the trunk set the release earlier so the arm can arrive on time instead of rescuing the ball."
+    why_this_first: "It treats the sequencing problem directly without turning the fix into an arm-only instruction."
+    avoid_for_now:
+      - "Do not cue the arm to whip faster by itself."
+      - "Do not layer this on top of a brand-new run-up cue in the same first rep."
+    expected_change:
+      - "Release timing looks calmer."
+      - "The arm no longer needs such a visible late rescue."
+    coach_check: "Watch whether the arm looks less rushed relative to trunk rotation over the next few balls."
+    reassess_after: "Review after the next 3 deliveries and again after 1 session."
+    works_best_when:
+      - "Arm chase is persistent and the gather is at least readable."
+      - "The bowler can repeat the same intent level across a short set."
+    contraindicated_when:
+      - "The main issue is unclear event timing from a weak capture."
+      - "Approach build is so low that trunk-arm sync cannot be judged fairly yet."
+    followup_metric_targets:
+      - "release_timing_stability up"
+      - "shoulder_rotation_timing calmer"
+      - "distal_velocity_rescue down"
+
+  quiet_the_end_rush:
+    id: quiet_the_end_rush
+    title: "Quiet the end rush"
+    goal: "Reduce how much the action relies on a violent final push into release."
+    primary_cue: "Keep the body carrying pace through the chain so the finish does not have to do all the work."
+    why_this_first: "It is the smallest useful intervention when pace is being produced late but expensively."
+    avoid_for_now:
+      - "Do not ask the bowler to slow down artificially."
+      - "Do not remove intent; redistribute it earlier."
+    expected_change:
+      - "Terminal impulse softens slightly while pace carry stays connected."
+      - "Follow-through looks less abrupt and more balanced."
+    coach_check: "Check whether the finish looks less violent without losing overall carry into the ball."
+    reassess_after: "Review after one short set and again after the next session."
+    works_best_when:
+      - "Terminal thrust and dissipation burden are both elevated."
+      - "The bowler already shows enough intent and does not need more aggression."
+    contraindicated_when:
+      - "The clip quality is too weak to trust the dissipation story."
+      - "The main issue is only low build with no visible end-rush burden."
+    followup_metric_targets:
+      - "terminal_impulse_score down"
+      - "dissipation_burden_score down"
+      - "followthrough_asymmetry down"

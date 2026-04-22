@@ -5,7 +5,7 @@ from datetime import datetime
 import os
 import time
 import uuid
-from typing import Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from app.common.logger import get_logger
 from app.common.auth import get_current_account
@@ -43,13 +43,20 @@ from app.interpretation.interpret_risks import interpret_risks
 from app.workers.efficiency.basic_coaching import analyze_basics
 
 # Clinician
+from app.clinician.deterministic_expert import DeterministicExpertSystem
 from app.clinician.loader import validate_known_yaml_files
+from app.clinician.knowledge_pack import validate_default_knowledge_pack
 from app.clinician.interpreter import ClinicianInterpreter
 
 # Persistence
 from app.persistence.writer import write_analysis
 from app.persistence.session import SessionLocal
-from app.persistence.models import Player, AccountPlayerLink
+from app.persistence.models import (
+    Player,
+    AccountPlayerLink,
+    AnalysisRun,
+    AnalysisResultRaw,
+)
 
 # Routers
 from app.persistence.read_api import router as persistence_read_router
@@ -77,6 +84,7 @@ if AUTO_CREATE_SCHEMA:
     Base.metadata.create_all(bind=engine)
 logger = get_logger(__name__)
 clinician_engine: Optional[ClinicianInterpreter] = None
+deterministic_expert_engine: Optional[DeterministicExpertSystem] = None
 RENDERS_DIR = RENDER_DIR
 
 WALKTHROUGH_PAUSE_SECONDS = 3.0
@@ -85,9 +93,11 @@ WALKTHROUGH_END_SUMMARY_SECONDS = 2.5
 
 @app.on_event("startup")
 def _startup_housekeeping() -> None:
-    global clinician_engine
+    global clinician_engine, deterministic_expert_engine
     validate_known_yaml_files()
+    validate_default_knowledge_pack()
     clinician_engine = ClinicianInterpreter()
+    deterministic_expert_engine = DeterministicExpertSystem()
     render_cleanup = cleanup_old_renders(
         RENDER_DIR,
         retention_days=render_retention_days(),
@@ -262,8 +272,49 @@ def _get_clinician_engine() -> ClinicianInterpreter:
     global clinician_engine
     if clinician_engine is None:
         validate_known_yaml_files()
+        validate_default_knowledge_pack()
         clinician_engine = ClinicianInterpreter()
     return clinician_engine
+
+
+def _get_deterministic_expert_engine() -> DeterministicExpertSystem:
+    global deterministic_expert_engine
+    if deterministic_expert_engine is None:
+        validate_default_knowledge_pack()
+        deterministic_expert_engine = DeterministicExpertSystem()
+    return deterministic_expert_engine
+
+
+def _load_recent_expert_history(
+    *,
+    db,
+    player_id: str,
+    limit: int,
+) -> List[Dict[str, Any]]:
+    if limit <= 0:
+        return []
+
+    rows = (
+        db.query(AnalysisRun, AnalysisResultRaw)
+        .join(AnalysisResultRaw, AnalysisResultRaw.run_id == AnalysisRun.run_id)
+        .filter(AnalysisRun.player_id == player_id)
+        .order_by(AnalysisRun.created_at.desc())
+        .limit(limit)
+        .all()
+    )
+    history: List[Dict[str, Any]] = []
+    for run_row, raw_row in rows:
+        result_json = getattr(raw_row, "result_json", None)
+        if not isinstance(result_json, dict):
+            continue
+        history.append(
+            {
+                "run_id": str(run_row.run_id),
+                "created_at": run_row.created_at,
+                "result_json": result_json,
+            }
+        )
+    return history
 
 
 def _reject_with_code(
@@ -600,6 +651,7 @@ def analyze(
     # Enforce Player Ownership
     # ------------------------------------------------------------
     db = SessionLocal()
+    prior_results: List[Dict[str, Any]] = []
     try:
         # Step 1: Check link (ownership)
         link = (
@@ -664,6 +716,12 @@ def analyze(
                     },
                 )
             effective_season = season
+
+        prior_results = _load_recent_expert_history(
+            db=db,
+            player_id=player_id,
+            limit=_get_deterministic_expert_engine().history_window_runs,
+        )
 
     finally:
         db.close()
@@ -861,6 +919,16 @@ def analyze(
             interpretation=interpretation,
             action=action,
         )
+        deterministic_expert = _get_deterministic_expert_engine().build(
+            events=events,
+            action=action,
+            risks=risks,
+            basics=basics,
+            interpretation=interpretation,
+            estimated_release_speed=estimated_release_speed,
+            prior_results=prior_results,
+            account_role=getattr(current_account, "role", None),
+        )
 
         # ------------------------------------------------------------
         # Build Response
@@ -886,6 +954,11 @@ def analyze(
             "basics": basics,
             "interpretation": interpretation,
             "clinician": clinician,
+            "deterministic_expert_v1": deterministic_expert,
+            "kinetic_chain_v1": deterministic_expert.get("kinetic_chain_v1"),
+            "mechanism_explanation_v1": deterministic_expert.get("mechanism_explanation_v1"),
+            "prescription_plan_v1": deterministic_expert.get("prescription_plan_v1"),
+            "history_plan_v1": deterministic_expert.get("history_plan_v1"),
         }
         result["visual_walkthrough"] = _build_walkthrough_render(
             run_id=run_id,

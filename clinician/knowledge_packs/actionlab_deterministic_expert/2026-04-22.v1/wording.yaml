@@ -1,0 +1,60 @@
+version: actionlab.knowledge_pack.wording.v1
+
+hedges:
+  observed: "This clip appears to show"
+  primary_mechanism: "This pattern most likely suggests"
+  performance: "Performance-wise, it appears to"
+  load: "From a load point of view, this pattern may"
+
+unknown_path:
+  primary_mechanism: "No confident deterministic mechanism match yet"
+  performance_impact: "ActionLab is holding back a stronger root-cause story because the current symptom bundle is not clear enough yet."
+  load_impact: "A stronger load story needs a cleaner or more complete clip before we attach it to this run."
+  coach_check: "Capture another clear clip before making a bigger mechanical change from this pathway."
+
+surfaces:
+  player:
+    primary_mechanism_prefix: "This clip most likely suggests"
+    performance_prefix: "Performance-wise, it appears to"
+    load_prefix: "From a load point of view, this pattern may"
+  coach:
+    primary_mechanism_prefix: "Current clip most likely reflects"
+    performance_prefix: "Performance implication:"
+    load_prefix: "Load implication:"
+
+unknown_path_surfaces:
+  player:
+    primary_mechanism: "No confident deterministic mechanism match yet"
+    performance_impact: "ActionLab is holding back a stronger root-cause story because the current symptom bundle is not clear enough yet."
+    load_impact: "A stronger load story needs a cleaner or more complete clip before we attach it to this run."
+    coach_check: "Capture another clear clip before making a bigger mechanical change from this pathway."
+  coach:
+    primary_mechanism: "Current clip does not clear the deterministic mechanism threshold yet"
+    performance_impact: "The current evidence is not strong enough to attach a firmer causal performance story."
+    load_impact: "The current evidence is not strong enough to attach a firmer load concentration story."
+    coach_check: "Re-capture a cleaner clip or a short set before coaching a stronger causal change from this pathway."
+
+status_leads:
+  confident_match:
+    player: "This clip is one of the clearer deterministic matches."
+    coach: "Current clip is clearing the stronger deterministic threshold."
+  partial_match:
+    player: "This clip has a usable root-cause story, but ActionLab is still keeping some caution."
+    coach: "Current clip supports a usable primary mechanism, but the evidence is not fully clean."
+  weak_match:
+    player: "There is an early signal here, but it is still a softer match."
+    coach: "Current clip is pointing toward a weak deterministic match only."
+  ambiguous_match:
+    player: "Two nearby root-cause stories are still close together on this clip."
+    coach: "Current clip is still split between two nearby deterministic mechanisms."
+  no_match:
+    player: "This clip does not give ActionLab a strong enough root-cause match yet."
+    coach: "Current clip is staying below the deterministic match threshold."
+
+product_rules:
+  - "Mechanism before remedy."
+  - "Performance and load are sibling stories."
+  - "Primary cause first."
+  - "Use the smallest useful intervention first."
+  - "Use biomechanical language, not medical diagnosis language."
+  - "Keep wording honest with suggests, appears to, likely, and may."

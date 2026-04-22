@@ -294,6 +294,90 @@ def _extract_visual_walkthrough(result_json: Optional[Dict[str, Any]]) -> Option
     return normalized
 
 
+def _extract_kinetic_chain_summary(result_json: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    if not isinstance(result_json, dict):
+        return None
+    kinetic_chain = result_json.get("kinetic_chain_v1")
+    explanation = result_json.get("mechanism_explanation_v1")
+    prescription_plan = result_json.get("prescription_plan_v1")
+    if not isinstance(kinetic_chain, dict):
+        return None
+
+    prescription_title = None
+    if isinstance(prescription_plan, dict):
+        prescriptions = prescription_plan.get("prescriptions") or []
+        if prescriptions and isinstance(prescriptions[0], dict):
+            prescription_title = prescriptions[0].get("title")
+
+    def phase_summary(key: str) -> Optional[Dict[str, Any]]:
+        raw = kinetic_chain.get(key) or {}
+        score = raw.get("score")
+        return {
+            "score": round(float(score), 3),
+            "label": raw.get("label"),
+        } if isinstance(score, (int, float)) else None
+
+    return {
+        "diagnosis_status": kinetic_chain.get("diagnosis_status"),
+        "confidence": kinetic_chain.get("confidence"),
+        "archetype": (kinetic_chain.get("archetype") or {}).get("short_label")
+        if isinstance(kinetic_chain.get("archetype"), dict)
+        else None,
+        "primary_mechanism": (explanation or {}).get("primary_mechanism") if isinstance(explanation, dict) else None,
+        "first_intervention": (explanation or {}).get("first_intervention") if isinstance(explanation, dict) else None,
+        "primary_prescription_title": prescription_title,
+        "approach_build": phase_summary("approach_build"),
+        "transfer": phase_summary("transfer"),
+        "block": phase_summary("block"),
+        "dissipation": phase_summary("dissipation"),
+        "pace_translation": {
+            "approach_momentum": ((kinetic_chain.get("pace_translation") or {}).get("approach_momentum")),
+            "transfer_efficiency": ((kinetic_chain.get("pace_translation") or {}).get("transfer_efficiency")),
+            "terminal_impulse": ((kinetic_chain.get("pace_translation") or {}).get("terminal_impulse")),
+            "leakage_before_block": ((kinetic_chain.get("pace_translation") or {}).get("leakage_before_block")),
+            "leakage_at_block": ((kinetic_chain.get("pace_translation") or {}).get("leakage_at_block")),
+            "late_arm_chase": ((kinetic_chain.get("pace_translation") or {}).get("late_arm_chase")),
+            "dissipation_burden": ((kinetic_chain.get("pace_translation") or {}).get("dissipation_burden")),
+        },
+    }
+
+
+def _extract_history_plan_summary(result_json: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    if not isinstance(result_json, dict):
+        return None
+    history_plan = result_json.get("history_plan_v1")
+    if not isinstance(history_plan, dict):
+        return None
+    bindings = history_plan.get("history_bindings") or []
+    binding_trends = history_plan.get("binding_trends") or []
+    followup_checks = history_plan.get("followup_checks") or []
+    render_stories = history_plan.get("render_stories") or []
+    return {
+        "history_story": history_plan.get("history_story"),
+        "coaching_priority": history_plan.get("coaching_priority"),
+        "history_binding_ids": [
+            binding.get("id")
+            for binding in bindings
+            if isinstance(binding, dict) and binding.get("id")
+        ],
+        "binding_trend_statuses": {
+            str(binding.get("id")): binding.get("status")
+            for binding in binding_trends
+            if isinstance(binding, dict) and binding.get("id")
+        },
+        "followup_check_ids": [
+            check.get("id")
+            for check in followup_checks
+            if isinstance(check, dict) and check.get("id")
+        ],
+        "render_story_ids": [
+            story.get("id")
+            for story in render_stories
+            if isinstance(story, dict) and story.get("id")
+        ],
+    }
+
+
 def _analysis_is_baseline_eligible(result_json: Optional[Dict[str, Any]]) -> bool:
     if not isinstance(result_json, dict):
         return False
@@ -1124,11 +1208,18 @@ def list_analysis_runs(
             "season": r.season,
             "age_group": r.age_group,
             "schema_version": r.schema_version,
+            "knowledge_pack_id": r.knowledge_pack_id,
+            "knowledge_pack_version": r.knowledge_pack_version,
+            "deterministic_diagnosis_status": r.deterministic_diagnosis_status,
+            "deterministic_primary_mechanism_id": r.deterministic_primary_mechanism_id,
+            "deterministic_archetype_id": r.deterministic_archetype_id,
             "fps": r.fps,
             "total_frames": r.total_frames,
             "score_summary": score_summary,
             "rating_summary_v2": rating_summary_v2,
             "visual_walkthrough": _extract_visual_walkthrough(raw.result_json if raw else None),
+            "kinetic_chain_summary_v1": _extract_kinetic_chain_summary(raw.result_json if raw else None),
+            "history_plan_summary_v1": _extract_history_plan_summary(raw.result_json if raw else None),
         }
         items.append(item)
         heatmap_entries.append(
@@ -1200,6 +1291,11 @@ def get_analysis_run(
         "age_group": run.age_group,
         "created_at": run.created_at,
         "schema_version": run.schema_version,
+        "knowledge_pack_id": run.knowledge_pack_id,
+        "knowledge_pack_version": run.knowledge_pack_version,
+        "deterministic_diagnosis_status": run.deterministic_diagnosis_status,
+        "deterministic_primary_mechanism_id": run.deterministic_primary_mechanism_id,
+        "deterministic_archetype_id": run.deterministic_archetype_id,
         "coach_notes": run.coach_notes,
         "visual_walkthrough": _extract_visual_walkthrough(raw.result_json if raw else None),
         "result": raw.result_json if raw else None,

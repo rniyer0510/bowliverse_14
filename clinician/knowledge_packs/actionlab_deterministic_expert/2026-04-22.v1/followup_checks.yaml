@@ -1,0 +1,62 @@
+version: actionlab.knowledge_pack.followup_checks.v1
+
+followup_checks:
+  reduced_trunk_drift_after_ffc:
+    id: reduced_trunk_drift_after_ffc
+    title: "Reduced trunk drift after front-foot contact"
+    success_signals:
+      - "Chest stops travelling so far past the landing base."
+      - "Front-leg support looks calmer into release."
+    failure_signals:
+      - "Trunk still carries forward aggressively after landing."
+      - "Landing support remains soft ball to ball."
+    recommended_review_window: "Next 3 deliveries, then next session."
+    history_graph_binding: transfer_block_stability
+
+  cleaner_transfer_score:
+    id: cleaner_transfer_score
+    title: "Cleaner transfer score"
+    success_signals:
+      - "Transfer efficiency improves while terminal rush does not increase."
+      - "Landing and release phases look more connected."
+    failure_signals:
+      - "Transfer score stays flat while late rescue remains visible."
+      - "Momentum still appears to leak before or at block."
+    recommended_review_window: "Next short set, then 1 to 2 sessions."
+    history_graph_binding: transfer_block_stability
+
+  lower_late_thrust_dependence:
+    id: lower_late_thrust_dependence
+    title: "Lower late-thrust dependence"
+    success_signals:
+      - "Terminal impulse eases while approach carry improves."
+      - "The finish looks less like a rescue action."
+    failure_signals:
+      - "The end rush stays just as violent."
+      - "Pace still appears to be created almost entirely near release."
+    recommended_review_window: "Next short set, then next session."
+    history_graph_binding: pace_translation_profile
+
+  more_stable_release_timing:
+    id: more_stable_release_timing
+    title: "More stable release timing"
+    success_signals:
+      - "The arm and trunk arrive in a calmer sequence."
+      - "Release timing varies less ball to ball."
+    failure_signals:
+      - "The arm still looks rushed."
+      - "Timing drift returns quickly when the bowler adds intent."
+    recommended_review_window: "Next 3 to 5 deliveries, then next session."
+    history_graph_binding: pace_translation_profile
+
+  reduced_dissipation_burden:
+    id: reduced_dissipation_burden
+    title: "Reduced dissipation burden"
+    success_signals:
+      - "Follow-through looks less abrupt and more balanced."
+      - "Side-body and trunk load cues soften after release."
+    failure_signals:
+      - "The finish still looks harsh or asymmetric."
+      - "Load concentration remains obvious after release."
+    recommended_review_window: "Next session and next spell."
+    history_graph_binding: dissipation_profile

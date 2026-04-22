@@ -9,6 +9,8 @@ from app.persistence.read_api import (
     _build_rating_heatmap_v2,
     _build_score_heatmap,
     _extract_action_change_traits,
+    _extract_history_plan_summary,
+    _extract_kinetic_chain_summary,
     _extract_rating_summary_v2,
     _extract_score_summary,
     _extract_visual_walkthrough,
@@ -362,6 +364,78 @@ class ScoreHeatmapTests(unittest.TestCase):
             extracted["url"],
             "https://api.actionlabcricket.in/renders/run-1_walkthrough.mp4",
         )
+
+    def test_extract_kinetic_chain_summary_from_result_json(self):
+        result_json = self._result_json()
+        result_json["kinetic_chain_v1"] = {
+            "diagnosis_status": "partial_match",
+            "confidence": 0.71,
+            "archetype": {"short_label": "Soft block leakage"},
+            "approach_build": {"score": 0.48, "label": "moderate"},
+            "transfer": {"score": 0.42, "label": "watch"},
+            "block": {"score": 0.36, "label": "weak"},
+            "dissipation": {"score": 0.64, "label": "high_load_concentration"},
+            "pace_translation": {
+                "approach_momentum": 0.48,
+                "transfer_efficiency": 0.42,
+                "terminal_impulse": 0.63,
+                "leakage_before_block": 0.39,
+                "leakage_at_block": 0.71,
+                "late_arm_chase": 0.34,
+                "dissipation_burden": 0.64,
+            },
+        }
+        result_json["mechanism_explanation_v1"] = {
+            "primary_mechanism": "Soft block with trunk carry",
+            "first_intervention": "Feel the chest arrive over the front leg sooner.",
+        }
+        result_json["prescription_plan_v1"] = {
+            "prescriptions": [
+                {"id": "stack_over_landing_leg", "title": "Stack over the landing leg sooner"},
+            ]
+        }
+
+        summary = _extract_kinetic_chain_summary(result_json)
+
+        self.assertEqual(summary["diagnosis_status"], "partial_match")
+        self.assertEqual(summary["archetype"], "Soft block leakage")
+        self.assertEqual(summary["primary_mechanism"], "Soft block with trunk carry")
+        self.assertEqual(summary["primary_prescription_title"], "Stack over the landing leg sooner")
+        self.assertEqual(summary["block"]["label"], "weak")
+        self.assertEqual(summary["pace_translation"]["leakage_at_block"], 0.71)
+
+    def test_extract_history_plan_summary_from_result_json(self):
+        result_json = self._result_json()
+        result_json["history_plan_v1"] = {
+            "history_story": "Recent clips keep showing a soft-block leakage pattern at landing.",
+            "coaching_priority": "Organize the body over the landing leg before coaching a harder brace.",
+            "history_bindings": [
+                {"id": "transfer_block_stability"},
+            ],
+            "binding_trends": [
+                {"id": "transfer_block_stability", "status": "better"},
+            ],
+            "followup_checks": [
+                {"id": "reduced_trunk_drift_after_ffc"},
+            ],
+            "render_stories": [
+                {"id": "soft_block_trunk_carry_story"},
+            ],
+        }
+
+        summary = _extract_history_plan_summary(result_json)
+
+        self.assertEqual(
+            summary["history_story"],
+            "Recent clips keep showing a soft-block leakage pattern at landing.",
+        )
+        self.assertEqual(summary["history_binding_ids"], ["transfer_block_stability"])
+        self.assertEqual(
+            summary["binding_trend_statuses"],
+            {"transfer_block_stability": "better"},
+        )
+        self.assertEqual(summary["followup_check_ids"], ["reduced_trunk_drift_after_ffc"])
+        self.assertEqual(summary["render_story_ids"], ["soft_block_trunk_carry_story"])
 
     def test_build_player_baseline_state_marks_refresh_candidate_on_sustained_action_shift(self):
         baseline_state = _build_player_baseline_state(

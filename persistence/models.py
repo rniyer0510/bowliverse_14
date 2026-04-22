@@ -178,6 +178,20 @@ class AnalysisRun(Base):
 
     schema_version: Mapped[str] = mapped_column(String, nullable=False)
     device_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    knowledge_pack_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    knowledge_pack_version: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    deterministic_diagnosis_status: Mapped[Optional[str]] = mapped_column(
+        String,
+        nullable=True,
+    )
+    deterministic_primary_mechanism_id: Mapped[Optional[str]] = mapped_column(
+        String,
+        nullable=True,
+    )
+    deterministic_archetype_id: Mapped[Optional[str]] = mapped_column(
+        String,
+        nullable=True,
+    )
 
     handedness: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     fps: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
