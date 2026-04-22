@@ -152,6 +152,13 @@ class ClinicianYamlValidationTests(unittest.TestCase):
 
         validate_default_knowledge_pack()
 
+    def test_pillar_positive_bonus_caps_are_enabled(self):
+        from app.clinician.interpreter import PILLAR_MAX_BONUS
+
+        self.assertGreater(PILLAR_MAX_BONUS["POSTURE"], 0.0)
+        self.assertGreater(PILLAR_MAX_BONUS["POWER"], 0.0)
+        self.assertGreater(PILLAR_MAX_BONUS["PROTECTION"], 0.0)
+
 
 class AnalyzePersistenceFallbackTests(unittest.TestCase):
     def test_persist_analysis_result_returns_warning_after_retries_fail(self):

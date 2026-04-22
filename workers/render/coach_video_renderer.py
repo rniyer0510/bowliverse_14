@@ -654,15 +654,6 @@ def _phase_cut_points(
     cp3 = max(cp2 + 1, min(last, cp3))
     return cp1, cp2, cp3
 
-
-def _event_confidence(events: Optional[Dict[str, Any]], key: str) -> float:
-    event = (events or {}).get(key) or {}
-    value = event.get("confidence")
-    if isinstance(value, (int, float)):
-        return float(value)
-    return 1.0 if _safe_int(event.get("frame")) is not None else 0.0
-
-
 def _event_method(events: Optional[Dict[str, Any]], key: str) -> str:
     event = (events or {}).get(key) or {}
     return str(event.get("method") or "").strip().lower()

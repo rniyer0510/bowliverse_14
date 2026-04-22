@@ -703,11 +703,10 @@ def _compute_elbow_legality(
 def evaluate_elbow_legality(
     elbow_signal: List[Dict[str, Any]],
     events: Dict[str, Any] = None,
+    fps: Optional[float] = None,
     pose_frames: Optional[List[Dict[str, Any]]] = None,
     hand: Optional[str] = None,
-    **kwargs,
 ) -> Dict[str, Any]:
-    fps = kwargs.get("fps")
     if not isinstance(events, dict):
         return {
             "verdict": "UNKNOWN",

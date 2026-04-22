@@ -53,6 +53,9 @@ from app.persistence.learning_cases import (
     build_learning_case_event,
     write_learning_case,
 )
+from app.persistence.notifications import (
+    persist_analysis_completed_notification_best_effort,
+)
 from app.persistence.prescription_followups import sync_prescription_followups_for_run
 from app.persistence.writer import write_analysis
 from app.persistence.session import SessionLocal
@@ -67,6 +70,7 @@ from app.persistence.models import (
 from app.persistence.read_api import router as persistence_read_router
 from app.persistence.write_api import router as persistence_write_router
 from app.persistence.account_api import router as account_router
+from app.persistence.notification_api import router as notification_router
 from app.auth_routes import router as auth_router
 
 
@@ -1060,6 +1064,11 @@ def analyze(
                 request_id=request_id,
                 run_id=run_id,
             )
+            background_tasks.add_task(
+                persist_analysis_completed_notification_best_effort,
+                account_id=str(current_account.account_id),
+                result=result,
+            )
 
         logger.info(
             f"[analyze:success] request_id={request_id} run_id={run_id} "
@@ -1083,3 +1092,4 @@ app.include_router(auth_router)
 app.include_router(persistence_read_router)
 app.include_router(persistence_write_router)
 app.include_router(account_router)
+app.include_router(notification_router)

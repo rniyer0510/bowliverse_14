@@ -896,6 +896,100 @@ class KnowledgePackRollbackAlert(Base):
     )
 
 
+class DeviceRegistration(Base):
+    __tablename__ = "device_registration"
+
+    device_registration_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    account_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("account.account_id"),
+        nullable=False,
+    )
+    platform: Mapped[str] = mapped_column(String, nullable=False)
+    push_provider: Mapped[str] = mapped_column(String, nullable=False)
+    push_token: Mapped[str] = mapped_column(String, nullable=False, unique=True)
+    device_label: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    app_version: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    locale: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    timezone: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    last_seen_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True),
+        default=datetime.utcnow,
+        nullable=False,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True),
+        default=datetime.utcnow,
+        nullable=False,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True),
+        default=datetime.utcnow,
+        nullable=False,
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "platform IN ('ios','android','web','unknown')",
+            name="ck_device_registration_platform",
+        ),
+        CheckConstraint(
+            "push_provider IN ('fcm','apns','unknown')",
+            name="ck_device_registration_push_provider",
+        ),
+    )
+
+
+class NotificationEvent(Base):
+    __tablename__ = "notification_event"
+
+    notification_event_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    account_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("account.account_id"),
+        nullable=False,
+    )
+    event_type: Mapped[str] = mapped_column(String, nullable=False)
+    status: Mapped[str] = mapped_column(String, nullable=False, default="PENDING")
+    active_device_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    payload_json: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    error_detail: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    sent_at: Mapped[Optional[datetime]] = mapped_column(
+        TIMESTAMP(timezone=True),
+        nullable=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True),
+        default=datetime.utcnow,
+        nullable=False,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True),
+        default=datetime.utcnow,
+        nullable=False,
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "event_type IN ('analysis_completed','analysis_failed','profile_country_required')",
+            name="ck_notification_event_type",
+        ),
+        CheckConstraint(
+            "status IN ('PENDING','SKIPPED_NO_DEVICE','SENT','FAILED')",
+            name="ck_notification_event_status",
+        ),
+    )
+
+
 class CoachFlag(Base):
     __tablename__ = "coach_flag"
 

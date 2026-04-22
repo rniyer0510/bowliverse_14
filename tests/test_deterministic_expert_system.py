@@ -89,6 +89,7 @@ class DeterministicExpertSystemTests(unittest.TestCase):
             "soft_block_trunk_carry_story",
         )
         self.assertFalse(payload["prescription_plan_v1"]["suppressed"])
+        self.assertNotIn("evidence_flags", payload["metrics"])
 
     def test_returns_no_match_when_pattern_is_clean(self):
         payload = self.engine.build(

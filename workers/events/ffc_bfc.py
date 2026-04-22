@@ -478,13 +478,22 @@ def _pick_bfc_backward_from_ffc(
         return _clamp(ffc - 1, win_start, ffc), 0.0, "no_ground_confirmed"
 
     chosen_frame = seed_frame
+    best_score = 0
     for idx in range(seed_frame + 1, min(ffc, win_end + 1)):
         back_score = _foot_ground_score(back_ank, back_toe, idx, hold, win_start, win_end, dt)
         if back_score < 2:
             break
         chosen_frame = idx
+        best_score = max(best_score, back_score)
 
-    return int(chosen_frame), 0.0, "simple_grounded_bfc"
+    if best_score <= 0:
+        best_score = _foot_ground_score(back_ank, back_toe, chosen_frame, hold, win_start, win_end, dt)
+
+    support_span = max(1, chosen_frame - seed_frame + 1)
+    confidence = 0.45 + (0.12 * max(0, min(best_score, 3) - 1)) + (0.05 * min(support_span - 1, 3))
+    confidence = float(max(0.0, min(0.85, confidence)))
+
+    return int(chosen_frame), confidence, "simple_grounded_bfc"
 
 
 def _sanitize_bfc_frame(

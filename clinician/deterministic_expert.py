@@ -683,26 +683,6 @@ class DeterministicExpertSystem:
             },
         }
 
-        evidence = {
-            "approach_momentum_score_low": _metric(1.0 - approach_momentum["value"], approach_momentum["confidence"]),
-            "terminal_impulse_score_high": terminal_impulse_score,
-            "transfer_efficiency_score_moderate_or_lower": _metric(1.0 - transfer_efficiency_score["value"], transfer_efficiency_score["confidence"]),
-            "runup_rhythm_stability_below_clean": _metric(1.0 - runup_rhythm_stability["value"], runup_rhythm_stability["confidence"]),
-            "gather_line_stability_low": _metric(1.0 - gather_line_stability["value"], gather_line_stability["confidence"]),
-            "front_leg_support_score_low": _metric(1.0 - front_leg_support_score["value"], front_leg_support_score["confidence"]),
-            "pelvis_trunk_alignment_unstable": _metric(1.0 - pelvis_trunk_alignment["value"], pelvis_trunk_alignment["confidence"]),
-            "trunk_drift_after_ffc_elevated": trunk_drift_after_ffc,
-            "trunk_drift_after_ffc_high": trunk_drift_after_ffc,
-            "chest_stack_over_landing_delayed": _metric(1.0 - chest_stack_over_landing["value"], chest_stack_over_landing["confidence"]),
-            "dissipation_burden_score_elevated": dissipation_burden_score,
-            "dissipation_burden_score_high": dissipation_burden_score,
-            "release_timing_stability_low": _metric(1.0 - release_timing_stability["value"], release_timing_stability["confidence"]),
-            "shoulder_rotation_timing_late": _metric(1.0 - shoulder_rotation_timing["value"], shoulder_rotation_timing["confidence"]),
-            "distal_velocity_rescue_present": distal_velocity_rescue,
-            "followthrough_asymmetry_present": followthrough_asymmetry,
-            "trunk_fold_severity_elevated": trunk_fold_severity,
-        }
-        metrics["evidence_flags"] = evidence
         return metrics
 
     def _build_symptoms(self, metrics: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -764,13 +744,34 @@ class DeterministicExpertSystem:
         symptoms.sort(key=lambda item: item["score"], reverse=True)
         return symptoms
 
+    def _build_evidence_flags(self, metrics: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
+        return {
+            "approach_momentum_score_low": _metric(1.0 - metrics["approach_momentum_score"]["value"], metrics["approach_momentum_score"]["confidence"]),
+            "terminal_impulse_score_high": metrics["terminal_impulse_score"],
+            "transfer_efficiency_score_moderate_or_lower": _metric(1.0 - metrics["transfer_efficiency_score"]["value"], metrics["transfer_efficiency_score"]["confidence"]),
+            "runup_rhythm_stability_below_clean": _metric(1.0 - metrics["runup_rhythm_stability"]["value"], metrics["runup_rhythm_stability"]["confidence"]),
+            "gather_line_stability_low": _metric(1.0 - metrics["gather_line_stability"]["value"], metrics["gather_line_stability"]["confidence"]),
+            "front_leg_support_score_low": _metric(1.0 - metrics["front_leg_support_score"]["value"], metrics["front_leg_support_score"]["confidence"]),
+            "pelvis_trunk_alignment_unstable": _metric(1.0 - metrics["pelvis_trunk_alignment"]["value"], metrics["pelvis_trunk_alignment"]["confidence"]),
+            "trunk_drift_after_ffc_elevated": metrics["trunk_drift_after_ffc"],
+            "trunk_drift_after_ffc_high": metrics["trunk_drift_after_ffc"],
+            "chest_stack_over_landing_delayed": _metric(1.0 - metrics["chest_stack_over_landing"]["value"], metrics["chest_stack_over_landing"]["confidence"]),
+            "dissipation_burden_score_elevated": metrics["dissipation_burden_score"],
+            "dissipation_burden_score_high": metrics["dissipation_burden_score"],
+            "release_timing_stability_low": _metric(1.0 - metrics["release_timing_stability"]["value"], metrics["release_timing_stability"]["confidence"]),
+            "shoulder_rotation_timing_late": _metric(1.0 - metrics["shoulder_rotation_timing"]["value"], metrics["shoulder_rotation_timing"]["confidence"]),
+            "distal_velocity_rescue_present": metrics["distal_velocity_rescue"],
+            "followthrough_asymmetry_present": metrics["followthrough_asymmetry"],
+            "trunk_fold_severity_elevated": metrics["trunk_fold_severity"],
+        }
+
     def _score_mechanisms(
         self,
         symptoms: List[Dict[str, Any]],
         metrics: Dict[str, Any],
     ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
         symptom_lookup = {symptom["id"]: symptom for symptom in symptoms}
-        evidence_lookup = metrics["evidence_flags"]
+        evidence_lookup = self._build_evidence_flags(metrics)
         hypotheses: List[Dict[str, Any]] = []
 
         for mechanism_id, cfg in self._pack["mechanisms"].items():
