@@ -38,7 +38,12 @@ class KnowledgePackLoaderTests(unittest.TestCase):
         self.assertIn("transfer_and_block", pack["coach_judgments"]["break_points"])
         self.assertIn("micro", pack["coach_judgments"]["change_size_bands"])
         self.assertIn("next_3_balls", pack["capture_templates"]["outcome_windows"])
+        self.assertIn(
+            "classification_before_interpretation",
+            pack["architecture_principles"],
+        )
         self.assertIn("glazier_wheat_2014", pack["research_sources"])
+        self.assertIn("agastya_blog_2", pack["research_sources"])
         self.assertIn("evidence_soft_block_ffc", pack["knowledge_evidence"])
         self.assertIn(
             "canonical_front_leg_transfer_support",
@@ -101,8 +106,16 @@ class KnowledgePackLoaderTests(unittest.TestCase):
             "A",
         )
         self.assertEqual(
+            pack["research_sources"]["agastya_blog_2"]["source_type"],
+            "architecture_reference",
+        )
+        self.assertEqual(
             pack["knowledge_evidence"]["evidence_stack_over_landing"]["target_type"],
             "prescription",
+        )
+        self.assertEqual(
+            pack["architecture_principles"]["strict_validation_gate"]["principle_type"],
+            "validation_phase",
         )
         self.assertEqual(
             pack["coach_judgments"]["break_points"]["transfer_and_block"]["title"],
@@ -163,6 +176,7 @@ class KnowledgePackLoaderTests(unittest.TestCase):
                         "history_bindings": "history_bindings.yaml",
                         "coach_judgments": "coach_judgments.yaml",
                         "capture_templates": "capture_templates.yaml",
+                        "architecture_principles": "architecture_principles.yaml",
                         "research_sources": "research_sources.yaml",
                         "knowledge_evidence": "knowledge_evidence.yaml",
                         "reconciliation": "reconciliation.yaml",

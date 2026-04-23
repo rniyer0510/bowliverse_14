@@ -100,6 +100,18 @@ This is where ActionLab can explicitly say:
 - this is the canonical concept we want report/history to trend
 - these are neighboring ideas that need human review rather than automatic merging
 
+### `architecture_principles.yaml`
+
+Explicit backend architecture principles for:
+
+- classification before interpretation
+- strict validation gates
+- human interpretation boundaries
+- momentum-not-fate trajectory framing
+- clear automation stopping points
+
+This section is inspired by the Nadi-architecture references you shared and is meant to keep ActionLab honest as the product scales.
+
 ## Runtime Usage
 
 The deterministic expert now reads contributor descriptions from the knowledge pack rather than hard-coded Python catalogs.
@@ -107,6 +119,12 @@ The deterministic expert now reads contributor descriptions from the knowledge p
 That means future biomechanical additions can increasingly be taught through the pack itself, not only through Python edits.
 
 Break-point titles and summaries also now come from the coach-judgment vocabulary when available.
+
+The pack now also stores architecture principles so that future implementation does not drift away from:
+
+- pattern classes before narrative
+- hard validation before explanation
+- human responsibility after classification and validation
 
 ## Intended Workflow
 

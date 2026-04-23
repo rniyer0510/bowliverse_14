@@ -1,0 +1,138 @@
+version: actionlab.knowledge_pack.architecture_principles.v1
+
+architecture_principles:
+  classification_before_interpretation:
+    id: classification_before_interpretation
+    principle_type: classification_phase
+    title: "Classification before interpretation"
+    summary: "The system should first place the delivery into a small set of candidate action patterns before any rich narrative is generated."
+    why_it_exists: "Pattern classes reduce the search space and stop the app from pretending every delivery is infinitely unique."
+    product_implications:
+      - "Mechanisms, contributors, and archetypes should function as indexed pattern classes."
+      - "History should trend stable IDs, not free-form narrative text."
+      - "The app should narrow to a candidate set before choosing a root-cause story."
+    do_not_break:
+      - "Do not let frontend prose invent a story before the backend has selected a candidate pattern."
+      - "Do not collapse all cases into one generic explanation."
+    source_ids:
+      - agastya_blog_1
+      - agastya_blog_2
+    linked_mechanism_ids:
+      - soft_block_with_trunk_carry
+      - gather_disorganization_before_block
+      - late_arm_acceleration_due_to_chain_delay
+      - release_window_instability_under_load
+    linked_contributor_ids:
+      - front_leg_support_score
+      - shoulder_rotation_timing
+      - pelvis_trunk_alignment
+    linked_prescription_ids:
+      - stack_over_landing_leg
+      - organize_the_gather_line
+
+  strict_validation_gate:
+    id: strict_validation_gate
+    principle_type: validation_phase
+    title: "Strict validation gate"
+    summary: "A candidate story should only survive if the required biomechanical anchors and supporting evidence really match."
+    why_it_exists: "Strict validation protects the product from forced matches, vague explanation drift, and narrative bending."
+    product_implications:
+      - "BFC, FFC, UAH, and Release remain truth anchors."
+      - "NO_MATCH and AMBIGUOUS are product strengths, not product failures."
+      - "A mechanism should be rejected when anchor evidence does not support it."
+    do_not_break:
+      - "Do not improve confidence by shifting to a visually worse frame."
+      - "Do not soften failed evidence into a fake match."
+    source_ids:
+      - agastya_blog_2
+    linked_mechanism_ids:
+      - soft_block_with_trunk_carry
+      - release_window_instability_under_load
+      - underused_transfer_window_with_late_dump
+    linked_contributor_ids:
+      - front_foot_braking_shock
+      - knee_brace_failure
+      - neck_tilt_left_bfc
+      - trunk_drift_after_ffc
+    linked_prescription_ids: []
+
+  human_interpretation_boundary:
+    id: human_interpretation_boundary
+    principle_type: human_phase
+    title: "Human interpretation boundary"
+    summary: "The system may classify and validate, but final meaning, ethical framing, and intervention ownership must remain human."
+    why_it_exists: "A bowling report should support agency, not create fatalism or blind obedience to the software."
+    product_implications:
+      - "The report should explain momentum and likely outcomes, not fixed destiny."
+      - "Prescriptions must be framed as coach-supporting options, not commands."
+      - "The app should make the consequences of a cue explicit so coaches can judge timing and risk."
+    do_not_break:
+      - "Do not present the app as the final authority over the coach or bowler."
+      - "Do not automate away human judgment on sensitive intervention choices."
+    source_ids:
+      - agastya_blog_2
+    linked_mechanism_ids:
+      - soft_block_with_trunk_carry
+      - release_window_instability_under_load
+    linked_contributor_ids:
+      - front_leg_support_score
+      - trunk_drift_after_ffc
+    linked_prescription_ids:
+      - stack_over_landing_leg
+      - stabilize_release_window_under_load
+
+  momentum_not_fate:
+    id: momentum_not_fate
+    principle_type: trajectory_principle
+    title: "Momentum, not fate"
+    summary: "The system should model trajectories and likely consequences, while preserving the idea that the action can change with the right intervention."
+    why_it_exists: "Bowlers and coaches need to know where the current pattern is heading without being trapped by deterministic language."
+    product_implications:
+      - "Near-term, medium-term, and long-term outlooks should describe momentum if unchanged."
+      - "Change reactions should describe what may happen if a cue is adopted."
+      - "Intervention outcomes should be tracked so the model learns what really changes momentum."
+    do_not_break:
+      - "Do not present future outcomes as guaranteed."
+      - "Do not remove room for remedies, practice, and adaptation."
+    source_ids:
+      - agastya_blog_1
+      - agastya_blog_2
+    linked_mechanism_ids:
+      - high_terminal_impulse_with_high_dissipation_burden
+      - release_window_instability_under_load
+      - underused_transfer_window_with_late_dump
+    linked_contributor_ids:
+      - trunk_drift_after_ffc
+      - shoulder_rotation_timing
+      - lateral_trunk_lean
+    linked_prescription_ids:
+      - quiet_the_end_rush
+      - stabilize_release_window_under_load
+      - absorb_through_balanced_finish
+
+  automation_stops_before_coaching_destiny:
+    id: automation_stops_before_coaching_destiny
+    principle_type: automation_boundary
+    title: "Automation stops before coaching destiny"
+    summary: "Classification and validation can be digitized aggressively, but the final coaching decision must remain bounded, reviewable, and accountable."
+    why_it_exists: "This keeps the system technically powerful without letting it become psychologically or ethically unsafe."
+    product_implications:
+      - "Report and History should surface evidence, not irreversible verdicts."
+      - "Knowledge ingestion can be systematic, but intervention recommendations must remain explainable."
+      - "The app should show what it knows, what it suspects, and what still needs human review."
+    do_not_break:
+      - "Do not let automation erase uncertainty."
+      - "Do not hide the boundary between evidence and coaching judgment."
+    source_ids:
+      - agastya_blog_2
+    linked_mechanism_ids:
+      - soft_block_with_trunk_carry
+      - gather_disorganization_before_block
+      - release_window_instability_under_load
+    linked_contributor_ids:
+      - neck_tilt_left_bfc
+      - front_leg_support_score
+      - hip_shoulder_mismatch
+    linked_prescription_ids:
+      - stack_over_landing_leg
+      - organize_the_gather_line

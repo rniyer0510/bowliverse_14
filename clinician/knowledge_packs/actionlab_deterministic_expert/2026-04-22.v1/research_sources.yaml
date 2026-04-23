@@ -170,3 +170,37 @@ research_sources:
       - biomechanics
     status: "candidate"
     notes: "Potentially strong intervention and coach-language source, but should not override peer-reviewed mechanics evidence."
+
+  agastya_blog_1:
+    id: agastya_blog_1
+    source_type: architecture_reference
+    evidence_tier: C
+    title: "Blog 1: The Genius of Agastya Maharishi: Investigating Palm Leaf Prophecies"
+    publisher: "Medium"
+    year: "2026"
+    url: "https://medium.com/the-genius-of-agastya-maharishi/the-genius-of-agastya-maharishi-why-i-spent-a-year-investigating-palm-leaf-prophecies-93b782718d9e"
+    scope: "Architecture reference for pattern classes, indexing, momentum-vs-fate framing, and remedies as trajectory changes."
+    tags:
+      - architecture
+      - pattern_recognition
+      - classification
+      - momentum
+    status: "reviewed"
+    notes: "Use for knowledge-system architecture and remedy framing, not for biomechanics truth."
+
+  agastya_blog_2:
+    id: agastya_blog_2
+    source_type: architecture_reference
+    evidence_tier: C
+    title: "Blog 2: The Architecture of Destiny — How Nadi Readings Actually Work"
+    publisher: "Medium"
+    year: "2026"
+    url: "https://medium.com/the-genius-of-agastya-maharishi/blog-2-the-architecture-of-destiny-how-nadi-readings-actually-work-1b92fb7faf06"
+    scope: "Architecture reference for three-phase design: indexing, strict validation, and human interpretation."
+    tags:
+      - architecture
+      - validation
+      - human_in_loop
+      - automation_boundary
+    status: "reviewed"
+    notes: "Use for backend architecture, validation-gate discipline, and explicit human-interpretation boundaries."

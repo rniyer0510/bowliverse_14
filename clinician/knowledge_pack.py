@@ -29,6 +29,7 @@ _REQUIRED_INDEX_KEYS = (
     "history_bindings",
     "coach_judgments",
     "capture_templates",
+    "architecture_principles",
     "research_sources",
     "knowledge_evidence",
     "reconciliation",
@@ -113,6 +114,10 @@ def load_knowledge_pack(version: Optional[str] = None) -> Dict[str, Any]:
         "capture_templates": _load_yaml_document(
             pack_root / index["capture_templates"],
             "knowledge pack capture templates",
+        ),
+        "architecture_principles": _load_yaml_document(
+            pack_root / index["architecture_principles"],
+            "knowledge pack architecture principles",
         ),
         "research_sources": _load_yaml_document(
             pack_root / index["research_sources"],
@@ -257,6 +262,7 @@ def _validate_knowledge_pack_documents(
     history_bindings_doc = documents["history_bindings"]
     coach_judgments_doc = documents["coach_judgments"]
     capture_templates_doc = documents["capture_templates"]
+    architecture_principles_doc = documents["architecture_principles"]
     research_sources_doc = documents["research_sources"]
     knowledge_evidence_doc = documents["knowledge_evidence"]
     reconciliation_doc = documents["reconciliation"]
@@ -295,6 +301,7 @@ def _validate_knowledge_pack_documents(
         phase_order=globals_cfg["phase_order"],
     )
     capture_templates = _validate_capture_templates(capture_templates_doc)
+    architecture_principles = _validate_architecture_principles(architecture_principles_doc)
     research_sources = _validate_research_sources(research_sources_doc)
     knowledge_evidence = _validate_knowledge_evidence(knowledge_evidence_doc)
     reconciliation = _validate_reconciliation(reconciliation_doc)
@@ -317,6 +324,13 @@ def _validate_knowledge_pack_documents(
         capture_templates,
         coach_judgments=coach_judgments,
         symptom_ids=symptoms.keys(),
+        mechanism_ids=mechanisms.keys(),
+        contributor_ids=contributors.keys(),
+        prescription_ids=prescriptions.keys(),
+    )
+    _validate_architecture_principle_links(
+        architecture_principles,
+        source_ids=research_sources.keys(),
         mechanism_ids=mechanisms.keys(),
         contributor_ids=contributors.keys(),
         prescription_ids=prescriptions.keys(),
@@ -356,6 +370,7 @@ def _validate_knowledge_pack_documents(
         "history_bindings": history_bindings,
         "coach_judgments": coach_judgments,
         "capture_templates": capture_templates,
+        "architecture_principles": architecture_principles,
         "research_sources": research_sources,
         "knowledge_evidence": knowledge_evidence,
         "reconciliation": reconciliation,
@@ -1104,6 +1119,38 @@ def _validate_capture_window_collection(document: Mapping[str, Any]) -> Dict[str
     return windows
 
 
+def _validate_architecture_principles(document: Mapping[str, Any]) -> Dict[str, Dict[str, Any]]:
+    principles = _require_entity_mapping(
+        document,
+        version_key="version",
+        collection_key="architecture_principles",
+        label="knowledge pack architecture principles",
+    )
+    for principle_id, principle in principles.items():
+        label = f"knowledge pack architecture principle {principle_id}"
+        _require_matching_id(principle_id, principle, "knowledge pack architecture principle")
+        principle_type = _require_string(principle, "principle_type", label)
+        if principle_type not in {
+            "classification_phase",
+            "validation_phase",
+            "human_phase",
+            "automation_boundary",
+            "trajectory_principle",
+            "knowledge_governance",
+        }:
+            raise ValueError(f"{label} principle_type must be a supported architecture type")
+        _require_string(principle, "title", label)
+        _require_string(principle, "summary", label)
+        _require_string(principle, "why_it_exists", label)
+        _require_str_list(principle, "product_implications", label)
+        _require_str_list(principle, "do_not_break", label)
+        _require_str_list(principle, "source_ids", label)
+        _require_str_list(principle, "linked_mechanism_ids", label)
+        _require_str_list(principle, "linked_contributor_ids", label)
+        _require_str_list(principle, "linked_prescription_ids", label)
+    return principles
+
+
 def _validate_research_sources(document: Mapping[str, Any]) -> Dict[str, Dict[str, Any]]:
     sources = _require_entity_mapping(
         document,
@@ -1121,6 +1168,7 @@ def _validate_research_sources(document: Mapping[str, Any]) -> Dict[str, Dict[st
             "university_research",
             "expert_practitioner",
             "internal_review",
+            "architecture_reference",
         }:
             raise ValueError(f"{label} source_type must be a supported source type")
         evidence_tier = _require_string(source, "evidence_tier", label)
@@ -1513,6 +1561,41 @@ def _validate_capture_template_links(
                 option_sets[option_group],
                 f"knowledge pack capture template field {field_id} options",
             )
+
+
+def _validate_architecture_principle_links(
+    architecture_principles: Mapping[str, Mapping[str, Any]],
+    *,
+    source_ids: Iterable[str],
+    mechanism_ids: Iterable[str],
+    contributor_ids: Iterable[str],
+    prescription_ids: Iterable[str],
+) -> None:
+    allowed_sources = set(source_ids)
+    allowed_mechanisms = set(mechanism_ids)
+    allowed_contributors = set(contributor_ids)
+    allowed_prescriptions = set(prescription_ids)
+    for principle_id, principle in architecture_principles.items():
+        _validate_known_ids(
+            principle["source_ids"],
+            allowed_sources,
+            f"knowledge pack architecture principle {principle_id} source_ids",
+        )
+        _validate_known_ids(
+            principle["linked_mechanism_ids"],
+            allowed_mechanisms,
+            f"knowledge pack architecture principle {principle_id} linked_mechanism_ids",
+        )
+        _validate_known_ids(
+            principle["linked_contributor_ids"],
+            allowed_contributors,
+            f"knowledge pack architecture principle {principle_id} linked_contributor_ids",
+        )
+        _validate_known_ids(
+            principle["linked_prescription_ids"],
+            allowed_prescriptions,
+            f"knowledge pack architecture principle {principle_id} linked_prescription_ids",
+        )
 
 
 def _validate_knowledge_evidence_links(
