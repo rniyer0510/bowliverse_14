@@ -22,6 +22,8 @@ class KnowledgePackLoaderTests(unittest.TestCase):
         self.assertIn("weak_approach_build", pack["symptoms"])
         self.assertIn("soft_block_with_trunk_carry", pack["mechanisms"])
         self.assertIn("release_window_instability_under_load", pack["mechanisms"])
+        self.assertIn("neck_tilt_left_bfc", pack["contributors"])
+        self.assertIn("front_leg_support_score", pack["contributors"])
         self.assertIn("pace_created_late_and_expensively", pack["trajectories"])
         self.assertIn("release_window_fragility_under_load", pack["trajectories"])
         self.assertIn("stack_over_landing_leg", pack["prescriptions"])
@@ -32,6 +34,18 @@ class KnowledgePackLoaderTests(unittest.TestCase):
         self.assertIn("release_window_under_load_story", pack["render_stories"])
         self.assertIn("transfer_block_stability", pack["history_bindings"])
         self.assertIn("release_window_control", pack["history_bindings"])
+        self.assertIn("workable_but_leaking", pack["coach_judgments"]["chain_statuses"])
+        self.assertIn("transfer_and_block", pack["coach_judgments"]["break_points"])
+        self.assertIn("micro", pack["coach_judgments"]["change_size_bands"])
+        self.assertIn("next_3_balls", pack["capture_templates"]["outcome_windows"])
+        self.assertIn(
+            "primary_mechanism_id",
+            pack["capture_templates"]["coach_review_questionnaire"],
+        )
+        self.assertIn(
+            "prescription_id",
+            pack["capture_templates"]["intervention_outcome_fields"],
+        )
         self.assertIn("soft_block_leakage_bowler", pack["archetypes"])
         self.assertIn("release_fragility_bowler", pack["archetypes"])
         self.assertIn("hedges", pack["wording"])
@@ -71,6 +85,14 @@ class KnowledgePackLoaderTests(unittest.TestCase):
         self.assertIn(
             "reduced_trunk_drift_after_ffc",
             pack["trajectories"]["pace_leakage_at_block"]["followup_signals"],
+        )
+        self.assertEqual(
+            pack["contributors"]["neck_tilt_left_bfc"]["phase"],
+            "BFC",
+        )
+        self.assertEqual(
+            pack["coach_judgments"]["break_points"]["transfer_and_block"]["title"],
+            "Transfer and block",
         )
         self.assertEqual(
             pack["followup_checks"]["reduced_trunk_drift_after_ffc"]["history_graph_binding"],
@@ -118,12 +140,15 @@ class KnowledgePackLoaderTests(unittest.TestCase):
                         "mechanism_families": "mechanism_families.yaml",
                         "symptoms": "symptoms.yaml",
                         "mechanisms": "mechanisms.yaml",
+                        "contributors": "contributors.yaml",
                         "archetypes": "archetypes.yaml",
                         "trajectories": "trajectories.yaml",
                         "prescriptions": "prescriptions.yaml",
                         "followup_checks": "followup_checks.yaml",
                         "render_stories": "render_stories.yaml",
                         "history_bindings": "history_bindings.yaml",
+                        "coach_judgments": "coach_judgments.yaml",
+                        "capture_templates": "capture_templates.yaml",
                         "wording": "wording.yaml",
                     },
                 },

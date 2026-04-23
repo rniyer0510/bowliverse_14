@@ -20,12 +20,15 @@ _REQUIRED_INDEX_KEYS = (
     "mechanism_families",
     "symptoms",
     "mechanisms",
+    "contributors",
     "archetypes",
     "trajectories",
     "prescriptions",
     "followup_checks",
     "render_stories",
     "history_bindings",
+    "coach_judgments",
+    "capture_templates",
     "wording",
 )
 
@@ -72,6 +75,10 @@ def load_knowledge_pack(version: Optional[str] = None) -> Dict[str, Any]:
             pack_root / index["mechanisms"],
             "knowledge pack mechanisms",
         ),
+        "contributors": _load_yaml_document(
+            pack_root / index["contributors"],
+            "knowledge pack contributors",
+        ),
         "archetypes": _load_yaml_document(
             pack_root / index["archetypes"],
             "knowledge pack archetypes",
@@ -95,6 +102,14 @@ def load_knowledge_pack(version: Optional[str] = None) -> Dict[str, Any]:
         "history_bindings": _load_yaml_document(
             pack_root / index["history_bindings"],
             "knowledge pack history bindings",
+        ),
+        "coach_judgments": _load_yaml_document(
+            pack_root / index["coach_judgments"],
+            "knowledge pack coach judgments",
+        ),
+        "capture_templates": _load_yaml_document(
+            pack_root / index["capture_templates"],
+            "knowledge pack capture templates",
         ),
         "wording": _load_yaml_document(
             pack_root / index["wording"],
@@ -218,17 +233,24 @@ def _validate_knowledge_pack_documents(
     mechanism_families_doc = documents["mechanism_families"]
     symptoms_doc = documents["symptoms"]
     mechanisms_doc = documents["mechanisms"]
+    contributors_doc = documents["contributors"]
     archetypes_doc = documents["archetypes"]
     trajectories_doc = documents["trajectories"]
     prescriptions_doc = documents["prescriptions"]
     followup_checks_doc = documents["followup_checks"]
     render_stories_doc = documents["render_stories"]
     history_bindings_doc = documents["history_bindings"]
+    coach_judgments_doc = documents["coach_judgments"]
+    capture_templates_doc = documents["capture_templates"]
     wording_doc = documents["wording"]
 
     globals_cfg = _validate_globals(globals_doc)
     mechanism_families = _validate_mechanism_families(mechanism_families_doc)
     symptoms = _validate_symptoms(symptoms_doc, globals_cfg["phase_order"])
+    contributors = _validate_contributors(
+        contributors_doc,
+        phase_order=globals_cfg["phase_order"],
+    )
     followup_checks = _validate_followup_checks(followup_checks_doc)
     trajectories = _validate_trajectories(trajectories_doc, followup_checks.keys())
     prescriptions = _validate_prescriptions(prescriptions_doc)
@@ -250,9 +272,19 @@ def _validate_knowledge_pack_documents(
         archetypes_doc,
         mechanism_ids=mechanisms.keys(),
     )
+    coach_judgments = _validate_coach_judgments(
+        coach_judgments_doc,
+        phase_order=globals_cfg["phase_order"],
+    )
+    capture_templates = _validate_capture_templates(capture_templates_doc)
     wording = _validate_wording(wording_doc)
 
     _validate_symptom_mechanism_links(symptoms, mechanisms.keys())
+    _validate_contributor_links(
+        contributors,
+        symptom_ids=symptoms.keys(),
+        mechanism_ids=mechanisms.keys(),
+    )
     _validate_render_story_links(render_stories, mechanisms.keys())
     _validate_history_binding_links(
         history_bindings,
@@ -260,6 +292,14 @@ def _validate_knowledge_pack_documents(
         trajectories.keys(),
     )
     _validate_followup_history_binding_links(followup_checks, history_bindings.keys())
+    _validate_capture_template_links(
+        capture_templates,
+        coach_judgments=coach_judgments,
+        symptom_ids=symptoms.keys(),
+        mechanism_ids=mechanisms.keys(),
+        contributor_ids=contributors.keys(),
+        prescription_ids=prescriptions.keys(),
+    )
 
     return {
         "manifest": copy.deepcopy(dict(manifest)),
@@ -269,12 +309,15 @@ def _validate_knowledge_pack_documents(
         "mechanism_families": mechanism_families,
         "symptoms": symptoms,
         "mechanisms": mechanisms,
+        "contributors": contributors,
         "archetypes": archetypes,
         "trajectories": trajectories,
         "prescriptions": prescriptions,
         "followup_checks": followup_checks,
         "render_stories": render_stories,
         "history_bindings": history_bindings,
+        "coach_judgments": coach_judgments,
+        "capture_templates": capture_templates,
         "wording": wording,
     }
 
@@ -651,6 +694,60 @@ def _validate_archetypes(
     return archetypes
 
 
+def _validate_contributors(
+    document: Mapping[str, Any],
+    *,
+    phase_order: Iterable[str],
+) -> Dict[str, Dict[str, Any]]:
+    allowed_phases = set(phase_order).union(
+        {"BFC", "FFC", "UAH", "RELEASE", "FFC_TO_RELEASE", "BFC_TO_FFC"}
+    )
+    contributors = _require_entity_mapping(
+        document,
+        version_key="version",
+        collection_key="contributors",
+        label="knowledge pack contributors",
+    )
+    for contributor_id, contributor in contributors.items():
+        label = f"knowledge pack contributor {contributor_id}"
+        _require_matching_id(contributor_id, contributor, "knowledge pack contributor")
+        finding_type = _require_string(contributor, "finding_type", label)
+        if finding_type not in {
+            "risk",
+            "metric",
+            "symptom",
+            "phase_anchor",
+            "compensation",
+            "positive_anchor",
+        }:
+            raise ValueError(f"{label} finding_type must be a supported contributor type")
+        body_group = _require_string(contributor, "body_group", label)
+        if body_group not in {"upper_body", "lower_body", "whole_chain"}:
+            raise ValueError(
+                f"{label} body_group must be upper_body, lower_body, or whole_chain"
+            )
+        phase = _require_string(contributor, "phase", label)
+        if phase not in allowed_phases:
+            raise ValueError(
+                f"{label} phase must be one of the configured phases or anchor phases"
+            )
+        source_type = _require_string(contributor, "source_type", label)
+        if source_type not in {"risk", "metric", "event", "manual"}:
+            raise ValueError(f"{label} source_type must be risk, metric, event, or manual")
+        _require_string(contributor, "source_key", label)
+        _require_string(contributor, "title", label)
+        _require_string(contributor, "summary", label)
+        _require_string(contributor, "definition", label)
+        _require_str_list(contributor, "why_it_matters", label)
+        _require_str_list(contributor, "evidence_inputs", label)
+        _require_str_list(contributor, "renderer_focus_regions", label)
+        _require_str_list(contributor, "related_symptom_ids", label)
+        _require_str_list(contributor, "possible_mechanism_ids", label)
+        _require_str_list(contributor, "common_compensation_ids", label)
+        _require_str_list(contributor, "common_coexisting_ids", label)
+    return contributors
+
+
 def _validate_trajectories(
     document: Mapping[str, Any],
     followup_check_ids: Iterable[str],
@@ -803,6 +900,167 @@ def _validate_history_bindings(
             raise ValueError(f"{label} primary_metric must be listed in metrics")
         _require_string(binding, "chart_summary", label)
     return history_bindings
+
+
+def _validate_coach_judgments(
+    document: Mapping[str, Any],
+    *,
+    phase_order: Iterable[str],
+) -> Dict[str, Any]:
+    _require_string(document, "version", "knowledge pack coach judgments")
+    chain_statuses = _require_entity_mapping(
+        document,
+        version_key="version",
+        collection_key="chain_statuses",
+        label="knowledge pack chain statuses",
+    )
+    for status_id, status in chain_statuses.items():
+        label = f"knowledge pack chain status {status_id}"
+        _require_matching_id(status_id, status, "knowledge pack chain status")
+        _require_string(status, "title", label)
+        _require_string(status, "summary", label)
+        _require_string(status, "coach_prompt", label)
+
+    allowed_break_points = set(phase_order).union({"BFC", "FFC", "UAH", "RELEASE"})
+    break_points = _require_entity_mapping(
+        document,
+        version_key="version",
+        collection_key="break_points",
+        label="knowledge pack break points",
+    )
+    for break_point_id, break_point in break_points.items():
+        label = f"knowledge pack break point {break_point_id}"
+        _require_matching_id(break_point_id, break_point, "knowledge pack break point")
+        if break_point_id not in allowed_break_points:
+            raise ValueError(f"{label} must match a configured phase or anchor phase")
+        _require_string(break_point, "title", label)
+        _require_string(break_point, "summary", label)
+        _require_string(break_point, "coach_question", label)
+
+    change_size_bands = _require_entity_mapping(
+        document,
+        version_key="version",
+        collection_key="change_size_bands",
+        label="knowledge pack change size bands",
+    )
+    for band_id, band in change_size_bands.items():
+        label = f"knowledge pack change size band {band_id}"
+        _require_matching_id(band_id, band, "knowledge pack change size band")
+        _require_string(band, "title", label)
+        _require_string(band, "summary", label)
+        _require_string(band, "adoption_hint", label)
+
+    adoption_risk_bands = _require_entity_mapping(
+        document,
+        version_key="version",
+        collection_key="adoption_risk_bands",
+        label="knowledge pack adoption risk bands",
+    )
+    for risk_id, risk in adoption_risk_bands.items():
+        label = f"knowledge pack adoption risk band {risk_id}"
+        _require_matching_id(risk_id, risk, "knowledge pack adoption risk band")
+        _require_string(risk, "title", label)
+        _require_string(risk, "summary", label)
+        _require_string(risk, "coach_meaning", label)
+
+    reaction_horizons = _require_entity_mapping(
+        document,
+        version_key="version",
+        collection_key="reaction_horizons",
+        label="knowledge pack reaction horizons",
+    )
+    for horizon_id, horizon in reaction_horizons.items():
+        label = f"knowledge pack reaction horizon {horizon_id}"
+        _require_matching_id(horizon_id, horizon, "knowledge pack reaction horizon")
+        _require_string(horizon, "title", label)
+        _require_string(horizon, "summary", label)
+        _require_string(horizon, "typical_window", label)
+
+    return {
+        "version": document["version"],
+        "chain_statuses": chain_statuses,
+        "break_points": break_points,
+        "change_size_bands": change_size_bands,
+        "adoption_risk_bands": adoption_risk_bands,
+        "reaction_horizons": reaction_horizons,
+    }
+
+
+def _validate_capture_templates(document: Mapping[str, Any]) -> Dict[str, Any]:
+    _require_string(document, "version", "knowledge pack capture templates")
+    return {
+        "version": document["version"],
+        "coach_review_questionnaire": _validate_capture_field_collection(
+            document,
+            collection_key="coach_review_questionnaire",
+            label="knowledge pack coach review questionnaire",
+        ),
+        "clip_annotation_fields": _validate_capture_field_collection(
+            document,
+            collection_key="clip_annotation_fields",
+            label="knowledge pack clip annotation fields",
+        ),
+        "intervention_outcome_fields": _validate_capture_field_collection(
+            document,
+            collection_key="intervention_outcome_fields",
+            label="knowledge pack intervention outcome fields",
+        ),
+        "outcome_windows": _validate_capture_window_collection(document),
+    }
+
+
+def _validate_capture_field_collection(
+    document: Mapping[str, Any],
+    *,
+    collection_key: str,
+    label: str,
+) -> Dict[str, Dict[str, Any]]:
+    allowed_response_types = {
+        "string",
+        "text",
+        "single_select",
+        "multi_select",
+        "number",
+        "boolean",
+    }
+    fields = _require_entity_mapping(
+        document,
+        version_key="version",
+        collection_key=collection_key,
+        label=label,
+    )
+    for field_id, field in fields.items():
+        field_label = f"{label} field {field_id}"
+        _require_matching_id(field_id, field, field_label)
+        _require_string(field, "section", field_label)
+        _require_string(field, "prompt", field_label)
+        response_type = _require_string(field, "response_type", field_label)
+        if response_type not in allowed_response_types:
+            raise ValueError(f"{field_label} response_type must be a supported type")
+        _require_bool(field, "required", field_label)
+        _require_string(field, "maps_to", field_label)
+        options = _require_str_list(field, "options", field_label)
+        if response_type in {"single_select", "multi_select"} and not options:
+            raise ValueError(f"{field_label} select questions must define options")
+        if response_type not in {"single_select", "multi_select"} and options:
+            raise ValueError(f"{field_label} only select questions may define options")
+    return fields
+
+
+def _validate_capture_window_collection(document: Mapping[str, Any]) -> Dict[str, Dict[str, Any]]:
+    windows = _require_entity_mapping(
+        document,
+        version_key="version",
+        collection_key="outcome_windows",
+        label="knowledge pack outcome windows",
+    )
+    for window_id, window in windows.items():
+        label = f"knowledge pack outcome window {window_id}"
+        _require_matching_id(window_id, window, "knowledge pack outcome window")
+        _require_string(window, "title", label)
+        _require_string(window, "summary", label)
+        _require_string(window, "typical_use", label)
+    return windows
 
 
 def _validate_wording(document: Mapping[str, Any]) -> Dict[str, Any]:
@@ -1033,6 +1291,84 @@ def _validate_followup_history_binding_links(
             )
 
 
+def _validate_contributor_links(
+    contributors: Mapping[str, Mapping[str, Any]],
+    *,
+    symptom_ids: Iterable[str],
+    mechanism_ids: Iterable[str],
+) -> None:
+    allowed_symptoms = set(symptom_ids)
+    allowed_mechanisms = set(mechanism_ids)
+    allowed_contributors = set(contributors.keys())
+    for contributor_id, contributor in contributors.items():
+        _validate_known_ids(
+            contributor["related_symptom_ids"],
+            allowed_symptoms,
+            f"knowledge pack contributor {contributor_id} related_symptom_ids",
+        )
+        _validate_known_ids(
+            contributor["possible_mechanism_ids"],
+            allowed_mechanisms,
+            f"knowledge pack contributor {contributor_id} possible_mechanism_ids",
+        )
+        _validate_known_ids(
+            contributor["common_compensation_ids"],
+            allowed_contributors,
+            f"knowledge pack contributor {contributor_id} common_compensation_ids",
+        )
+        _validate_known_ids(
+            contributor["common_coexisting_ids"],
+            allowed_contributors,
+            f"knowledge pack contributor {contributor_id} common_coexisting_ids",
+        )
+
+
+def _validate_capture_template_links(
+    capture_templates: Mapping[str, Any],
+    *,
+    coach_judgments: Mapping[str, Any],
+    symptom_ids: Iterable[str],
+    mechanism_ids: Iterable[str],
+    contributor_ids: Iterable[str],
+    prescription_ids: Iterable[str],
+) -> None:
+    option_sets = {
+        "chain_status": set(coach_judgments["chain_statuses"].keys()),
+        "break_point": set(coach_judgments["break_points"].keys()),
+        "change_size": set(coach_judgments["change_size_bands"].keys()),
+        "adoption_risk": set(coach_judgments["adoption_risk_bands"].keys()),
+        "symptom": set(symptom_ids),
+        "mechanism": set(mechanism_ids),
+        "contributor": set(contributor_ids),
+        "prescription": set(prescription_ids),
+        "reviewer_role": {"coach", "clinician", "reviewer"},
+        "context": {"training", "trial", "match", "rehab", "off_season"},
+        "adoption_observed": {"yes", "partial", "no"},
+    }
+    for collection_name in (
+        "coach_review_questionnaire",
+        "clip_annotation_fields",
+        "intervention_outcome_fields",
+    ):
+        for field_id, field in capture_templates[collection_name].items():
+            options = field["options"]
+            if not options:
+                continue
+            maps_to = str(field["maps_to"]).strip().lower()
+            option_group = None
+            for key in option_sets:
+                if key in maps_to:
+                    option_group = key
+                    break
+            if option_group is None:
+                continue
+            _validate_known_ids(
+                options,
+                option_sets[option_group],
+                f"knowledge pack capture template field {field_id} options",
+            )
+
+
 def _require_entity_mapping(
     document: Mapping[str, Any],
     *,
@@ -1082,6 +1418,15 @@ def _require_str_list(payload: Mapping[str, Any], key: str, label: str) -> List[
             raise ValueError(f"{label} {key}[{idx}] must be a non-empty string")
         normalized.append(value)
     return normalized
+
+
+def _require_bool(payload: Mapping[str, Any], key: str, label: str) -> bool:
+    if key not in payload:
+        raise ValueError(f"{label} missing required key: {key}")
+    value = payload[key]
+    if not isinstance(value, bool):
+        raise ValueError(f"{label} {key} must be a boolean")
+    return value
 
 
 def _optional_string(payload: Mapping[str, Any], key: str, default: str) -> str:

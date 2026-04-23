@@ -129,78 +129,6 @@ _PRESENTATION_STATUS_RANK = {
     "confident_match": 3,
 }
 
-_RISK_CONTRIBUTOR_CATALOG: Dict[str, Dict[str, str]] = {
-    "lateral_trunk_lean": {
-        "title": "Trunk lean",
-        "body_group": "upper_body",
-        "phase": "RELEASE",
-        "summary": "The trunk is leaning away instead of staying more stacked through release.",
-    },
-    "hip_shoulder_mismatch": {
-        "title": "Hip-shoulder mismatch",
-        "body_group": "upper_body",
-        "phase": "FFC_TO_RELEASE",
-        "summary": "Upper and lower segments are not rotating together cleanly into release.",
-    },
-    "trunk_rotation_snap": {
-        "title": "Shoulder rotation timing",
-        "body_group": "upper_body",
-        "phase": "FFC_TO_RELEASE",
-        "summary": "Shoulder-trunk rotation is arriving abruptly and too late in the chain.",
-    },
-    "foot_line_deviation": {
-        "title": "Foot line deviation",
-        "body_group": "lower_body",
-        "phase": "FFC",
-        "summary": "The landing line is not guiding force cleanly toward target.",
-    },
-    "front_foot_braking_shock": {
-        "title": "Front-foot landing quality",
-        "body_group": "lower_body",
-        "phase": "FFC",
-        "summary": "Landing is not becoming a calm, stable transfer point.",
-    },
-    "knee_brace_failure": {
-        "title": "Knee brace loss",
-        "body_group": "lower_body",
-        "phase": "FFC_TO_RELEASE",
-        "summary": "The front knee is not supporting the action strongly enough through release.",
-    },
-}
-
-_METRIC_CONTRIBUTOR_CATALOG: Dict[str, Dict[str, str]] = {
-    "shoulder_rotation_timing": {
-        "title": "Shoulder rotation timing",
-        "body_group": "upper_body",
-        "phase": "FFC_TO_RELEASE",
-        "summary": "Shoulder rotation timing is arriving later than we want for a calm release window.",
-    },
-    "pelvis_trunk_alignment": {
-        "title": "Pelvic movement organization",
-        "body_group": "lower_body",
-        "phase": "BFC_TO_FFC",
-        "summary": "Pelvis-to-trunk organization is not staying clean enough into landing.",
-    },
-    "chest_stack_over_landing": {
-        "title": "Chest stack over landing",
-        "body_group": "lower_body",
-        "phase": "FFC_TO_RELEASE",
-        "summary": "The chest is not getting stacked over the landing leg early enough.",
-    },
-    "front_leg_support_score": {
-        "title": "Front-leg support",
-        "body_group": "lower_body",
-        "phase": "FFC_TO_RELEASE",
-        "summary": "The landing leg is not turning landing into a stable transfer base.",
-    },
-    "trunk_drift_after_ffc": {
-        "title": "Late trunk drift",
-        "body_group": "upper_body",
-        "phase": "FFC_TO_RELEASE",
-        "summary": "The trunk keeps travelling after landing instead of settling into release.",
-    },
-}
-
 _PHASE_LABELS: Dict[str, str] = {
     "approach_build": "Approach build",
     "gather_and_organize": "Gather and organize",
@@ -1820,6 +1748,16 @@ class DeterministicExpertSystem:
             for symptom in symptoms
             if isinstance(symptom, dict)
         }
+        risk_contributors = {
+            str(cfg.get("source_key") or contributor_id): cfg
+            for contributor_id, cfg in self._pack["contributors"].items()
+            if str(cfg.get("source_type") or "") == "risk"
+        }
+        metric_contributors = [
+            (str(cfg.get("source_key") or contributor_id), cfg)
+            for contributor_id, cfg in self._pack["contributors"].items()
+            if str(cfg.get("source_type") or "") == "metric"
+        ]
         primary = selection.get("primary") or {}
         if isinstance(primary, dict):
             for symptom_id in list(primary.get("supporting_symptom_ids") or []):
@@ -1841,7 +1779,7 @@ class DeterministicExpertSystem:
             if not isinstance(risk, dict):
                 continue
             risk_id = str(risk.get("risk_id") or "").strip()
-            cfg = _RISK_CONTRIBUTOR_CATALOG.get(risk_id)
+            cfg = risk_contributors.get(risk_id) or {}
             if not cfg:
                 continue
             signal = _safe_float(risk.get("signal_strength"), 0.0)
@@ -1859,7 +1797,7 @@ class DeterministicExpertSystem:
                 }
             )
 
-        for metric_name, cfg in _METRIC_CONTRIBUTOR_CATALOG.items():
+        for metric_name, cfg in metric_contributors:
             metric = metrics.get(metric_name) or {}
             if not isinstance(metric, dict):
                 continue
@@ -1944,10 +1882,14 @@ class DeterministicExpertSystem:
             phase_key = str(visible_symptom.get("phase") or "").strip()
         if not phase_key:
             return None
+        break_cfg = self._pack["coach_judgments"]["break_points"].get(phase_key) or {}
         return {
             "phase_id": phase_key,
-            "title": _PHASE_LABELS.get(phase_key, phase_key.replace("_", " ").title()),
-            "summary": self._break_point_summary(phase_key),
+            "title": break_cfg.get(
+                "title",
+                _PHASE_LABELS.get(phase_key, phase_key.replace("_", " ").title()),
+            ),
+            "summary": break_cfg.get("summary") or self._break_point_summary(phase_key),
         }
 
     def _break_point_summary(self, phase_key: str) -> str:

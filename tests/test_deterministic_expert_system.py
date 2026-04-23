@@ -128,6 +128,10 @@ class DeterministicExpertSystemTests(unittest.TestCase):
             "transfer_and_block",
         )
         self.assertEqual(
+            coach_diagnosis["primary_break_point"]["title"],
+            "Transfer and block",
+        )
+        self.assertEqual(
             coach_diagnosis["change_strategy"]["change_size"],
             "micro",
         )
@@ -147,6 +151,10 @@ class DeterministicExpertSystemTests(unittest.TestCase):
         self.assertTrue(coach_diagnosis["change_reaction"]["near_term_positive"])
         self.assertTrue(coach_diagnosis["change_reaction"]["near_term_negative"])
         self.assertTrue(coach_diagnosis["change_reaction"]["long_term_positive"])
+        self.assertIn(
+            "Front-foot landing quality",
+            [item["title"] for item in coach_diagnosis["lower_body_contributors"]],
+        )
 
     def test_returns_no_match_when_pattern_is_clean(self):
         payload = self.engine.build(

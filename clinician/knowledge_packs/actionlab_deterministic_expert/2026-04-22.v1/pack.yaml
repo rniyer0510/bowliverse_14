@@ -14,10 +14,13 @@ index:
   mechanism_families: mechanism_families.yaml
   symptoms: symptoms.yaml
   mechanisms: mechanisms.yaml
+  contributors: contributors.yaml
   archetypes: archetypes.yaml
   trajectories: trajectories.yaml
   prescriptions: prescriptions.yaml
   followup_checks: followup_checks.yaml
   render_stories: render_stories.yaml
   history_bindings: history_bindings.yaml
+  coach_judgments: coach_judgments.yaml
+  capture_templates: capture_templates.yaml
   wording: wording.yaml
