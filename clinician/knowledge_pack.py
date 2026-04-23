@@ -352,6 +352,10 @@ def _validate_knowledge_pack_documents(
         prescription_ids=prescriptions.keys(),
         evidence_ids=knowledge_evidence.keys(),
     )
+    runtime_indexes = _build_runtime_indexes(
+        knowledge_evidence=knowledge_evidence,
+        reconciliation=reconciliation,
+    )
 
     return {
         "manifest": copy.deepcopy(dict(manifest)),
@@ -375,6 +379,7 @@ def _validate_knowledge_pack_documents(
         "knowledge_evidence": knowledge_evidence,
         "reconciliation": reconciliation,
         "wording": wording,
+        "runtime_indexes": runtime_indexes,
     }
 
 
@@ -1032,6 +1037,83 @@ def _validate_coach_judgments(
         _require_string(horizon, "summary", label)
         _require_string(horizon, "typical_window", label)
 
+    strength_signals_doc = _require_mapping(
+        document,
+        "strength_signals",
+        "knowledge pack coach judgments",
+    )
+    strength_signals: Dict[str, Dict[str, Any]] = {}
+    for metric_id, signal in strength_signals_doc.items():
+        label = f"knowledge pack strength signal {metric_id}"
+        if not isinstance(metric_id, str) or not metric_id.strip():
+            raise ValueError(f"{label} must use a non-blank metric id")
+        if not isinstance(signal, Mapping):
+            raise ValueError(f"{label} must be a mapping")
+        normalized_signal = dict(signal)
+        strength_signals[metric_id] = {
+            "metric_id": _optional_string(normalized_signal, "metric_id", metric_id),
+            "min_value": _require_float(normalized_signal, "min_value", label),
+            "summary": _require_string(normalized_signal, "summary", label),
+        }
+
+    symptom_body_groups_doc = _require_mapping(
+        document,
+        "symptom_body_groups",
+        "knowledge pack coach judgments",
+    )
+    symptom_body_groups: Dict[str, str] = {}
+    for symptom_id, body_group in symptom_body_groups_doc.items():
+        if not isinstance(symptom_id, str) or not symptom_id.strip():
+            raise ValueError("knowledge pack symptom_body_groups contains a blank symptom id")
+        value = str(body_group or "").strip()
+        if value not in {"upper_body", "lower_body", "whole_chain"}:
+            raise ValueError(
+                f"knowledge pack symptom_body_groups {symptom_id} must be upper_body, lower_body, or whole_chain"
+            )
+        symptom_body_groups[symptom_id] = value
+
+    compensation_symptom_ids = _require_str_list(
+        document,
+        "compensation_symptom_ids",
+        "knowledge pack coach judgments",
+    )
+
+    role_policy_doc = _require_mapping(
+        document,
+        "role_detail_policies",
+        "knowledge pack coach judgments",
+    )
+    role_detail_policies: Dict[str, Dict[str, Any]] = {}
+    required_roles = ("player", "parent", "coach", "reviewer", "clinician")
+    policy_flags = (
+        "include_supporting_contributors",
+        "include_body_group_breakdown",
+        "include_compensations",
+        "include_what_is_ok",
+        "include_what_is_not_ok",
+        "include_phase_anchors",
+        "include_history_bindings",
+        "include_change_reaction",
+        "include_evidence_basis",
+        "include_holdback_candidates",
+    )
+    for role_name in required_roles:
+        raw_policy = role_policy_doc.get(role_name)
+        if not isinstance(raw_policy, Mapping):
+            raise ValueError(f"knowledge pack role_detail_policies.{role_name} must be a mapping")
+        policy = dict(raw_policy)
+        normalized_policy: Dict[str, Any] = {
+            "id": _optional_string(policy, "id", role_name),
+        }
+        for flag in policy_flags:
+            value = policy.get(flag)
+            if not isinstance(value, bool):
+                raise ValueError(
+                    f"knowledge pack role_detail_policies.{role_name}.{flag} must be a boolean"
+                )
+            normalized_policy[flag] = value
+        role_detail_policies[role_name] = normalized_policy
+
     return {
         "version": document["version"],
         "chain_statuses": chain_statuses,
@@ -1039,6 +1121,10 @@ def _validate_coach_judgments(
         "change_size_bands": change_size_bands,
         "adoption_risk_bands": adoption_risk_bands,
         "reaction_horizons": reaction_horizons,
+        "strength_signals": strength_signals,
+        "symptom_body_groups": symptom_body_groups,
+        "compensation_symptom_ids": compensation_symptom_ids,
+        "role_detail_policies": role_detail_policies,
     }
 
 
@@ -1684,6 +1770,60 @@ def _validate_reconciliation_links(
             allowed_evidence,
             f"knowledge pack canonical concept {concept_id} related_evidence_ids",
         )
+
+
+def _build_runtime_indexes(
+    *,
+    knowledge_evidence: Mapping[str, Mapping[str, Any]],
+    reconciliation: Mapping[str, Any],
+) -> Dict[str, Any]:
+    evidence_by_target: Dict[str, Dict[str, List[Dict[str, Any]]]] = {}
+    for evidence_id, evidence in knowledge_evidence.items():
+        target_type = str(evidence["target_type"])
+        target_id = str(evidence["target_id"])
+        payload = {
+            "id": evidence_id,
+            "target_type": target_type,
+            "target_id": target_id,
+            "evidence_kind": evidence["evidence_kind"],
+            "evidence_tier": evidence["evidence_tier"],
+            "source_ids": list(evidence["source_ids"]),
+            "claim_summary": evidence["claim_summary"],
+            "coach_consensus_status": evidence["coach_consensus_status"],
+            "related_evidence_ids": list(evidence["related_evidence_ids"]),
+        }
+        evidence_by_target.setdefault(target_type, {}).setdefault(target_id, []).append(payload)
+
+    target_concepts: Dict[str, Dict[str, Any]] = {}
+    canonical_concepts = reconciliation["canonical_concepts"]
+    for concept_id, concept in canonical_concepts.items():
+        canonical_ref = f"{concept['canonical_target_type']}:{concept['canonical_target_id']}"
+
+        def _store_target_ref(ref: str, relation: str) -> None:
+            target_concepts[ref] = {
+                "concept_id": concept_id,
+                "title": concept["title"],
+                "merge_status": concept["merge_status"],
+                "canonical_ref": canonical_ref,
+                "canonical_target_type": concept["canonical_target_type"],
+                "canonical_target_id": concept["canonical_target_id"],
+                "reconciliation_note": concept["reconciliation_note"],
+                "related_evidence_ids": list(concept["related_evidence_ids"]),
+                "relation": relation,
+                "duplicate_targets": list(concept["duplicate_targets"]),
+                "similar_targets": list(concept["similar_targets"]),
+            }
+
+        _store_target_ref(canonical_ref, "canonical")
+        for ref in concept["duplicate_targets"]:
+            _store_target_ref(ref, "duplicate")
+        for ref in concept["similar_targets"]:
+            _store_target_ref(ref, "similar")
+
+    return {
+        "knowledge_evidence_by_target": evidence_by_target,
+        "reconciliation_target_concepts": target_concepts,
+    }
 
 
 def _require_entity_mapping(

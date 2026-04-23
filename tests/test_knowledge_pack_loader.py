@@ -37,6 +37,8 @@ class KnowledgePackLoaderTests(unittest.TestCase):
         self.assertIn("workable_but_leaking", pack["coach_judgments"]["chain_statuses"])
         self.assertIn("transfer_and_block", pack["coach_judgments"]["break_points"])
         self.assertIn("micro", pack["coach_judgments"]["change_size_bands"])
+        self.assertIn("front_leg_softening", pack["coach_judgments"]["symptom_body_groups"])
+        self.assertIn("player", pack["coach_judgments"]["role_detail_policies"])
         self.assertIn("next_3_balls", pack["capture_templates"]["outcome_windows"])
         self.assertIn(
             "classification_before_interpretation",
@@ -112,6 +114,14 @@ class KnowledgePackLoaderTests(unittest.TestCase):
         self.assertEqual(
             pack["knowledge_evidence"]["evidence_stack_over_landing"]["target_type"],
             "prescription",
+        )
+        self.assertIn(
+            "soft_block_with_trunk_carry",
+            pack["runtime_indexes"]["knowledge_evidence_by_target"]["mechanism"],
+        )
+        self.assertEqual(
+            pack["runtime_indexes"]["reconciliation_target_concepts"]["mechanism:soft_block_with_trunk_carry"]["concept_id"],
+            "canonical_transfer_break_story",
         )
         self.assertEqual(
             pack["architecture_principles"]["strict_validation_gate"]["principle_type"],

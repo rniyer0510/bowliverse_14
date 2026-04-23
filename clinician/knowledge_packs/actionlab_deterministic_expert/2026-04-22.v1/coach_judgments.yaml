@@ -139,3 +139,101 @@ reaction_horizons:
     title: "Long term"
     summary: "What may change across repeated exposure, sustained load, and longer retention windows."
     typical_window: "repeated_sessions_and_match_cycles"
+
+strength_signals:
+  transfer_efficiency_score:
+    metric_id: transfer_efficiency_score
+    min_value: 0.65
+    summary: "Transfer into release is staying reasonably connected."
+  approach_momentum_score:
+    metric_id: approach_momentum_score
+    min_value: 0.65
+    summary: "Approach intent is bringing usable momentum into the crease."
+  release_timing_stability:
+    metric_id: release_timing_stability
+    min_value: 0.65
+    summary: "Release timing looks calmer than the main leak would suggest."
+  front_leg_support_score:
+    metric_id: front_leg_support_score
+    min_value: 0.65
+    summary: "Landing support is giving the action at least some usable base."
+
+symptom_body_groups:
+  weak_approach_build: whole_chain
+  unstable_gather: whole_chain
+  front_leg_softening: lower_body
+  late_trunk_drift: upper_body
+  arm_chase: upper_body
+  high_terminal_thrust: whole_chain
+  asymmetric_dissipation: whole_chain
+  release_window_instability: upper_body
+  late_chain_load_dump: whole_chain
+  underused_transfer_window: lower_body
+
+compensation_symptom_ids:
+  - arm_chase
+  - high_terminal_thrust
+  - asymmetric_dissipation
+  - late_chain_load_dump
+
+role_detail_policies:
+  player:
+    id: player
+    include_supporting_contributors: false
+    include_body_group_breakdown: false
+    include_compensations: false
+    include_what_is_ok: true
+    include_what_is_not_ok: true
+    include_phase_anchors: false
+    include_history_bindings: false
+    include_change_reaction: false
+    include_evidence_basis: false
+    include_holdback_candidates: false
+  parent:
+    id: parent
+    include_supporting_contributors: false
+    include_body_group_breakdown: false
+    include_compensations: false
+    include_what_is_ok: true
+    include_what_is_not_ok: true
+    include_phase_anchors: false
+    include_history_bindings: false
+    include_change_reaction: false
+    include_evidence_basis: false
+    include_holdback_candidates: false
+  coach:
+    id: coach
+    include_supporting_contributors: true
+    include_body_group_breakdown: true
+    include_compensations: true
+    include_what_is_ok: true
+    include_what_is_not_ok: true
+    include_phase_anchors: true
+    include_history_bindings: true
+    include_change_reaction: true
+    include_evidence_basis: true
+    include_holdback_candidates: true
+  reviewer:
+    id: reviewer
+    include_supporting_contributors: true
+    include_body_group_breakdown: true
+    include_compensations: true
+    include_what_is_ok: true
+    include_what_is_not_ok: true
+    include_phase_anchors: true
+    include_history_bindings: true
+    include_change_reaction: true
+    include_evidence_basis: true
+    include_holdback_candidates: true
+  clinician:
+    id: clinician
+    include_supporting_contributors: true
+    include_body_group_breakdown: true
+    include_compensations: true
+    include_what_is_ok: true
+    include_what_is_not_ok: true
+    include_phase_anchors: true
+    include_history_bindings: true
+    include_change_reaction: true
+    include_evidence_basis: true
+    include_holdback_candidates: true

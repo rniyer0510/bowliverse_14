@@ -185,6 +185,84 @@ class DeterministicExpertSystem:
     def history_window_runs(self) -> int:
         return int(self._pack["globals"]["history_window_defaults"]["trend_window_runs"])
 
+    def _knowledge_evidence_items(self, target_type: str, target_id: Optional[str]) -> List[Dict[str, Any]]:
+        normalized_target_id = str(target_id or "").strip()
+        if not normalized_target_id:
+            return []
+        indexes = self._pack.get("runtime_indexes") or {}
+        by_target = indexes.get("knowledge_evidence_by_target") or {}
+        return list(((by_target.get(str(target_type)) or {}).get(normalized_target_id) or []))
+
+    def _reconciliation_concept(self, target_type: str, target_id: Optional[str]) -> Optional[Dict[str, Any]]:
+        normalized_target_id = str(target_id or "").strip()
+        if not normalized_target_id:
+            return None
+        indexes = self._pack.get("runtime_indexes") or {}
+        ref = f"{target_type}:{normalized_target_id}"
+        concept = (indexes.get("reconciliation_target_concepts") or {}).get(ref)
+        return dict(concept) if isinstance(concept, dict) else None
+
+    def _knowledge_support_score(self, target_type: str, target_id: Optional[str]) -> float:
+        tier_weight = {"A": 1.0, "B": 0.82, "C": 0.65, "INTERNAL": 0.55}
+        consensus_weight = {"accepted": 1.0, "reviewed": 0.85, "draft": 0.65}
+        kind_weight = {
+            "biomechanics_truth": 1.0,
+            "performance_relation": 0.92,
+            "load_risk": 0.92,
+            "coaching_translation": 0.78,
+            "intervention_heuristic": 0.72,
+        }
+        evidence_items = self._knowledge_evidence_items(target_type, target_id)
+        if not evidence_items:
+            return 0.0
+        weighted_scores: List[float] = []
+        for item in evidence_items:
+            weighted_scores.append(
+                tier_weight.get(str(item.get("evidence_tier") or ""), 0.5)
+                * consensus_weight.get(str(item.get("coach_consensus_status") or ""), 0.6)
+                * kind_weight.get(str(item.get("evidence_kind") or ""), 0.65)
+            )
+        return _round3(_average(weighted_scores, default=0.0))
+
+    def _role_detail_policy(self, account_role: Optional[str]) -> Dict[str, Any]:
+        policies = (self._pack.get("coach_judgments") or {}).get("role_detail_policies") or {}
+        role = str(account_role or "").strip().lower()
+        if not role:
+            return {}
+        if role in policies:
+            return dict(policies[role])
+        if role in {"coach", "reviewer", "clinician"} and "coach" in policies:
+            return dict(policies["coach"])
+        if role == "parent" and "parent" in policies:
+            return dict(policies["parent"])
+        return dict(policies.get("player") or {})
+
+    def _evidence_basis_for_target(self, target_type: str, target_id: Optional[str]) -> Optional[Dict[str, Any]]:
+        normalized_target_id = str(target_id or "").strip()
+        if not normalized_target_id:
+            return None
+        evidence_items = self._knowledge_evidence_items(target_type, normalized_target_id)
+        concept = self._reconciliation_concept(target_type, normalized_target_id)
+        if not evidence_items and not concept:
+            return None
+        return {
+            "target_type": target_type,
+            "target_id": normalized_target_id,
+            "knowledge_support": self._knowledge_support_score(target_type, normalized_target_id),
+            "evidence_items": [
+                {
+                    "id": item["id"],
+                    "evidence_kind": item["evidence_kind"],
+                    "evidence_tier": item["evidence_tier"],
+                    "claim_summary": item["claim_summary"],
+                    "source_ids": list(item["source_ids"]),
+                    "coach_consensus_status": item["coach_consensus_status"],
+                }
+                for item in evidence_items
+            ],
+            "canonical_concept": concept,
+        }
+
     def build(
         self,
         *,
@@ -274,6 +352,10 @@ class DeterministicExpertSystem:
             history_plan=history_plan,
             archetype=archetype,
             history_context=history_context,
+        )
+        coach_diagnosis = self._filter_coach_diagnosis(
+            account_role=account_role,
+            coach_diagnosis=coach_diagnosis,
         )
         presentation_payload = self._build_presentation_payload(
             selection=selection,
@@ -832,12 +914,15 @@ class DeterministicExpertSystem:
                 for eid in [*cfg["required_evidence"], *cfg["supporting_evidence"]]
             ]
             evidence_completeness = _average(evidence_confidences, default=0.0)
+            knowledge_support = self._knowledge_support_score("mechanism", mechanism_id)
+            reconciliation_concept = self._reconciliation_concept("mechanism", mechanism_id)
 
             support_score = _clip01(
                 (0.40 * _average(required_symptom_scores, default=0.0))
                 + (0.15 * _average(supporting_symptom_scores, default=0.0))
                 + (0.30 * _average(required_evidence_scores, default=0.0))
                 + (0.15 * _average(supporting_evidence_scores, default=0.0))
+                + (0.05 * knowledge_support)
             )
 
             context_penalty, contradiction_notes = self._context_penalty(
@@ -870,6 +955,12 @@ class DeterministicExpertSystem:
                     "prescription_ids": list(cfg["prescription_ids"]),
                     "render_story_ids": list(cfg["render_story_ids"]),
                     "history_metrics_to_track": list(cfg["history_metrics_to_track"]),
+                    "knowledge_support": knowledge_support,
+                    "knowledge_evidence_ids": [
+                        item["id"]
+                        for item in self._knowledge_evidence_items("mechanism", mechanism_id)
+                    ],
+                    "canonical_concept": reconciliation_concept,
                     "matched_symptom_ids": [
                         symptom_id
                         for symptom_id in [*cfg["required_symptoms"], *cfg["supporting_symptoms"]]
@@ -892,6 +983,25 @@ class DeterministicExpertSystem:
             and abs(top["overall_confidence"] - runner_up["overall_confidence"])
             <= thresholds["ambiguous_match_delta_max"]
         )
+        same_reconciliation_story = bool(
+            top
+            and runner_up
+            and isinstance(top.get("canonical_concept"), dict)
+            and isinstance(runner_up.get("canonical_concept"), dict)
+            and top["canonical_concept"].get("concept_id")
+            == runner_up["canonical_concept"].get("concept_id")
+        )
+        if (
+            not ambiguous
+            and same_reconciliation_story
+            and top
+            and runner_up
+            and top["overall_confidence"] >= thresholds["partial_match_min"]
+            and runner_up["overall_confidence"] >= thresholds["weak_match_min"]
+            and abs(top["overall_confidence"] - runner_up["overall_confidence"])
+            <= thresholds["ambiguous_match_delta_max"] + 0.08
+        ):
+            ambiguous = True
 
         if not top or top["overall_confidence"] < thresholds["weak_match_min"]:
             diagnosis_status = "no_match"
@@ -941,6 +1051,16 @@ class DeterministicExpertSystem:
             "selected_trajectory_ids": list(dict.fromkeys(trajectory_ids)),
             "selected_prescription_ids": list(dict.fromkeys(prescription_ids)),
             "selected_render_story_ids": list(dict.fromkeys(render_story_ids)),
+            "reconciliation_story_id": (
+                top["canonical_concept"].get("concept_id")
+                if top and isinstance(top.get("canonical_concept"), dict)
+                else None
+            ),
+            "reconciliation_note": (
+                top["canonical_concept"].get("reconciliation_note")
+                if ambiguous and top and isinstance(top.get("canonical_concept"), dict)
+                else None
+            ),
         }
         return hypotheses, selection
 
@@ -1541,6 +1661,7 @@ class DeterministicExpertSystem:
 
         visible_symptom = self._visible_symptom(symptoms)
         supporting_contributors = self._supporting_contributors(
+            events=events,
             risks=risks,
             metrics=metrics,
             symptoms=symptoms,
@@ -1687,6 +1808,25 @@ class DeterministicExpertSystem:
                 "dominant_archetype_id": history_context.get("dominant_archetype_id"),
                 "bindings": history_bindings,
             },
+            "evidence_basis": {
+                "primary_mechanism": self._evidence_basis_for_target(
+                    "mechanism",
+                    primary.get("id"),
+                ),
+                "visible_symptom": self._evidence_basis_for_target(
+                    "symptom",
+                    (visible_symptom or {}).get("id"),
+                ),
+                "supporting_contributors": [
+                    basis
+                    for item in supporting_contributors
+                    if item.get("role") != "supporting_symptom"
+                    for basis in [self._evidence_basis_for_target("contributor", item.get("id"))]
+                    if basis is not None
+                ],
+                "reconciliation_story_id": selection.get("reconciliation_story_id"),
+                "reconciliation_note": selection.get("reconciliation_note"),
+            },
             "archetype": (
                 {
                     "id": archetype.get("id"),
@@ -1723,31 +1863,66 @@ class DeterministicExpertSystem:
             }
         return None
 
+    def _filter_coach_diagnosis(
+        self,
+        *,
+        account_role: Optional[str],
+        coach_diagnosis: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        policy = self._role_detail_policy(account_role)
+        if not policy:
+            return coach_diagnosis
+        filtered = dict(coach_diagnosis)
+        filtered["detail_policy_id"] = policy.get("id")
+        if not policy.get("include_supporting_contributors", False):
+            filtered["supporting_contributors"] = []
+        if not policy.get("include_body_group_breakdown", False):
+            filtered["upper_body_contributors"] = []
+            filtered["lower_body_contributors"] = []
+        if not policy.get("include_compensations", False):
+            filtered["compensations"] = []
+        if not policy.get("include_what_is_ok", False):
+            filtered["what_is_ok"] = []
+        if not policy.get("include_what_is_not_ok", False):
+            filtered["what_is_not_ok"] = []
+        if not policy.get("include_phase_anchors", False):
+            filtered["phase_anchored_findings"] = []
+        if not policy.get("include_history_bindings", False):
+            history_bindings = dict(filtered.get("history_bindings") or {})
+            history_bindings["bindings"] = []
+            filtered["history_bindings"] = history_bindings
+        if not policy.get("include_change_reaction", False):
+            filtered["change_reaction"] = None
+        if not policy.get("include_evidence_basis", False):
+            filtered["evidence_basis"] = None
+        holdback = filtered.get("holdback")
+        if (
+            isinstance(holdback, dict)
+            and not policy.get("include_holdback_candidates", False)
+        ):
+            filtered["holdback"] = {
+                "reason": holdback.get("reason"),
+                "top_candidates": [],
+            }
+        return filtered
+
     def _supporting_contributors(
         self,
         *,
+        events: Dict[str, Any],
         risks: List[Dict[str, Any]],
         metrics: Dict[str, Any],
         symptoms: List[Dict[str, Any]],
         selection: Dict[str, Any],
     ) -> List[Dict[str, Any]]:
         contributors: List[Dict[str, Any]] = []
-        seen_ids: set[str] = set()
-
-        def add(item: Optional[Dict[str, Any]]) -> None:
-            if not item:
-                return
-            item_id = str(item.get("id") or "").strip()
-            if not item_id or item_id in seen_ids:
-                return
-            seen_ids.add(item_id)
-            contributors.append(item)
-
         symptom_lookup = {
             str(symptom.get("id") or ""): symptom
             for symptom in symptoms
             if isinstance(symptom, dict)
         }
+        selected_mechanism_ids = set(selection.get("selected_mechanism_ids") or [])
+        primary_mechanism_id = str(selection.get("primary_mechanism_id") or "").strip()
         risk_contributors = {
             str(cfg.get("source_key") or contributor_id): cfg
             for contributor_id, cfg in self._pack["contributors"].items()
@@ -1758,21 +1933,77 @@ class DeterministicExpertSystem:
             for contributor_id, cfg in self._pack["contributors"].items()
             if str(cfg.get("source_type") or "") == "metric"
         ]
+        event_contributors = [
+            cfg
+            for cfg in self._pack["contributors"].values()
+            if str(cfg.get("source_type") or "") == "event"
+        ]
+
+        def _candidate(
+            *,
+            item_id: str,
+            title: str,
+            body_group: str,
+            phase: str,
+            role: str,
+            summary: str,
+            signal_strength: float,
+            confidence: float,
+            possible_mechanism_ids: Optional[List[str]] = None,
+            target_type: str = "contributor",
+        ) -> Dict[str, Any]:
+            evidence_support = self._knowledge_support_score(target_type, item_id)
+            canonical_concept = self._reconciliation_concept(target_type, item_id)
+            possible_ids = set(possible_mechanism_ids or [])
+            mechanism_affinity = 0.0
+            if primary_mechanism_id and primary_mechanism_id in possible_ids:
+                mechanism_affinity = 0.16
+            elif selected_mechanism_ids.intersection(possible_ids):
+                mechanism_affinity = 0.08
+            phase_anchor_boost = 0.08 if phase in {"BFC", "FFC", "UAH", "RELEASE"} else 0.0
+            ranking_score = _clip01(
+                (0.52 * _clip01(signal_strength))
+                + (0.18 * _clip01(confidence))
+                + (0.18 * evidence_support)
+                + mechanism_affinity
+                + phase_anchor_boost
+            )
+            return {
+                "id": item_id,
+                "title": title,
+                "body_group": body_group,
+                "phase": phase,
+                "role": role,
+                "signal_strength": _round3(signal_strength),
+                "evidence_support": evidence_support,
+                "ranking_score": _round3(ranking_score),
+                "summary": summary,
+                "knowledge_evidence_ids": [
+                    item["id"] for item in self._knowledge_evidence_items(target_type, item_id)
+                ],
+                "canonical_concept": canonical_concept,
+            }
+
+        candidates: List[Dict[str, Any]] = []
         primary = selection.get("primary") or {}
         if isinstance(primary, dict):
             for symptom_id in list(primary.get("supporting_symptom_ids") or []):
                 symptom = symptom_lookup.get(str(symptom_id))
                 if not symptom or not symptom.get("present"):
                     continue
-                add(
-                    {
-                        "id": symptom.get("id"),
-                        "title": symptom.get("title"),
-                        "body_group": self._symptom_body_group(str(symptom.get("id") or "")),
-                        "phase": str(symptom.get("phase") or "").upper(),
-                        "role": "supporting_symptom",
-                        "summary": symptom.get("description"),
-                    }
+                candidates.append(
+                    _candidate(
+                        item_id=str(symptom.get("id") or ""),
+                        title=str(symptom.get("title") or ""),
+                        body_group=self._symptom_body_group(str(symptom.get("id") or "")),
+                        phase=str(symptom.get("phase") or "").upper(),
+                        role="supporting_symptom",
+                        summary=str(symptom.get("description") or ""),
+                        signal_strength=_safe_float(symptom.get("score"), 0.0),
+                        confidence=_safe_float(symptom.get("confidence"), 0.0),
+                        possible_mechanism_ids=list(symptom.get("possible_mechanisms") or []),
+                        target_type="symptom",
+                    )
                 )
 
         for risk in risks:
@@ -1783,18 +2014,21 @@ class DeterministicExpertSystem:
             if not cfg:
                 continue
             signal = _safe_float(risk.get("signal_strength"), 0.0)
+            confidence = _safe_float(risk.get("confidence"), 0.0)
             if signal < 0.35:
                 continue
-            add(
-                {
-                    "id": risk_id,
-                    "title": cfg["title"],
-                    "body_group": cfg["body_group"],
-                    "phase": cfg["phase"],
-                    "role": "supporting_risk",
-                    "signal_strength": _round3(signal),
-                    "summary": cfg["summary"],
-                }
+            candidates.append(
+                _candidate(
+                    item_id=risk_id,
+                    title=cfg["title"],
+                    body_group=cfg["body_group"],
+                    phase=cfg["phase"],
+                    role="supporting_risk",
+                    summary=cfg["summary"],
+                    signal_strength=signal,
+                    confidence=confidence,
+                    possible_mechanism_ids=list(cfg.get("possible_mechanism_ids") or []),
+                )
             )
 
         for metric_name, cfg in metric_contributors:
@@ -1808,19 +2042,124 @@ class DeterministicExpertSystem:
             severity = (1.0 - value) if metric_name != "trunk_drift_after_ffc" else value
             if severity < 0.4:
                 continue
-            add(
-                {
-                    "id": metric_name,
-                    "title": cfg["title"],
-                    "body_group": cfg["body_group"],
-                    "phase": cfg["phase"],
-                    "role": "supporting_metric",
-                    "signal_strength": _round3(severity),
-                    "summary": cfg["summary"],
-                }
+            candidates.append(
+                _candidate(
+                    item_id=metric_name,
+                    title=cfg["title"],
+                    body_group=cfg["body_group"],
+                    phase=cfg["phase"],
+                    role="supporting_metric",
+                    summary=cfg["summary"],
+                    signal_strength=severity,
+                    confidence=confidence,
+                    possible_mechanism_ids=list(cfg.get("possible_mechanism_ids") or []),
+                )
             )
 
-        return contributors[:6]
+        for cfg in event_contributors:
+            signal, confidence = self._event_contributor_signal(events=events, contributor_cfg=cfg)
+            if signal < 0.4 or confidence < 0.15:
+                continue
+            candidates.append(
+                _candidate(
+                    item_id=str(cfg.get("id") or ""),
+                    title=str(cfg.get("title") or ""),
+                    body_group=str(cfg.get("body_group") or "whole_chain"),
+                    phase=str(cfg.get("phase") or "").upper(),
+                    role="supporting_phase_anchor",
+                    summary=str(cfg.get("summary") or ""),
+                    signal_strength=signal,
+                    confidence=confidence,
+                    possible_mechanism_ids=list(cfg.get("possible_mechanism_ids") or []),
+                )
+            )
+
+        candidates.sort(key=lambda item: item["ranking_score"], reverse=True)
+        seen_ids: set[str] = set()
+        concept_scores: Dict[str, float] = {}
+        for candidate in candidates:
+            item_id = str(candidate.get("id") or "").strip()
+            if not item_id or item_id in seen_ids:
+                continue
+            concept = candidate.get("canonical_concept") or {}
+            concept_id = str(concept.get("concept_id") or "").strip()
+            relation = str(concept.get("relation") or "").strip()
+            adjusted_score = _safe_float(candidate.get("ranking_score"), 0.0)
+            if concept_id and relation == "similar" and concept_id in concept_scores:
+                adjusted_score = max(0.0, adjusted_score - 0.08)
+            if adjusted_score < 0.45:
+                continue
+            candidate["ranking_score"] = _round3(adjusted_score)
+            if concept_id and concept_id not in concept_scores:
+                concept_scores[concept_id] = adjusted_score
+            seen_ids.add(item_id)
+            contributors.append(candidate)
+            if len(contributors) >= 6:
+                break
+
+        return contributors
+
+    def _event_contributor_signal(
+        self,
+        *,
+        events: Dict[str, Any],
+        contributor_cfg: Dict[str, Any],
+    ) -> Tuple[float, float]:
+        phase = str(contributor_cfg.get("phase") or "").strip().upper()
+        event_lookup = {
+            "BFC": "bfc",
+            "FFC": "ffc",
+            "UAH": "uah",
+            "RELEASE": "release",
+        }
+        event_key = event_lookup.get(phase)
+        if not event_key:
+            return 0.0, 0.0
+        event = (events or {}).get(event_key) or {}
+        if not isinstance(event, dict):
+            return 0.0, 0.0
+        source_key = str(contributor_cfg.get("source_key") or "").strip()
+        if not source_key:
+            return 0.0, 0.0
+
+        def _extract_raw(container: Dict[str, Any]) -> Any:
+            for key in (source_key, source_key.lower(), source_key.upper()):
+                if key in container:
+                    return container.get(key)
+            return None
+
+        raw_value = _extract_raw(event)
+        if raw_value is None:
+            for nested_key in ("signals", "flags", "debug", "observations", "derived"):
+                nested = event.get(nested_key) or {}
+                if isinstance(nested, dict):
+                    raw_value = _extract_raw(nested)
+                    if raw_value is not None:
+                        break
+        if raw_value is None:
+            return 0.0, 0.0
+
+        confidence = _safe_float(event.get("confidence"), 0.0)
+        if isinstance(raw_value, dict):
+            confidence = max(confidence, _safe_float(raw_value.get("confidence"), confidence))
+            if "value" in raw_value:
+                raw_value = raw_value.get("value")
+            elif "score" in raw_value:
+                raw_value = raw_value.get("score")
+            elif "present" in raw_value:
+                raw_value = raw_value.get("present")
+
+        if isinstance(raw_value, bool):
+            signal = 0.72 if raw_value else 0.0
+        elif isinstance(raw_value, (int, float)):
+            signal = _clip01(abs(float(raw_value)))
+        else:
+            text = str(raw_value or "").strip().lower()
+            if text in {"true", "yes", "present", "left", "right", "tilted"}:
+                signal = 0.68
+            else:
+                signal = 0.0
+        return _round3(signal), _round3(max(confidence, 0.35 if signal > 0.0 else 0.0))
 
     def _phase_anchored_findings(
         self,
@@ -1893,20 +2232,8 @@ class DeterministicExpertSystem:
         }
 
     def _break_point_summary(self, phase_key: str) -> str:
-        mapping = {
-            "approach_build": "The chain is losing value before enough usable build reaches the crease.",
-            "gather_and_organize": "The body is arriving without enough organization to set up clean transfer.",
-            "transfer_and_block": "The main leak is around landing, where momentum is not becoming a stable transfer point.",
-            "whip_and_release": "The chain is reaching release late enough that the distal segments have to rescue timing or pace.",
-            "dissipation_and_recovery": "The action is paying for pace after release through a harsh or concentrated finish.",
-            "BFC": "The chain is already showing a visible organization issue at back-foot contact.",
-            "FFC": "The key leak is visible at front-foot contact.",
-            "RELEASE": "The issue becomes clearest right at release.",
-        }
-        return mapping.get(
-            phase_key,
-            "This is the main place where the chain is no longer carrying momentum cleanly.",
-        )
+        label = _PHASE_LABELS.get(phase_key, phase_key.replace("_", " ").title())
+        return f"{label} is the main place where the chain is no longer carrying momentum cleanly."
 
     def _change_strategy(
         self,
@@ -2008,18 +2335,14 @@ class DeterministicExpertSystem:
                 text = str(item).strip()
                 if text:
                     positives.append(text)
-        metric_strengths = [
-            ("transfer_efficiency_score", "Transfer into release is staying reasonably connected."),
-            ("approach_momentum_score", "Approach intent is bringing usable momentum into the crease."),
-            ("release_timing_stability", "Release timing looks calmer than the main leak would suggest."),
-            ("front_leg_support_score", "Landing support is giving the action at least some usable base."),
-        ]
-        for metric_name, text in metric_strengths:
+        strength_signals = (self._pack.get("coach_judgments") or {}).get("strength_signals") or {}
+        for metric_name, signal_cfg in strength_signals.items():
             metric = metrics.get(metric_name) or {}
             if not isinstance(metric, dict):
                 continue
-            if _safe_float(metric.get("value"), 0.0) >= 0.65:
-                positives.append(text)
+            min_value = _safe_float(signal_cfg.get("min_value"), 0.65)
+            if _safe_float(metric.get("value"), 0.0) >= min_value:
+                positives.append(str(signal_cfg.get("summary") or "").strip())
         return list(dict.fromkeys(positives))[:3]
 
     def _what_is_not_ok(
@@ -2041,12 +2364,9 @@ class DeterministicExpertSystem:
         return list(dict.fromkeys(issues))[:4]
 
     def _compensation_patterns(self, symptoms: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        compensation_ids = {
-            "arm_chase",
-            "high_terminal_thrust",
-            "asymmetric_dissipation",
-            "late_chain_load_dump",
-        }
+        compensation_ids = set(
+            ((self._pack.get("coach_judgments") or {}).get("compensation_symptom_ids") or [])
+        )
         patterns: List[Dict[str, Any]] = []
         for symptom in symptoms:
             if str(symptom.get("id") or "") not in compensation_ids:
@@ -2064,13 +2384,8 @@ class DeterministicExpertSystem:
         return patterns[:3]
 
     def _symptom_body_group(self, symptom_id: str) -> str:
-        upper = {"late_trunk_drift", "arm_chase"}
-        lower = {"front_leg_softening", "unstable_gather"}
-        if symptom_id in upper:
-            return "upper_body"
-        if symptom_id in lower:
-            return "lower_body"
-        return "whole_chain"
+        mapping = (self._pack.get("coach_judgments") or {}).get("symptom_body_groups") or {}
+        return str(mapping.get(symptom_id) or "whole_chain")
 
     def _history_binding_ids(self, selection: Dict[str, Any]) -> List[str]:
         selected_mechanism_ids = set(selection["selected_mechanism_ids"])

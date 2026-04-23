@@ -148,9 +148,14 @@ class DeterministicExpertSystemTests(unittest.TestCase):
         )
         self.assertTrue(coach_diagnosis["change_strategy"]["selection_window_safety"])
         self.assertIsNotNone(coach_diagnosis["change_reaction"])
+        self.assertIsNotNone(coach_diagnosis["evidence_basis"])
         self.assertTrue(coach_diagnosis["change_reaction"]["near_term_positive"])
         self.assertTrue(coach_diagnosis["change_reaction"]["near_term_negative"])
         self.assertTrue(coach_diagnosis["change_reaction"]["long_term_positive"])
+        self.assertEqual(
+            coach_diagnosis["evidence_basis"]["primary_mechanism"]["canonical_concept"]["concept_id"],
+            "canonical_transfer_break_story",
+        )
         self.assertIn(
             "Front-foot landing quality",
             [item["title"] for item in coach_diagnosis["lower_body_contributors"]],
@@ -210,6 +215,43 @@ class DeterministicExpertSystemTests(unittest.TestCase):
         self.assertEqual(coach_diagnosis["change_strategy"]["change_size"], "micro")
         self.assertEqual(coach_diagnosis["change_strategy"]["adoption_risk"], "low")
         self.assertIsNone(coach_diagnosis["change_reaction"])
+
+    def test_player_surface_filters_coach_only_diagnosis_detail(self):
+        payload = self.engine.build(
+            events={"event_chain": {"quality": 0.84}},
+            action={"action": "SEMI_OPEN", "intent": "semi_open", "confidence": 0.81},
+            risks=[
+                {"risk_id": "front_foot_braking_shock", "signal_strength": 0.78, "confidence": 0.88},
+                {"risk_id": "knee_brace_failure", "signal_strength": 0.82, "confidence": 0.9},
+                {"risk_id": "lateral_trunk_lean", "signal_strength": 0.72, "confidence": 0.86},
+            ],
+            basics={
+                "knee_brace_proxy": {"status": "bad", "confidence": 0.92},
+                "back_foot_stability": {"status": "ok", "confidence": 0.9},
+                "front_foot_toe_alignment": {"status": "semi_open", "confidence": 1.0},
+            },
+            interpretation={"linear_flow": {"flow_state": "INTERRUPTED", "confidence": 0.82, "contributors": []}},
+            estimated_release_speed={
+                "available": True,
+                "confidence": 0.76,
+                "debug": {
+                    "elbow_extension_velocity_deg_per_sec": 165.0,
+                    "wrist_arm_ratio": 1.12,
+                    "shoulder_body_ratio": 0.41,
+                    "pelvis_body_ratio": 0.34,
+                },
+            },
+            account_role="player",
+        )
+
+        coach_diagnosis = payload["coach_diagnosis_v1"]
+        self.assertEqual(coach_diagnosis["detail_policy_id"], "player")
+        self.assertEqual(coach_diagnosis["supporting_contributors"], [])
+        self.assertEqual(coach_diagnosis["upper_body_contributors"], [])
+        self.assertEqual(coach_diagnosis["lower_body_contributors"], [])
+        self.assertEqual(coach_diagnosis["phase_anchored_findings"], [])
+        self.assertIsNone(coach_diagnosis["change_reaction"])
+        self.assertIsNone(coach_diagnosis["evidence_basis"])
 
     def test_history_can_stabilize_archetype_and_surface_variants(self):
         payload = self.engine.build(
