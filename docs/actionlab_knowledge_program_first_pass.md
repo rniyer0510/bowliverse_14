@@ -63,6 +63,43 @@ Structured data-capture templates for:
 
 These templates are the first-pass contract for collecting proprietary ActionLab knowledge.
 
+### `research_sources.yaml`
+
+Canonical source catalog for:
+
+- peer-reviewed biomechanics papers
+- official cricket-body or university research pages
+- expert-practitioner sites
+
+Each source is tagged with an evidence tier so the system can distinguish primary biomechanics truth from coaching translation and heuristics.
+
+### `knowledge_evidence.yaml`
+
+Structured evidence assertions linking sources to:
+
+- contributors
+- mechanisms
+- prescriptions
+- trajectories
+- symptoms
+
+This is the first-pass home for derived claims such as:
+
+- what FFC evidence supports a transfer-break story
+- what supports a load-cost interpretation
+- what is only a coaching translation versus a direct biomechanics finding
+
+### `reconciliation.yaml`
+
+Canonical duplicate/similar-concept reconciliation catalog.
+
+This is where ActionLab can explicitly say:
+
+- these findings are duplicates
+- these findings are similar but not the same
+- this is the canonical concept we want report/history to trend
+- these are neighboring ideas that need human review rather than automatic merging
+
 ## Runtime Usage
 
 The deterministic expert now reads contributor descriptions from the knowledge pack rather than hard-coded Python catalogs.
@@ -77,9 +114,12 @@ Break-point titles and summaries also now come from the coach-judgment vocabular
 2. Review real clips against the questionnaire
 3. Capture intervention outcomes against the defined windows
 4. Promote repeatable expert patterns into mechanisms, prescriptions, and change reactions
+5. Reconcile duplicates and similar concepts before promoting them into runtime truth
 
 ## Important Limitation
 
 This first pass creates the structure for richer findings like BFC neck tilt, but it does not automatically detect every new contributor yet.
 
 The next gains come from teaching more real biomechanical signals and linking them into the pack and deterministic reasoning path.
+
+The new source and reconciliation artifacts are intended to keep that growth disciplined rather than letting the knowledge base drift into duplicated or overlapping concepts.

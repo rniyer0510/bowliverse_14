@@ -38,6 +38,12 @@ class KnowledgePackLoaderTests(unittest.TestCase):
         self.assertIn("transfer_and_block", pack["coach_judgments"]["break_points"])
         self.assertIn("micro", pack["coach_judgments"]["change_size_bands"])
         self.assertIn("next_3_balls", pack["capture_templates"]["outcome_windows"])
+        self.assertIn("glazier_wheat_2014", pack["research_sources"])
+        self.assertIn("evidence_soft_block_ffc", pack["knowledge_evidence"])
+        self.assertIn(
+            "canonical_front_leg_transfer_support",
+            pack["reconciliation"]["canonical_concepts"],
+        )
         self.assertIn(
             "primary_mechanism_id",
             pack["capture_templates"]["coach_review_questionnaire"],
@@ -89,6 +95,14 @@ class KnowledgePackLoaderTests(unittest.TestCase):
         self.assertEqual(
             pack["contributors"]["neck_tilt_left_bfc"]["phase"],
             "BFC",
+        )
+        self.assertEqual(
+            pack["research_sources"]["glazier_wheat_2014"]["evidence_tier"],
+            "A",
+        )
+        self.assertEqual(
+            pack["knowledge_evidence"]["evidence_stack_over_landing"]["target_type"],
+            "prescription",
         )
         self.assertEqual(
             pack["coach_judgments"]["break_points"]["transfer_and_block"]["title"],
@@ -149,6 +163,9 @@ class KnowledgePackLoaderTests(unittest.TestCase):
                         "history_bindings": "history_bindings.yaml",
                         "coach_judgments": "coach_judgments.yaml",
                         "capture_templates": "capture_templates.yaml",
+                        "research_sources": "research_sources.yaml",
+                        "knowledge_evidence": "knowledge_evidence.yaml",
+                        "reconciliation": "reconciliation.yaml",
                         "wording": "wording.yaml",
                     },
                 },

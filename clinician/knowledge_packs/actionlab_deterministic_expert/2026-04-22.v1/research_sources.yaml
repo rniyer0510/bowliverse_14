@@ -1,0 +1,172 @@
+version: actionlab.knowledge_pack.research_sources.v1
+
+research_sources:
+  glazier_wheat_2014:
+    id: glazier_wheat_2014
+    source_type: paper
+    evidence_tier: A
+    title: "An integrated approach to the biomechanics and motor control of cricket fast bowling techniques"
+    publisher: "Sports Medicine"
+    year: "2014"
+    url: "https://pubmed.ncbi.nlm.nih.gov/24065337/"
+    scope: "Integrated review of fast-bowling biomechanics, performance, injury, and coaching relevance."
+    tags:
+      - biomechanics
+      - review
+      - motor_control
+      - coaching_practice
+    status: "reviewed"
+    notes: "Foundational source for mechanism framing and the limitation of simple variable-by-variable coaching."
+
+  senington_2018:
+    id: senington_2018
+    source_type: paper
+    evidence_tier: A
+    title: "Ground reaction force, spinal kinematics and their relationship to lower back pain and injury in cricket fast bowling: A review"
+    publisher: "Journal of Back and Musculoskeletal Rehabilitation"
+    year: "2018"
+    url: "https://pubmed.ncbi.nlm.nih.gov/29562485/"
+    scope: "Links spinal kinematics and loading patterns with lower-back pain and injury risk."
+    tags:
+      - injury
+      - load
+      - spinal_kinematics
+      - review
+    status: "reviewed"
+    notes: "Useful for long-term load outlook and for grounding trunk and spinal cost language."
+
+  felton_2020_ffc:
+    id: felton_2020_ffc
+    source_type: paper
+    evidence_tier: A
+    title: "Optimising the front foot contact phase of the cricket fast bowling action"
+    publisher: "Journal of Sports Sciences"
+    year: "2020"
+    url: "https://pubmed.ncbi.nlm.nih.gov/32475221/"
+    scope: "Simulation-based examination of front-foot-contact technique and ball release speed."
+    tags:
+      - front_foot_contact
+      - performance
+      - simulation
+      - release_speed
+    status: "reviewed"
+    notes: "Strong source for FFC, front-leg support, knee position, and transfer-related mechanism design."
+
+  felton_2023_individual:
+    id: felton_2023_individual
+    source_type: paper
+    evidence_tier: A
+    title: "Optimal initial position and technique for the front foot contact phase of cricket fast bowling"
+    publisher: "Journal of Biomechanics"
+    year: "2023"
+    url: "https://pubmed.ncbi.nlm.nih.gov/37579606/"
+    scope: "Individual-specific optimization study for elite bowlers during the front-foot-contact phase."
+    tags:
+      - front_foot_contact
+      - individual_specific
+      - simulation
+      - elite_bowlers
+    status: "reviewed"
+    notes: "Important for same-symptom/different-bowler nuance and for avoiding one-size-fits-all prescriptions."
+
+  kiely_2021:
+    id: kiely_2021
+    source_type: paper
+    evidence_tier: A
+    title: "The influence of technique and physical capacity on ball release speed in cricket fast-bowling"
+    publisher: "Journal of Sports Sciences"
+    year: "2021"
+    url: "https://pubmed.ncbi.nlm.nih.gov/34096462/"
+    scope: "Technique and physical capacity relationships with ball release speed."
+    tags:
+      - performance
+      - ball_speed
+      - technique
+      - physical_capacity
+    status: "reviewed"
+    notes: "Supports separating pure physical-capacity limitations from technical-chain limitations."
+
+  bhandurge_2024_review:
+    id: bhandurge_2024_review
+    source_type: paper
+    evidence_tier: A
+    title: "Technique Variables Associated with Fast Bowling Performance: A Systematic-Narrative Review"
+    publisher: "Applied Sciences"
+    year: "2024"
+    url: "https://www.mdpi.com/2896884"
+    scope: "Systematic-narrative review of performance-related fast-bowling technique variables."
+    tags:
+      - performance
+      - systematic_review
+      - technique_variables
+      - coaching_translation
+    status: "reviewed"
+    notes: "Good synthesis source for which variables have stronger or weaker performance evidence."
+
+  loughborough_fast_bowling:
+    id: loughborough_fast_bowling
+    source_type: university_research
+    evidence_tier: B
+    title: "Loughborough University fast bowling research spotlight"
+    publisher: "Loughborough University"
+    year: "2026"
+    url: "https://www.lboro.ac.uk/research/spotlights/fast-bowling/"
+    scope: "Research-to-coaching translation for performance, injury reduction, and career longevity."
+    tags:
+      - research_translation
+      - coaching
+      - injury_prevention
+      - performance
+    status: "reviewed"
+    notes: "Useful bridge source between biomechanics papers and coach-facing practice."
+
+  loughborough_ecb_fast_bowling:
+    id: loughborough_ecb_fast_bowling
+    source_type: official_body
+    evidence_tier: B
+    title: "Loughborough and ECB-linked fast bowling research page"
+    publisher: "Loughborough University / ECB-linked research"
+    year: "2026"
+    url: "https://www.lboro.ac.uk/microsites/ssehs/biomechanics/cricket/fast-bowling.html"
+    scope: "Technique, performance, and lumbar bone stress injury research translated into coach development."
+    tags:
+      - ecb
+      - technique
+      - injury
+      - coach_education
+    status: "reviewed"
+    notes: "Valuable for practical coach-education framing and official-program alignment."
+
+  pace_doctor:
+    id: pace_doctor
+    source_type: expert_practitioner
+    evidence_tier: C
+    title: "Pace Doctor"
+    publisher: "Pace Doctor"
+    year: "2026"
+    url: "https://www.pacedoctor.com.au/about"
+    scope: "Expert-practitioner framing around fast-bowling performance, injury prevention, and biomechanics."
+    tags:
+      - practitioner
+      - coaching
+      - biomechanics
+      - intervention
+    status: "candidate"
+    notes: "Use for coaching heuristics and intervention wording only after reconciliation against Tier A/B sources."
+
+  cricket_biomechanist:
+    id: cricket_biomechanist
+    source_type: expert_practitioner
+    evidence_tier: C
+    title: "The Cricket Biomechanist"
+    publisher: "The Cricket Biomechanist"
+    year: "2026"
+    url: "https://thecricketbiomechanist.com/"
+    scope: "Coach mentoring and applied biomechanics translation for cricket technique interventions."
+    tags:
+      - practitioner
+      - coach_education
+      - intervention
+      - biomechanics
+    status: "candidate"
+    notes: "Potentially strong intervention and coach-language source, but should not override peer-reviewed mechanics evidence."

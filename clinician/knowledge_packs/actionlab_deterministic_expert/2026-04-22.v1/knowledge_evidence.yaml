@@ -1,0 +1,115 @@
+version: actionlab.knowledge_pack.knowledge_evidence.v1
+
+evidence_items:
+  evidence_soft_block_ffc:
+    id: evidence_soft_block_ffc
+    target_type: mechanism
+    target_id: soft_block_with_trunk_carry
+    evidence_kind: biomechanics_truth
+    evidence_tier: A
+    source_ids:
+      - felton_2020_ffc
+      - felton_2023_individual
+    claim_summary: "Front-foot-contact organization and front-leg support materially affect whether momentum is converted cleanly or leaked through landing and release."
+    extraction_notes:
+      - "Use this evidence to support the transfer-and-block break-point story."
+      - "Do not overstate a single optimal landing style across all bowlers."
+    coach_consensus_status: reviewed
+    related_evidence_ids:
+      - evidence_front_leg_support
+
+  evidence_front_leg_support:
+    id: evidence_front_leg_support
+    target_type: contributor
+    target_id: front_leg_support_score
+    evidence_kind: biomechanics_truth
+    evidence_tier: A
+    source_ids:
+      - felton_2020_ffc
+      - senington_2018
+    claim_summary: "Landing-leg support is a key contributor for transfer quality and downstream load cost."
+    extraction_notes:
+      - "Useful for both performance and load narratives."
+      - "Supports front-leg support as a renderer and report truth anchor."
+    coach_consensus_status: reviewed
+    related_evidence_ids:
+      - evidence_soft_block_ffc
+
+  evidence_trunk_load_cost:
+    id: evidence_trunk_load_cost
+    target_type: contributor
+    target_id: trunk_drift_after_ffc
+    evidence_kind: load_risk
+    evidence_tier: A
+    source_ids:
+      - senington_2018
+      - glazier_wheat_2014
+    claim_summary: "Trunk and spinal cost language should be grounded in known links between spinal kinematics, technique, and lower-back injury risk."
+    extraction_notes:
+      - "Use careful wording: risk and cost should be framed probabilistically, not diagnostically."
+      - "Supports long-term outlook rather than an instant injury claim."
+    coach_consensus_status: reviewed
+    related_evidence_ids: []
+
+  evidence_release_window_load:
+    id: evidence_release_window_load
+    target_type: mechanism
+    target_id: release_window_instability_under_load
+    evidence_kind: performance_relation
+    evidence_tier: A
+    source_ids:
+      - kiely_2021
+      - bhandurge_2024_review
+    claim_summary: "Release-window stability and upper-chain timing should be treated as performance-relevant, especially when effort rises."
+    extraction_notes:
+      - "Use this to justify why release calmness matters for pace repeatability."
+      - "Do not treat release-timing metrics as isolated from earlier chain organization."
+    coach_consensus_status: reviewed
+    related_evidence_ids: []
+
+  evidence_stack_over_landing:
+    id: evidence_stack_over_landing
+    target_type: prescription
+    target_id: stack_over_landing_leg
+    evidence_kind: coaching_translation
+    evidence_tier: B
+    source_ids:
+      - loughborough_fast_bowling
+      - loughborough_ecb_fast_bowling
+    claim_summary: "Landing and trunk organization should often be coached as a transfer refinement before a harder brace cue is introduced."
+    extraction_notes:
+      - "This is a coaching translation item, not a direct paper claim."
+      - "Supports 'smallest useful change first' for soft-block patterns."
+    coach_consensus_status: reviewed
+    related_evidence_ids:
+      - evidence_soft_block_ffc
+
+  evidence_hip_shoulder_sequence:
+    id: evidence_hip_shoulder_sequence
+    target_type: contributor
+    target_id: hip_shoulder_mismatch
+    evidence_kind: biomechanics_truth
+    evidence_tier: A
+    source_ids:
+      - glazier_wheat_2014
+      - bhandurge_2024_review
+    claim_summary: "Hip-shoulder timing and coordination are part of the sequencing story that separates calm carry from late rescue."
+    extraction_notes:
+      - "Use as a supporting contributor, not a standalone diagnosis."
+    coach_consensus_status: draft
+    related_evidence_ids: []
+
+  evidence_neck_tilt_bfc:
+    id: evidence_neck_tilt_bfc
+    target_type: contributor
+    target_id: neck_tilt_left_bfc
+    evidence_kind: coaching_translation
+    evidence_tier: INTERNAL
+    source_ids:
+      - loughborough_fast_bowling
+    claim_summary: "BFC head-neck tilt can be stored as a supporting phase-anchor when it helps explain earlier organization bias."
+    extraction_notes:
+      - "Treat as supporting context only until stronger direct evidence is reconciled."
+      - "Good candidate for internal coach-review validation against clip annotations."
+    coach_consensus_status: draft
+    related_evidence_ids: []

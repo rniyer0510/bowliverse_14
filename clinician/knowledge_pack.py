@@ -29,6 +29,9 @@ _REQUIRED_INDEX_KEYS = (
     "history_bindings",
     "coach_judgments",
     "capture_templates",
+    "research_sources",
+    "knowledge_evidence",
+    "reconciliation",
     "wording",
 )
 
@@ -110,6 +113,18 @@ def load_knowledge_pack(version: Optional[str] = None) -> Dict[str, Any]:
         "capture_templates": _load_yaml_document(
             pack_root / index["capture_templates"],
             "knowledge pack capture templates",
+        ),
+        "research_sources": _load_yaml_document(
+            pack_root / index["research_sources"],
+            "knowledge pack research sources",
+        ),
+        "knowledge_evidence": _load_yaml_document(
+            pack_root / index["knowledge_evidence"],
+            "knowledge pack evidence catalog",
+        ),
+        "reconciliation": _load_yaml_document(
+            pack_root / index["reconciliation"],
+            "knowledge pack reconciliation rules",
         ),
         "wording": _load_yaml_document(
             pack_root / index["wording"],
@@ -242,6 +257,9 @@ def _validate_knowledge_pack_documents(
     history_bindings_doc = documents["history_bindings"]
     coach_judgments_doc = documents["coach_judgments"]
     capture_templates_doc = documents["capture_templates"]
+    research_sources_doc = documents["research_sources"]
+    knowledge_evidence_doc = documents["knowledge_evidence"]
+    reconciliation_doc = documents["reconciliation"]
     wording_doc = documents["wording"]
 
     globals_cfg = _validate_globals(globals_doc)
@@ -277,6 +295,9 @@ def _validate_knowledge_pack_documents(
         phase_order=globals_cfg["phase_order"],
     )
     capture_templates = _validate_capture_templates(capture_templates_doc)
+    research_sources = _validate_research_sources(research_sources_doc)
+    knowledge_evidence = _validate_knowledge_evidence(knowledge_evidence_doc)
+    reconciliation = _validate_reconciliation(reconciliation_doc)
     wording = _validate_wording(wording_doc)
 
     _validate_symptom_mechanism_links(symptoms, mechanisms.keys())
@@ -300,6 +321,23 @@ def _validate_knowledge_pack_documents(
         contributor_ids=contributors.keys(),
         prescription_ids=prescriptions.keys(),
     )
+    _validate_knowledge_evidence_links(
+        knowledge_evidence,
+        source_ids=research_sources.keys(),
+        symptom_ids=symptoms.keys(),
+        mechanism_ids=mechanisms.keys(),
+        contributor_ids=contributors.keys(),
+        prescription_ids=prescriptions.keys(),
+        trajectory_ids=trajectories.keys(),
+    )
+    _validate_reconciliation_links(
+        reconciliation,
+        symptom_ids=symptoms.keys(),
+        mechanism_ids=mechanisms.keys(),
+        contributor_ids=contributors.keys(),
+        prescription_ids=prescriptions.keys(),
+        evidence_ids=knowledge_evidence.keys(),
+    )
 
     return {
         "manifest": copy.deepcopy(dict(manifest)),
@@ -318,6 +356,9 @@ def _validate_knowledge_pack_documents(
         "history_bindings": history_bindings,
         "coach_judgments": coach_judgments,
         "capture_templates": capture_templates,
+        "research_sources": research_sources,
+        "knowledge_evidence": knowledge_evidence,
+        "reconciliation": reconciliation,
         "wording": wording,
     }
 
@@ -1063,6 +1104,111 @@ def _validate_capture_window_collection(document: Mapping[str, Any]) -> Dict[str
     return windows
 
 
+def _validate_research_sources(document: Mapping[str, Any]) -> Dict[str, Dict[str, Any]]:
+    sources = _require_entity_mapping(
+        document,
+        version_key="version",
+        collection_key="research_sources",
+        label="knowledge pack research sources",
+    )
+    for source_id, source in sources.items():
+        label = f"knowledge pack research source {source_id}"
+        _require_matching_id(source_id, source, "knowledge pack research source")
+        source_type = _require_string(source, "source_type", label)
+        if source_type not in {
+            "paper",
+            "official_body",
+            "university_research",
+            "expert_practitioner",
+            "internal_review",
+        }:
+            raise ValueError(f"{label} source_type must be a supported source type")
+        evidence_tier = _require_string(source, "evidence_tier", label)
+        if evidence_tier not in {"A", "B", "C", "INTERNAL"}:
+            raise ValueError(f"{label} evidence_tier must be A, B, C, or INTERNAL")
+        _require_string(source, "title", label)
+        _require_string(source, "publisher", label)
+        _require_string(source, "year", label)
+        _require_string(source, "url", label)
+        _require_string(source, "scope", label)
+        _require_str_list(source, "tags", label)
+        _require_string(source, "status", label)
+        _require_string(source, "notes", label)
+    return sources
+
+
+def _validate_knowledge_evidence(document: Mapping[str, Any]) -> Dict[str, Dict[str, Any]]:
+    evidence_items = _require_entity_mapping(
+        document,
+        version_key="version",
+        collection_key="evidence_items",
+        label="knowledge pack evidence items",
+    )
+    for evidence_id, evidence in evidence_items.items():
+        label = f"knowledge pack evidence item {evidence_id}"
+        _require_matching_id(evidence_id, evidence, "knowledge pack evidence item")
+        target_type = _require_string(evidence, "target_type", label)
+        if target_type not in {
+            "symptom",
+            "mechanism",
+            "contributor",
+            "prescription",
+            "trajectory",
+        }:
+            raise ValueError(f"{label} target_type must be a supported knowledge target")
+        _require_string(evidence, "target_id", label)
+        evidence_kind = _require_string(evidence, "evidence_kind", label)
+        if evidence_kind not in {
+            "biomechanics_truth",
+            "coaching_translation",
+            "intervention_heuristic",
+            "load_risk",
+            "performance_relation",
+        }:
+            raise ValueError(f"{label} evidence_kind must be a supported evidence kind")
+        evidence_tier = _require_string(evidence, "evidence_tier", label)
+        if evidence_tier not in {"A", "B", "C", "INTERNAL"}:
+            raise ValueError(f"{label} evidence_tier must be A, B, C, or INTERNAL")
+        _require_str_list(evidence, "source_ids", label)
+        _require_string(evidence, "claim_summary", label)
+        _require_str_list(evidence, "extraction_notes", label)
+        consensus = _require_string(evidence, "coach_consensus_status", label)
+        if consensus not in {"draft", "reviewed", "accepted"}:
+            raise ValueError(f"{label} coach_consensus_status must be draft, reviewed, or accepted")
+        _require_str_list(evidence, "related_evidence_ids", label)
+    return evidence_items
+
+
+def _validate_reconciliation(document: Mapping[str, Any]) -> Dict[str, Any]:
+    _require_string(document, "version", "knowledge pack reconciliation")
+    canonical_concepts = _require_entity_mapping(
+        document,
+        version_key="version",
+        collection_key="canonical_concepts",
+        label="knowledge pack canonical concepts",
+    )
+    for concept_id, concept in canonical_concepts.items():
+        label = f"knowledge pack canonical concept {concept_id}"
+        _require_matching_id(concept_id, concept, "knowledge pack canonical concept")
+        concept_type = _require_string(concept, "concept_type", label)
+        if concept_type not in {"contributor", "mechanism", "prescription", "symptom"}:
+            raise ValueError(f"{label} concept_type must be contributor, mechanism, prescription, or symptom")
+        canonical_target_type = _require_string(concept, "canonical_target_type", label)
+        if canonical_target_type not in {"contributor", "mechanism", "prescription", "symptom"}:
+            raise ValueError(f"{label} canonical_target_type must be a supported target type")
+        _require_string(concept, "canonical_target_id", label)
+        _require_string(concept, "title", label)
+        _require_string(concept, "merge_status", label)
+        _require_str_list(concept, "duplicate_targets", label)
+        _require_str_list(concept, "similar_targets", label)
+        _require_str_list(concept, "related_evidence_ids", label)
+        _require_string(concept, "reconciliation_note", label)
+    return {
+        "version": document["version"],
+        "canonical_concepts": canonical_concepts,
+    }
+
+
 def _validate_wording(document: Mapping[str, Any]) -> Dict[str, Any]:
     _require_string(document, "version", "knowledge pack wording")
     hedges = _require_mapping(document, "hedges", "knowledge pack wording")
@@ -1367,6 +1513,94 @@ def _validate_capture_template_links(
                 option_sets[option_group],
                 f"knowledge pack capture template field {field_id} options",
             )
+
+
+def _validate_knowledge_evidence_links(
+    knowledge_evidence: Mapping[str, Mapping[str, Any]],
+    *,
+    source_ids: Iterable[str],
+    symptom_ids: Iterable[str],
+    mechanism_ids: Iterable[str],
+    contributor_ids: Iterable[str],
+    prescription_ids: Iterable[str],
+    trajectory_ids: Iterable[str],
+) -> None:
+    allowed_sources = set(source_ids)
+    target_sets = {
+        "symptom": set(symptom_ids),
+        "mechanism": set(mechanism_ids),
+        "contributor": set(contributor_ids),
+        "prescription": set(prescription_ids),
+        "trajectory": set(trajectory_ids),
+    }
+    allowed_evidence_ids = set(knowledge_evidence.keys())
+    for evidence_id, evidence in knowledge_evidence.items():
+        _validate_known_ids(
+            evidence["source_ids"],
+            allowed_sources,
+            f"knowledge pack evidence item {evidence_id} source_ids",
+        )
+        target_type = evidence["target_type"]
+        target_id = evidence["target_id"]
+        if target_id not in target_sets[target_type]:
+            raise ValueError(
+                f"knowledge pack evidence item {evidence_id} target_id {target_id} is unknown for type {target_type}"
+            )
+        _validate_known_ids(
+            evidence["related_evidence_ids"],
+            allowed_evidence_ids,
+            f"knowledge pack evidence item {evidence_id} related_evidence_ids",
+        )
+
+
+def _validate_reconciliation_links(
+    reconciliation: Mapping[str, Any],
+    *,
+    symptom_ids: Iterable[str],
+    mechanism_ids: Iterable[str],
+    contributor_ids: Iterable[str],
+    prescription_ids: Iterable[str],
+    evidence_ids: Iterable[str],
+) -> None:
+    target_sets = {
+        "symptom": set(symptom_ids),
+        "mechanism": set(mechanism_ids),
+        "contributor": set(contributor_ids),
+        "prescription": set(prescription_ids),
+    }
+    allowed_evidence = set(evidence_ids)
+
+    def _validate_target_ref(value: str, label: str) -> None:
+        target_type, sep, target_id = value.partition(":")
+        if sep != ":" or not target_type or not target_id:
+            raise ValueError(f"{label} must use target_type:target_id format")
+        if target_type not in target_sets:
+            raise ValueError(f"{label} uses unsupported target_type {target_type}")
+        if target_id not in target_sets[target_type]:
+            raise ValueError(f"{label} references unknown target_id {target_id}")
+
+    for concept_id, concept in reconciliation["canonical_concepts"].items():
+        canonical_type = concept["canonical_target_type"]
+        canonical_id = concept["canonical_target_id"]
+        if canonical_id not in target_sets[canonical_type]:
+            raise ValueError(
+                f"knowledge pack canonical concept {concept_id} references unknown canonical target {canonical_type}:{canonical_id}"
+            )
+        for ref in concept["duplicate_targets"]:
+            _validate_target_ref(
+                ref,
+                f"knowledge pack canonical concept {concept_id} duplicate target {ref}",
+            )
+        for ref in concept["similar_targets"]:
+            _validate_target_ref(
+                ref,
+                f"knowledge pack canonical concept {concept_id} similar target {ref}",
+            )
+        _validate_known_ids(
+            concept["related_evidence_ids"],
+            allowed_evidence,
+            f"knowledge pack canonical concept {concept_id} related_evidence_ids",
+        )
 
 
 def _require_entity_mapping(

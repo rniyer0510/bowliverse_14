@@ -1,0 +1,71 @@
+version: actionlab.knowledge_pack.reconciliation.v1
+
+canonical_concepts:
+  canonical_front_leg_transfer_support:
+    id: canonical_front_leg_transfer_support
+    concept_type: contributor
+    canonical_target_type: contributor
+    canonical_target_id: front_leg_support_score
+    title: "Front-leg transfer support"
+    merge_status: reviewed
+    duplicate_targets:
+      - "contributor:front_leg_support_score"
+    similar_targets:
+      - "contributor:front_foot_braking_shock"
+      - "contributor:knee_brace_failure"
+      - "contributor:chest_stack_over_landing"
+    related_evidence_ids:
+      - evidence_front_leg_support
+      - evidence_soft_block_ffc
+    reconciliation_note: "These findings are related but not identical. Front-foot landing quality, knee support, and chest stacking should remain separate observations unless future evidence proves they are redundant."
+
+  canonical_upper_chain_late_rescue:
+    id: canonical_upper_chain_late_rescue
+    concept_type: contributor
+    canonical_target_type: contributor
+    canonical_target_id: shoulder_rotation_timing
+    title: "Upper-chain late rescue"
+    merge_status: draft
+    duplicate_targets:
+      - "contributor:shoulder_rotation_timing"
+    similar_targets:
+      - "contributor:trunk_rotation_snap"
+      - "contributor:hip_shoulder_mismatch"
+      - "contributor:lateral_trunk_lean"
+    related_evidence_ids:
+      - evidence_hip_shoulder_sequence
+      - evidence_release_window_load
+    reconciliation_note: "These contributors often appear together but should not be merged automatically. Keep timing, mismatch, and visible trunk spill distinct until clip-review evidence shows they are being over-counted."
+
+  canonical_transfer_break_story:
+    id: canonical_transfer_break_story
+    concept_type: mechanism
+    canonical_target_type: mechanism
+    canonical_target_id: soft_block_with_trunk_carry
+    title: "Transfer-break story"
+    merge_status: reviewed
+    duplicate_targets:
+      - "mechanism:soft_block_with_trunk_carry"
+    similar_targets:
+      - "mechanism:gather_disorganization_before_block"
+      - "mechanism:underused_transfer_window_with_late_dump"
+    related_evidence_ids:
+      - evidence_soft_block_ffc
+      - evidence_stack_over_landing
+    reconciliation_note: "Same visible symptom can come from multiple neighboring transfer stories. Reconcile by asking whether the bowler arrives poorly organized, lands softly, or simply fails to use an available transfer window."
+
+  canonical_smallest_useful_change:
+    id: canonical_smallest_useful_change
+    concept_type: prescription
+    canonical_target_type: prescription
+    canonical_target_id: stack_over_landing_leg
+    title: "Smallest useful transfer change"
+    merge_status: reviewed
+    duplicate_targets:
+      - "prescription:stack_over_landing_leg"
+    similar_targets:
+      - "prescription:brace_without_reaching"
+      - "prescription:organize_the_gather_line"
+    related_evidence_ids:
+      - evidence_stack_over_landing
+    reconciliation_note: "These prescriptions can look similar in language. Reconcile them by deciding whether the bowler needs earlier organization, calmer stacking, or a clearer block-under-body cue."
