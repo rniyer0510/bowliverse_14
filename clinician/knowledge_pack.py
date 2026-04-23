@@ -705,7 +705,30 @@ def _validate_prescriptions(document: Mapping[str, Any]) -> Dict[str, Dict[str, 
         _require_str_list(prescription, "works_best_when", label)
         _require_str_list(prescription, "contraindicated_when", label)
         _require_str_list(prescription, "followup_metric_targets", label)
+        _validate_change_reaction(prescription, label)
     return prescriptions
+
+
+def _validate_change_reaction(
+    prescription: Mapping[str, Any],
+    label: str,
+) -> Dict[str, Any]:
+    reaction = _require_mapping(prescription, "change_reaction", label)
+    reaction_label = f"{label} change_reaction"
+    _require_str_list(reaction, "near_term_positive", reaction_label)
+    _require_str_list(reaction, "near_term_negative", reaction_label)
+    _require_str_list(reaction, "medium_term_positive", reaction_label)
+    _require_str_list(reaction, "medium_term_negative", reaction_label)
+    _require_str_list(reaction, "long_term_positive", reaction_label)
+    _require_str_list(reaction, "long_term_negative", reaction_label)
+    _require_string(reaction, "selection_window_safety", reaction_label)
+    match_pressure_risk = _require_string(reaction, "match_pressure_risk", reaction_label)
+    if match_pressure_risk not in {"low", "medium", "high"}:
+        raise ValueError(
+            f"{reaction_label} match_pressure_risk must be one of low, medium, high"
+        )
+    _require_string(reaction, "adoption_rationale", reaction_label)
+    return reaction
 
 
 def _validate_followup_checks(document: Mapping[str, Any]) -> Dict[str, Dict[str, Any]]:

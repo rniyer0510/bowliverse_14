@@ -46,6 +46,14 @@ class KnowledgePackLoaderTests(unittest.TestCase):
             pack["prescriptions"]["stack_over_landing_leg"]["review_window_type"],
             "next_3_runs",
         )
+        self.assertIn(
+            "change_reaction",
+            pack["prescriptions"]["stack_over_landing_leg"],
+        )
+        self.assertEqual(
+            pack["prescriptions"]["stabilize_release_window_under_load"]["change_reaction"]["match_pressure_risk"],
+            "high",
+        )
         self.assertEqual(
             pack["manifest"]["min_engine_version"],
             ACTIONLAB_EXPERT_ENGINE_VERSION,

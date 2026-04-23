@@ -1484,6 +1484,7 @@ class DeterministicExpertSystem:
                     "review_window_type": cfg["review_window_type"],
                     "followup_metric_targets": list(cfg["followup_metric_targets"]),
                     "avoid_for_now": list(cfg["avoid_for_now"]),
+                    "change_reaction": dict(cfg["change_reaction"]),
                 }
             )
         return {
@@ -1641,6 +1642,7 @@ class DeterministicExpertSystem:
 
         prescriptions = prescription_plan.get("prescriptions") or []
         primary_prescription = prescriptions[0] if prescriptions else {}
+        primary_change_reaction = primary_prescription.get("change_reaction") or {}
         followup_checks = history_plan.get("followup_checks") or []
         primary_followup = followup_checks[0] if followup_checks else {}
         history_bindings = history_plan.get("history_bindings") or []
@@ -1653,6 +1655,7 @@ class DeterministicExpertSystem:
             capture_quality=capture_quality,
             diagnosis_status=diagnosis_status,
             primary_prescription=primary_prescription,
+            primary_change_reaction=primary_change_reaction,
             primary_followup=primary_followup,
             trajectories=trajectories,
         )
@@ -1728,6 +1731,7 @@ class DeterministicExpertSystem:
                 else None
             ),
             "change_strategy": change_strategy,
+            "change_reaction": primary_change_reaction if primary_change_reaction else None,
             "do_not_change_yet": list(primary_prescription.get("avoid_for_now") or []),
             "improvement_check": (
                 {
@@ -1968,6 +1972,7 @@ class DeterministicExpertSystem:
         capture_quality: Dict[str, Any],
         diagnosis_status: str,
         primary_prescription: Dict[str, Any],
+        primary_change_reaction: Dict[str, Any],
         primary_followup: Dict[str, Any],
         trajectories: List[Dict[str, Any]],
     ) -> Dict[str, Any]:
@@ -1976,6 +1981,9 @@ class DeterministicExpertSystem:
                 "change_size": "hold",
                 "adoption_risk": "unknown",
                 "why_smallest_useful_change": "Capture quality is too weak to justify a coaching change yet.",
+                "selection_window_safety": "Do not change the action from this clip alone.",
+                "match_pressure_risk": "unknown",
+                "adoption_rationale": "The safest choice is to improve evidence first, not to coach a change from unclear anchors.",
                 "expected_near_term_tradeoff": "Do not introduce a mechanical change until the anchors are clearer.",
                 "next_review_window": "Retest with a clearer clip first.",
                 "improvement_signal": "Cleaner BFC, FFC, and release anchors before a correction is introduced.",
@@ -1986,6 +1994,9 @@ class DeterministicExpertSystem:
                 "change_size": "micro",
                 "adoption_risk": "low",
                 "why_smallest_useful_change": "The system is holding back, so the safest move is to review anchors before making a bigger change.",
+                "selection_window_safety": "Safe because it avoids a rebuild cue while the story is still uncertain.",
+                "match_pressure_risk": "low",
+                "adoption_rationale": "Bowlers usually accept anchor-checking more easily than a change that might threaten short-term performance.",
                 "expected_near_term_tradeoff": "This should protect near-term performance because it avoids a premature rebuild cue.",
                 "next_review_window": primary_followup.get("recommended_review_window")
                 or "Next 3 deliveries, then next session.",
@@ -1993,6 +2004,9 @@ class DeterministicExpertSystem:
             }
 
         avoid_for_now = list(primary_prescription.get("avoid_for_now") or [])
+        match_pressure_risk = str(
+            primary_change_reaction.get("match_pressure_risk") or ""
+        ).strip().lower()
         if avoid_for_now:
             change_size = "micro"
         elif trajectories:
@@ -2000,14 +2014,24 @@ class DeterministicExpertSystem:
         else:
             change_size = "micro"
 
-        adoption_risk = "low" if change_size == "micro" else "medium"
-        if len(avoid_for_now) >= 3:
-            adoption_risk = "high"
+        adoption_risk = (
+            match_pressure_risk
+            if match_pressure_risk in {"low", "medium", "high"}
+            else ("low" if change_size == "micro" else "medium")
+        )
+        if len(avoid_for_now) >= 3 and adoption_risk != "high":
+            adoption_risk = "medium"
 
         expected_tradeoff = (
-            "This should be small enough to protect near-term performance while still changing the main leak."
+            (
+                (primary_change_reaction.get("near_term_negative") or [None])[0]
+                or "This should be small enough to protect near-term performance while still changing the main leak."
+            )
             if change_size == "micro"
-            else "This may feel different for a short period, so it should be introduced outside the highest-pressure moments."
+            else (
+                (primary_change_reaction.get("near_term_negative") or [None])[0]
+                or "This may feel different for a short period, so it should be introduced outside the highest-pressure moments."
+            )
         )
 
         return {
@@ -2017,6 +2041,9 @@ class DeterministicExpertSystem:
                 primary_prescription.get("why_this_first")
                 or "This is the smallest useful intervention before larger changes are considered."
             ),
+            "selection_window_safety": primary_change_reaction.get("selection_window_safety"),
+            "match_pressure_risk": adoption_risk,
+            "adoption_rationale": primary_change_reaction.get("adoption_rationale"),
             "expected_near_term_tradeoff": expected_tradeoff,
             "next_review_window": primary_followup.get("recommended_review_window")
             or primary_prescription.get("reassess_after"),

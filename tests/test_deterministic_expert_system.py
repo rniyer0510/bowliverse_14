@@ -138,6 +138,15 @@ class DeterministicExpertSystemTests(unittest.TestCase):
         self.assertTrue(
             coach_diagnosis["change_strategy"]["why_smallest_useful_change"]
         )
+        self.assertEqual(
+            coach_diagnosis["change_strategy"]["match_pressure_risk"],
+            "low",
+        )
+        self.assertTrue(coach_diagnosis["change_strategy"]["selection_window_safety"])
+        self.assertIsNotNone(coach_diagnosis["change_reaction"])
+        self.assertTrue(coach_diagnosis["change_reaction"]["near_term_positive"])
+        self.assertTrue(coach_diagnosis["change_reaction"]["near_term_negative"])
+        self.assertTrue(coach_diagnosis["change_reaction"]["long_term_positive"])
 
     def test_returns_no_match_when_pattern_is_clean(self):
         payload = self.engine.build(
@@ -192,6 +201,7 @@ class DeterministicExpertSystemTests(unittest.TestCase):
         self.assertTrue(coach_diagnosis["what_is_ok"])
         self.assertEqual(coach_diagnosis["change_strategy"]["change_size"], "micro")
         self.assertEqual(coach_diagnosis["change_strategy"]["adoption_risk"], "low")
+        self.assertIsNone(coach_diagnosis["change_reaction"])
 
     def test_history_can_stabilize_archetype_and_surface_variants(self):
         payload = self.engine.build(
@@ -336,6 +346,7 @@ class DeterministicExpertSystemTests(unittest.TestCase):
         self.assertEqual(payload["coach_diagnosis_v1"]["capture_quality_status"], "UNUSABLE")
         self.assertEqual(payload["coach_diagnosis_v1"]["state"], "NO_MATCH")
         self.assertEqual(payload["coach_diagnosis_v1"]["change_strategy"]["change_size"], "hold")
+        self.assertIsNone(payload["coach_diagnosis_v1"]["change_reaction"])
 
 
 if __name__ == "__main__":
