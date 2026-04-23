@@ -95,6 +95,49 @@ class DeterministicExpertSystemTests(unittest.TestCase):
             payload["presentation_payload_v1"]["match"]["primary_mechanism_id"],
             "soft_block_with_trunk_carry",
         )
+        coach_diagnosis = payload["coach_diagnosis_v1"]
+        self.assertEqual(coach_diagnosis["state"], "MATCH")
+        self.assertEqual(
+            coach_diagnosis["primary_mechanism"]["id"],
+            "soft_block_with_trunk_carry",
+        )
+        self.assertEqual(
+            coach_diagnosis["visible_symptom"]["id"],
+            "front_leg_softening",
+        )
+        self.assertTrue(coach_diagnosis["upper_body_contributors"])
+        self.assertTrue(coach_diagnosis["lower_body_contributors"])
+        self.assertEqual(
+            coach_diagnosis["renderer_bindings"]["selected_story_id"],
+            "soft_block_trunk_carry_story",
+        )
+        self.assertIn(
+            "transfer_block_stability",
+            [
+                binding["id"]
+                for binding in coach_diagnosis["history_bindings"]["bindings"]
+            ],
+        )
+        self.assertEqual(
+            coach_diagnosis["first_priority"]["prescription_id"],
+            "stack_over_landing_leg",
+        )
+        self.assertTrue(coach_diagnosis["do_not_change_yet"])
+        self.assertEqual(
+            coach_diagnosis["primary_break_point"]["phase_id"],
+            "transfer_and_block",
+        )
+        self.assertEqual(
+            coach_diagnosis["change_strategy"]["change_size"],
+            "micro",
+        )
+        self.assertEqual(
+            coach_diagnosis["change_strategy"]["adoption_risk"],
+            "low",
+        )
+        self.assertTrue(
+            coach_diagnosis["change_strategy"]["why_smallest_useful_change"]
+        )
 
     def test_returns_no_match_when_pattern_is_clean(self):
         payload = self.engine.build(
@@ -142,6 +185,13 @@ class DeterministicExpertSystemTests(unittest.TestCase):
             "efficient_transfer_bowler",
         )
         self.assertEqual(payload["prescription_plan_v1"]["prescriptions"], [])
+        coach_diagnosis = payload["coach_diagnosis_v1"]
+        self.assertEqual(coach_diagnosis["state"], "NO_MATCH")
+        self.assertIsNone(coach_diagnosis["primary_mechanism"])
+        self.assertIsNotNone(coach_diagnosis["holdback"])
+        self.assertTrue(coach_diagnosis["what_is_ok"])
+        self.assertEqual(coach_diagnosis["change_strategy"]["change_size"], "micro")
+        self.assertEqual(coach_diagnosis["change_strategy"]["adoption_risk"], "low")
 
     def test_history_can_stabilize_archetype_and_surface_variants(self):
         payload = self.engine.build(
@@ -246,6 +296,10 @@ class DeterministicExpertSystemTests(unittest.TestCase):
             payload["presentation_payload_v1"]["selected_surface"],
             "reviewer",
         )
+        self.assertEqual(
+            payload["coach_diagnosis_v1"]["history_bindings"]["prior_run_count"],
+            2,
+        )
 
     def test_unusable_capture_quality_short_circuits_mechanism_scoring(self):
         payload = self.engine.build(
@@ -279,6 +333,9 @@ class DeterministicExpertSystemTests(unittest.TestCase):
             payload["presentation_payload_v1"]["capture_quality_status"],
             "UNUSABLE",
         )
+        self.assertEqual(payload["coach_diagnosis_v1"]["capture_quality_status"], "UNUSABLE")
+        self.assertEqual(payload["coach_diagnosis_v1"]["state"], "NO_MATCH")
+        self.assertEqual(payload["coach_diagnosis_v1"]["change_strategy"]["change_size"], "hold")
 
 
 if __name__ == "__main__":

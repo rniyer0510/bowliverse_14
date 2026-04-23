@@ -129,6 +129,92 @@ _PRESENTATION_STATUS_RANK = {
     "confident_match": 3,
 }
 
+_RISK_CONTRIBUTOR_CATALOG: Dict[str, Dict[str, str]] = {
+    "lateral_trunk_lean": {
+        "title": "Trunk lean",
+        "body_group": "upper_body",
+        "phase": "RELEASE",
+        "summary": "The trunk is leaning away instead of staying more stacked through release.",
+    },
+    "hip_shoulder_mismatch": {
+        "title": "Hip-shoulder mismatch",
+        "body_group": "upper_body",
+        "phase": "FFC_TO_RELEASE",
+        "summary": "Upper and lower segments are not rotating together cleanly into release.",
+    },
+    "trunk_rotation_snap": {
+        "title": "Shoulder rotation timing",
+        "body_group": "upper_body",
+        "phase": "FFC_TO_RELEASE",
+        "summary": "Shoulder-trunk rotation is arriving abruptly and too late in the chain.",
+    },
+    "foot_line_deviation": {
+        "title": "Foot line deviation",
+        "body_group": "lower_body",
+        "phase": "FFC",
+        "summary": "The landing line is not guiding force cleanly toward target.",
+    },
+    "front_foot_braking_shock": {
+        "title": "Front-foot landing quality",
+        "body_group": "lower_body",
+        "phase": "FFC",
+        "summary": "Landing is not becoming a calm, stable transfer point.",
+    },
+    "knee_brace_failure": {
+        "title": "Knee brace loss",
+        "body_group": "lower_body",
+        "phase": "FFC_TO_RELEASE",
+        "summary": "The front knee is not supporting the action strongly enough through release.",
+    },
+}
+
+_METRIC_CONTRIBUTOR_CATALOG: Dict[str, Dict[str, str]] = {
+    "shoulder_rotation_timing": {
+        "title": "Shoulder rotation timing",
+        "body_group": "upper_body",
+        "phase": "FFC_TO_RELEASE",
+        "summary": "Shoulder rotation timing is arriving later than we want for a calm release window.",
+    },
+    "pelvis_trunk_alignment": {
+        "title": "Pelvic movement organization",
+        "body_group": "lower_body",
+        "phase": "BFC_TO_FFC",
+        "summary": "Pelvis-to-trunk organization is not staying clean enough into landing.",
+    },
+    "chest_stack_over_landing": {
+        "title": "Chest stack over landing",
+        "body_group": "lower_body",
+        "phase": "FFC_TO_RELEASE",
+        "summary": "The chest is not getting stacked over the landing leg early enough.",
+    },
+    "front_leg_support_score": {
+        "title": "Front-leg support",
+        "body_group": "lower_body",
+        "phase": "FFC_TO_RELEASE",
+        "summary": "The landing leg is not turning landing into a stable transfer base.",
+    },
+    "trunk_drift_after_ffc": {
+        "title": "Late trunk drift",
+        "body_group": "upper_body",
+        "phase": "FFC_TO_RELEASE",
+        "summary": "The trunk keeps travelling after landing instead of settling into release.",
+    },
+}
+
+_PHASE_LABELS: Dict[str, str] = {
+    "approach_build": "Approach build",
+    "gather_and_organize": "Gather and organize",
+    "transfer_and_block": "Transfer and block",
+    "whip_and_release": "Whip and release",
+    "dissipation_and_recovery": "Dissipation and recovery",
+    "BFC": "Back-foot contact",
+    "FFC": "Front-foot contact",
+    "UAH": "Upper-arm horizontal",
+    "RELEASE": "Release",
+    "FFC_TO_RELEASE": "Front-foot contact to release",
+    "BFC_TO_FFC": "Back-foot contact to front-foot contact",
+}
+
 
 def _status_score(status: str) -> float:
     normalized = str(status or "").strip().lower()
@@ -246,6 +332,21 @@ class DeterministicExpertSystem:
             archetype=archetype,
             history_context=history_context,
         )
+        coach_diagnosis = self._build_coach_diagnosis(
+            events=events,
+            risks=risks,
+            metrics=metrics,
+            symptoms=symptoms,
+            hypotheses=hypotheses,
+            selection=selection,
+            capture_quality=capture_quality,
+            render_reasoning=render_reasoning,
+            mechanism_explanation=mechanism_explanation,
+            prescription_plan=prescription_plan,
+            history_plan=history_plan,
+            archetype=archetype,
+            history_context=history_context,
+        )
         presentation_payload = self._build_presentation_payload(
             selection=selection,
             hypotheses=hypotheses,
@@ -275,6 +376,7 @@ class DeterministicExpertSystem:
             "mechanism_explanation_v1": mechanism_explanation,
             "prescription_plan_v1": prescription_plan,
             "history_plan_v1": history_plan,
+            "coach_diagnosis_v1": coach_diagnosis,
             "presentation_payload_v1": presentation_payload,
         }
 
@@ -1484,6 +1586,522 @@ class DeterministicExpertSystem:
             "followup_checks": followup_checks,
             "render_stories": render_stories,
         }
+
+    def _build_coach_diagnosis(
+        self,
+        *,
+        events: Dict[str, Any],
+        risks: List[Dict[str, Any]],
+        metrics: Dict[str, Any],
+        symptoms: List[Dict[str, Any]],
+        hypotheses: List[Dict[str, Any]],
+        selection: Dict[str, Any],
+        capture_quality: Dict[str, Any],
+        render_reasoning: Dict[str, Any],
+        mechanism_explanation: Dict[str, Any],
+        prescription_plan: Dict[str, Any],
+        history_plan: Dict[str, Any],
+        archetype: Optional[Dict[str, Any]],
+        history_context: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        diagnosis_status = str(selection.get("diagnosis_status") or "no_match")
+        state = self._presentation_state(diagnosis_status)
+        primary = selection.get("primary") or {}
+        if not isinstance(primary, dict):
+            primary = {}
+
+        visible_symptom = self._visible_symptom(symptoms)
+        supporting_contributors = self._supporting_contributors(
+            risks=risks,
+            metrics=metrics,
+            symptoms=symptoms,
+            selection=selection,
+        )
+        upper_body = [
+            item for item in supporting_contributors if item.get("body_group") == "upper_body"
+        ]
+        lower_body = [
+            item for item in supporting_contributors if item.get("body_group") == "lower_body"
+        ]
+        phase_findings = self._phase_anchored_findings(
+            events=events,
+            visible_symptom=visible_symptom,
+            contributors=supporting_contributors,
+        )
+
+        trajectory_ids = list(selection.get("selected_trajectory_ids") or [])
+        trajectories = [
+            self._pack["trajectories"][trajectory_id]
+            for trajectory_id in trajectory_ids
+            if trajectory_id in self._pack["trajectories"]
+        ]
+        near_term = trajectories[0]["performance_consequence"] if trajectories else None
+        medium_term = trajectories[0]["repeatability_consequence"] if trajectories else None
+        long_term = trajectories[0]["load_consequence"] if trajectories else None
+
+        prescriptions = prescription_plan.get("prescriptions") or []
+        primary_prescription = prescriptions[0] if prescriptions else {}
+        followup_checks = history_plan.get("followup_checks") or []
+        primary_followup = followup_checks[0] if followup_checks else {}
+        history_bindings = history_plan.get("history_bindings") or []
+        render_stories = history_plan.get("render_stories") or []
+        primary_break_point = self._primary_break_point(
+            primary=primary,
+            visible_symptom=visible_symptom,
+        )
+        change_strategy = self._change_strategy(
+            capture_quality=capture_quality,
+            diagnosis_status=diagnosis_status,
+            primary_prescription=primary_prescription,
+            primary_followup=primary_followup,
+            trajectories=trajectories,
+        )
+
+        what_is_ok = self._what_is_ok(
+            metrics=metrics,
+            archetype=archetype,
+        )
+        what_is_not_ok = self._what_is_not_ok(
+            visible_symptom=visible_symptom,
+            primary=primary,
+            contributors=supporting_contributors,
+        )
+        compensations = self._compensation_patterns(symptoms)
+
+        holdback = {
+            "reason": (
+                selection.get("no_match_reason")
+                or mechanism_explanation.get("performance_impact")
+                or None
+            ),
+            "top_candidates": [
+                {
+                    "id": item.get("id"),
+                    "title": item.get("title"),
+                    "overall_confidence": item.get("overall_confidence"),
+                }
+                for item in hypotheses[:2]
+                if isinstance(item, dict)
+            ],
+        }
+
+        return {
+            "version": "coach_diagnosis_v1",
+            "knowledge_pack_id": self._pack["pack_id"],
+            "knowledge_pack_version": self._pack["pack_version"],
+            "state": state,
+            "diagnosis_status": diagnosis_status,
+            "capture_quality_status": capture_quality.get("status"),
+            "visible_symptom": visible_symptom,
+            "primary_mechanism": (
+                {
+                    "id": primary.get("id"),
+                    "title": primary.get("title"),
+                    "family": primary.get("family"),
+                    "summary": primary.get("summary"),
+                    "overall_confidence": primary.get("overall_confidence"),
+                    "matched_symptom_ids": list(primary.get("matched_symptom_ids") or []),
+                    "history_story": mechanism_explanation.get("history_story"),
+                }
+                if primary
+                else None
+            ),
+            "supporting_contributors": supporting_contributors,
+            "upper_body_contributors": upper_body,
+            "lower_body_contributors": lower_body,
+            "compensations": compensations,
+            "what_is_ok": what_is_ok,
+            "what_is_not_ok": what_is_not_ok,
+            "primary_break_point": primary_break_point,
+            "near_term_effect": near_term,
+            "medium_term_effect": medium_term,
+            "long_term_outlook": long_term,
+            "first_priority": (
+                {
+                    "prescription_id": primary_prescription.get("id"),
+                    "title": primary_prescription.get("title"),
+                    "goal": primary_prescription.get("goal"),
+                    "primary_cue": primary_prescription.get("primary_cue"),
+                    "why_this_first": primary_prescription.get("why_this_first"),
+                }
+                if primary_prescription
+                else None
+            ),
+            "change_strategy": change_strategy,
+            "do_not_change_yet": list(primary_prescription.get("avoid_for_now") or []),
+            "improvement_check": (
+                {
+                    "coach_check": mechanism_explanation.get("coach_check"),
+                    "check_id": primary_followup.get("id"),
+                    "title": primary_followup.get("title"),
+                    "recommended_review_window": primary_followup.get("recommended_review_window"),
+                    "success_signals": list(primary_followup.get("success_signals") or []),
+                    "failure_signals": list(primary_followup.get("failure_signals") or []),
+                    "history_graph_binding": primary_followup.get("history_graph_binding"),
+                    "followup_metric_targets": list(primary_prescription.get("followup_metric_targets") or []),
+                }
+            ),
+            "phase_anchored_findings": phase_findings,
+            "renderer_bindings": {
+                "renderer_mode": render_reasoning.get("renderer_mode"),
+                "selected_story_id": render_reasoning.get("selected_story_id"),
+                "story_ids": list(selection.get("selected_render_story_ids") or []),
+                "stories": render_stories,
+            },
+            "history_bindings": {
+                "history_window_runs": history_plan.get("history_window_runs"),
+                "prior_run_count": history_context.get("prior_run_count"),
+                "dominant_mechanism_id": history_context.get("dominant_mechanism_id"),
+                "dominant_archetype_id": history_context.get("dominant_archetype_id"),
+                "bindings": history_bindings,
+            },
+            "archetype": (
+                {
+                    "id": archetype.get("id"),
+                    "title": archetype.get("title"),
+                    "short_label": archetype.get("short_label"),
+                    "summary": archetype.get("summary"),
+                }
+                if archetype
+                else None
+            ),
+            "holdback": holdback if state != "MATCH" else None,
+        }
+
+    def _visible_symptom(self, symptoms: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        for symptom in symptoms:
+            if symptom.get("present"):
+                return {
+                    "id": symptom.get("id"),
+                    "title": symptom.get("title"),
+                    "phase": str(symptom.get("phase") or "").upper(),
+                    "summary": symptom.get("description"),
+                    "severity": symptom.get("severity"),
+                    "confidence": symptom.get("confidence"),
+                }
+        if symptoms:
+            symptom = symptoms[0]
+            return {
+                "id": symptom.get("id"),
+                "title": symptom.get("title"),
+                "phase": str(symptom.get("phase") or "").upper(),
+                "summary": symptom.get("description"),
+                "severity": symptom.get("severity"),
+                "confidence": symptom.get("confidence"),
+            }
+        return None
+
+    def _supporting_contributors(
+        self,
+        *,
+        risks: List[Dict[str, Any]],
+        metrics: Dict[str, Any],
+        symptoms: List[Dict[str, Any]],
+        selection: Dict[str, Any],
+    ) -> List[Dict[str, Any]]:
+        contributors: List[Dict[str, Any]] = []
+        seen_ids: set[str] = set()
+
+        def add(item: Optional[Dict[str, Any]]) -> None:
+            if not item:
+                return
+            item_id = str(item.get("id") or "").strip()
+            if not item_id or item_id in seen_ids:
+                return
+            seen_ids.add(item_id)
+            contributors.append(item)
+
+        symptom_lookup = {
+            str(symptom.get("id") or ""): symptom
+            for symptom in symptoms
+            if isinstance(symptom, dict)
+        }
+        primary = selection.get("primary") or {}
+        if isinstance(primary, dict):
+            for symptom_id in list(primary.get("supporting_symptom_ids") or []):
+                symptom = symptom_lookup.get(str(symptom_id))
+                if not symptom or not symptom.get("present"):
+                    continue
+                add(
+                    {
+                        "id": symptom.get("id"),
+                        "title": symptom.get("title"),
+                        "body_group": self._symptom_body_group(str(symptom.get("id") or "")),
+                        "phase": str(symptom.get("phase") or "").upper(),
+                        "role": "supporting_symptom",
+                        "summary": symptom.get("description"),
+                    }
+                )
+
+        for risk in risks:
+            if not isinstance(risk, dict):
+                continue
+            risk_id = str(risk.get("risk_id") or "").strip()
+            cfg = _RISK_CONTRIBUTOR_CATALOG.get(risk_id)
+            if not cfg:
+                continue
+            signal = _safe_float(risk.get("signal_strength"), 0.0)
+            if signal < 0.35:
+                continue
+            add(
+                {
+                    "id": risk_id,
+                    "title": cfg["title"],
+                    "body_group": cfg["body_group"],
+                    "phase": cfg["phase"],
+                    "role": "supporting_risk",
+                    "signal_strength": _round3(signal),
+                    "summary": cfg["summary"],
+                }
+            )
+
+        for metric_name, cfg in _METRIC_CONTRIBUTOR_CATALOG.items():
+            metric = metrics.get(metric_name) or {}
+            if not isinstance(metric, dict):
+                continue
+            value = _safe_float(metric.get("value"), 0.0)
+            confidence = _safe_float(metric.get("confidence"), 0.0)
+            if confidence < 0.15:
+                continue
+            severity = (1.0 - value) if metric_name != "trunk_drift_after_ffc" else value
+            if severity < 0.4:
+                continue
+            add(
+                {
+                    "id": metric_name,
+                    "title": cfg["title"],
+                    "body_group": cfg["body_group"],
+                    "phase": cfg["phase"],
+                    "role": "supporting_metric",
+                    "signal_strength": _round3(severity),
+                    "summary": cfg["summary"],
+                }
+            )
+
+        return contributors[:6]
+
+    def _phase_anchored_findings(
+        self,
+        *,
+        events: Dict[str, Any],
+        visible_symptom: Optional[Dict[str, Any]],
+        contributors: List[Dict[str, Any]],
+    ) -> List[Dict[str, Any]]:
+        findings: List[Dict[str, Any]] = []
+        if visible_symptom:
+            findings.append(
+                {
+                    "id": visible_symptom.get("id"),
+                    "title": visible_symptom.get("title"),
+                    "phase": visible_symptom.get("phase"),
+                    "role": "visible_symptom",
+                    "summary": visible_symptom.get("summary"),
+                }
+            )
+        for contributor in contributors[:4]:
+            findings.append(
+                {
+                    "id": contributor.get("id"),
+                    "title": contributor.get("title"),
+                    "phase": contributor.get("phase"),
+                    "role": contributor.get("role"),
+                    "summary": contributor.get("summary"),
+                }
+            )
+
+        anchor_lookup = {
+            "BFC": "bfc",
+            "FFC": "ffc",
+            "UAH": "uah",
+            "RELEASE": "release",
+        }
+        for finding in findings:
+            phase = str(finding.get("phase") or "").upper()
+            event_key = anchor_lookup.get(phase)
+            event = (events or {}).get(event_key) or {}
+            if isinstance(event, dict):
+                finding["anchor_frame"] = event.get("frame")
+                finding["anchor_confidence"] = _safe_float(event.get("confidence"), 0.0)
+        return findings
+
+    def _primary_break_point(
+        self,
+        *,
+        primary: Dict[str, Any],
+        visible_symptom: Optional[Dict[str, Any]],
+    ) -> Optional[Dict[str, Any]]:
+        phase_key = None
+        if primary:
+            mechanism_cfg = self._pack["mechanisms"].get(str(primary.get("id") or "")) or {}
+            phases = list(mechanism_cfg.get("primary_phases") or [])
+            if phases:
+                phase_key = str(phases[0]).strip()
+        if not phase_key and visible_symptom:
+            phase_key = str(visible_symptom.get("phase") or "").strip()
+        if not phase_key:
+            return None
+        return {
+            "phase_id": phase_key,
+            "title": _PHASE_LABELS.get(phase_key, phase_key.replace("_", " ").title()),
+            "summary": self._break_point_summary(phase_key),
+        }
+
+    def _break_point_summary(self, phase_key: str) -> str:
+        mapping = {
+            "approach_build": "The chain is losing value before enough usable build reaches the crease.",
+            "gather_and_organize": "The body is arriving without enough organization to set up clean transfer.",
+            "transfer_and_block": "The main leak is around landing, where momentum is not becoming a stable transfer point.",
+            "whip_and_release": "The chain is reaching release late enough that the distal segments have to rescue timing or pace.",
+            "dissipation_and_recovery": "The action is paying for pace after release through a harsh or concentrated finish.",
+            "BFC": "The chain is already showing a visible organization issue at back-foot contact.",
+            "FFC": "The key leak is visible at front-foot contact.",
+            "RELEASE": "The issue becomes clearest right at release.",
+        }
+        return mapping.get(
+            phase_key,
+            "This is the main place where the chain is no longer carrying momentum cleanly.",
+        )
+
+    def _change_strategy(
+        self,
+        *,
+        capture_quality: Dict[str, Any],
+        diagnosis_status: str,
+        primary_prescription: Dict[str, Any],
+        primary_followup: Dict[str, Any],
+        trajectories: List[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        if str(capture_quality.get("status") or "").upper() == "UNUSABLE":
+            return {
+                "change_size": "hold",
+                "adoption_risk": "unknown",
+                "why_smallest_useful_change": "Capture quality is too weak to justify a coaching change yet.",
+                "expected_near_term_tradeoff": "Do not introduce a mechanical change until the anchors are clearer.",
+                "next_review_window": "Retest with a clearer clip first.",
+                "improvement_signal": "Cleaner BFC, FFC, and release anchors before a correction is introduced.",
+            }
+
+        if diagnosis_status in {"no_match", "ambiguous_match"}:
+            return {
+                "change_size": "micro",
+                "adoption_risk": "low",
+                "why_smallest_useful_change": "The system is holding back, so the safest move is to review anchors before making a bigger change.",
+                "expected_near_term_tradeoff": "This should protect near-term performance because it avoids a premature rebuild cue.",
+                "next_review_window": primary_followup.get("recommended_review_window")
+                or "Next 3 deliveries, then next session.",
+                "improvement_signal": "The next clip should make one story clearer before a stronger intervention is chosen.",
+            }
+
+        avoid_for_now = list(primary_prescription.get("avoid_for_now") or [])
+        if avoid_for_now:
+            change_size = "micro"
+        elif trajectories:
+            change_size = "moderate"
+        else:
+            change_size = "micro"
+
+        adoption_risk = "low" if change_size == "micro" else "medium"
+        if len(avoid_for_now) >= 3:
+            adoption_risk = "high"
+
+        expected_tradeoff = (
+            "This should be small enough to protect near-term performance while still changing the main leak."
+            if change_size == "micro"
+            else "This may feel different for a short period, so it should be introduced outside the highest-pressure moments."
+        )
+
+        return {
+            "change_size": change_size,
+            "adoption_risk": adoption_risk,
+            "why_smallest_useful_change": (
+                primary_prescription.get("why_this_first")
+                or "This is the smallest useful intervention before larger changes are considered."
+            ),
+            "expected_near_term_tradeoff": expected_tradeoff,
+            "next_review_window": primary_followup.get("recommended_review_window")
+            or primary_prescription.get("reassess_after"),
+            "improvement_signal": (
+                (primary_followup.get("success_signals") or [None])[0]
+                or (primary_prescription.get("followup_metric_targets") or [None])[0]
+            ),
+        }
+
+    def _what_is_ok(
+        self,
+        *,
+        metrics: Dict[str, Any],
+        archetype: Optional[Dict[str, Any]],
+    ) -> List[str]:
+        positives: List[str] = []
+        if isinstance(archetype, dict):
+            cfg = self._pack["archetypes"].get(str(archetype.get("id") or "")) or {}
+            for item in list(cfg.get("expected_strengths") or []):
+                text = str(item).strip()
+                if text:
+                    positives.append(text)
+        metric_strengths = [
+            ("transfer_efficiency_score", "Transfer into release is staying reasonably connected."),
+            ("approach_momentum_score", "Approach intent is bringing usable momentum into the crease."),
+            ("release_timing_stability", "Release timing looks calmer than the main leak would suggest."),
+            ("front_leg_support_score", "Landing support is giving the action at least some usable base."),
+        ]
+        for metric_name, text in metric_strengths:
+            metric = metrics.get(metric_name) or {}
+            if not isinstance(metric, dict):
+                continue
+            if _safe_float(metric.get("value"), 0.0) >= 0.65:
+                positives.append(text)
+        return list(dict.fromkeys(positives))[:3]
+
+    def _what_is_not_ok(
+        self,
+        *,
+        visible_symptom: Optional[Dict[str, Any]],
+        primary: Dict[str, Any],
+        contributors: List[Dict[str, Any]],
+    ) -> List[str]:
+        issues: List[str] = []
+        if visible_symptom and visible_symptom.get("summary"):
+            issues.append(str(visible_symptom["summary"]))
+        if primary.get("summary"):
+            issues.append(str(primary["summary"]))
+        for contributor in contributors[:3]:
+            summary = str(contributor.get("summary") or "").strip()
+            if summary:
+                issues.append(summary)
+        return list(dict.fromkeys(issues))[:4]
+
+    def _compensation_patterns(self, symptoms: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        compensation_ids = {
+            "arm_chase",
+            "high_terminal_thrust",
+            "asymmetric_dissipation",
+            "late_chain_load_dump",
+        }
+        patterns: List[Dict[str, Any]] = []
+        for symptom in symptoms:
+            if str(symptom.get("id") or "") not in compensation_ids:
+                continue
+            if not symptom.get("present"):
+                continue
+            patterns.append(
+                {
+                    "id": symptom.get("id"),
+                    "title": symptom.get("title"),
+                    "phase": str(symptom.get("phase") or "").upper(),
+                    "summary": symptom.get("description"),
+                }
+            )
+        return patterns[:3]
+
+    def _symptom_body_group(self, symptom_id: str) -> str:
+        upper = {"late_trunk_drift", "arm_chase"}
+        lower = {"front_leg_softening", "unstable_gather"}
+        if symptom_id in upper:
+            return "upper_body"
+        if symptom_id in lower:
+            return "lower_body"
+        return "whole_chain"
 
     def _history_binding_ids(self, selection: Dict[str, Any]) -> List[str]:
         selected_mechanism_ids = set(selection["selected_mechanism_ids"])
