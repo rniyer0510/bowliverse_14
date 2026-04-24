@@ -67,6 +67,97 @@ evidence_items:
     coach_consensus_status: reviewed
     related_evidence_ids: []
 
+  evidence_low_build_late_rescue:
+    id: evidence_low_build_late_rescue
+    target_type: mechanism
+    target_id: low_build_forcing_late_rescue
+    evidence_kind: performance_relation
+    evidence_tier: A
+    source_ids:
+      - kiely_2021
+      - glazier_wheat_2014
+      - bhandurge_2024_review
+    claim_summary: "When less usable momentum is carried into delivery, more pace generation has to occur late, which increases reliance on end-chain rescue."
+    extraction_notes:
+      - "Supports explaining late pace creation as a carry problem before it is framed as an arm problem."
+      - "Use as a performance-repeatability story, not as a single ideal run-up template."
+    coach_consensus_status: reviewed
+    related_evidence_ids:
+      - evidence_shoulder_rotation_timing
+
+  evidence_gather_disorganization_transfer:
+    id: evidence_gather_disorganization_transfer
+    target_type: mechanism
+    target_id: gather_disorganization_before_block
+    evidence_kind: biomechanics_truth
+    evidence_tier: A
+    source_ids:
+      - glazier_wheat_2014
+      - felton_2023_individual
+      - bhandurge_2024_review
+    claim_summary: "Gather-to-landing organization is part of whether the chain arrives ready to transfer force cleanly at front-foot contact."
+    extraction_notes:
+      - "Supports root-cause stories that begin before landing even when the leak becomes obvious at landing."
+      - "Useful when explaining why a landing problem can still start in the gather."
+    coach_consensus_status: reviewed
+    related_evidence_ids:
+      - evidence_pelvis_trunk_alignment
+
+  evidence_late_arm_chain_delay:
+    id: evidence_late_arm_chain_delay
+    target_type: mechanism
+    target_id: late_arm_acceleration_due_to_chain_delay
+    evidence_kind: performance_relation
+    evidence_tier: A
+    source_ids:
+      - glazier_wheat_2014
+      - kiely_2021
+      - bhandurge_2024_review
+    claim_summary: "Late arm acceleration is more informative as a downstream rescue signal when earlier sequencing is delayed than as a standalone arm fault."
+    extraction_notes:
+      - "Use to keep the explanation chain-first rather than arm-first."
+      - "Supports distinguishing primary driver from visible compensation."
+    coach_consensus_status: reviewed
+    related_evidence_ids:
+      - evidence_shoulder_rotation_timing
+      - evidence_hip_shoulder_sequence
+
+  evidence_high_terminal_dissipation:
+    id: evidence_high_terminal_dissipation
+    target_type: mechanism
+    target_id: high_terminal_impulse_with_high_dissipation_burden
+    evidence_kind: load_risk
+    evidence_tier: A
+    source_ids:
+      - senington_2018
+      - glazier_wheat_2014
+      - bhandurge_2024_review
+    claim_summary: "High late impulse combined with a harsh finish should be treated as a cost story because concentrated end-chain deceleration raises technique and load concern."
+    extraction_notes:
+      - "Supports load-watch language without implying immediate injury."
+      - "Use when the action still produces pace but appears expensive."
+    coach_consensus_status: reviewed
+    related_evidence_ids:
+      - evidence_trunk_load_cost
+
+  evidence_underused_transfer_late_dump:
+    id: evidence_underused_transfer_late_dump
+    target_type: mechanism
+    target_id: underused_transfer_window_with_late_dump
+    evidence_kind: biomechanics_truth
+    evidence_tier: A
+    source_ids:
+      - felton_2020_ffc
+      - felton_2023_individual
+      - glazier_wheat_2014
+    claim_summary: "A readable landing window is only useful when momentum is converted through it; if transfer stays underused, more of the load cost appears late in the finish."
+    extraction_notes:
+      - "Supports explaining underused transfer as a missed conversion opportunity rather than a mysterious finish issue."
+      - "Useful for cases that look workable but still dump load late."
+    coach_consensus_status: reviewed
+    related_evidence_ids:
+      - evidence_soft_block_ffc
+
   evidence_stack_over_landing:
     id: evidence_stack_over_landing
     target_type: prescription
@@ -113,3 +204,39 @@ evidence_items:
       - "Good candidate for internal coach-review validation against clip annotations."
     coach_consensus_status: draft
     related_evidence_ids: []
+
+  evidence_shoulder_rotation_timing:
+    id: evidence_shoulder_rotation_timing
+    target_type: contributor
+    target_id: shoulder_rotation_timing
+    evidence_kind: performance_relation
+    evidence_tier: A
+    source_ids:
+      - glazier_wheat_2014
+      - kiely_2021
+      - bhandurge_2024_review
+    claim_summary: "Upper-chain timing should be judged in the context of how calmly the action carries into the release window, not only from the instant of release."
+    extraction_notes:
+      - "Supports shoulder-timing language as part of a broader sequencing story."
+      - "Do not treat this as independent from earlier chain organization."
+    coach_consensus_status: reviewed
+    related_evidence_ids:
+      - evidence_hip_shoulder_sequence
+
+  evidence_pelvis_trunk_alignment:
+    id: evidence_pelvis_trunk_alignment
+    target_type: contributor
+    target_id: pelvis_trunk_alignment
+    evidence_kind: biomechanics_truth
+    evidence_tier: A
+    source_ids:
+      - glazier_wheat_2014
+      - felton_2023_individual
+      - bhandurge_2024_review
+    claim_summary: "Pelvis-to-trunk organization into landing is a meaningful part of whether the chain arrives ready to transfer force cleanly."
+    extraction_notes:
+      - "Useful as a gather-to-landing supporting contributor."
+      - "Supports the idea that similar late symptoms can still begin from earlier organization bias."
+    coach_consensus_status: reviewed
+    related_evidence_ids:
+      - evidence_hip_shoulder_sequence

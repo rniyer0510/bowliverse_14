@@ -55,7 +55,78 @@ def _supports_ffc_story(events: Optional[Dict[str, Any]]) -> bool:
     )
 
 
-def _story_risk_for_phase(report_story: Optional[Dict[str, Any]], *, phase_key: str, events: Optional[Dict[str, Any]]) -> Optional[str]:
+def _risk_supported_for_phase(
+    risk_id: Optional[str],
+    *,
+    phase_key: str,
+    events: Optional[Dict[str, Any]],
+) -> bool:
+    if not risk_id:
+        return False
+    if phase_key == "ffc":
+        return risk_id in _LEG_RISKS and _supports_ffc_story(events)
+    if phase_key == "release":
+        return risk_id in _RELEASE_RISKS
+    return False
+
+
+def _root_cause_anchor_risk_id(
+    root_cause: Optional[Dict[str, Any]],
+    *,
+    phase_key: str,
+) -> Optional[str]:
+    guidance = ((root_cause or {}).get("renderer_guidance") or {})
+    anchor_risk_ids = guidance.get("anchor_risk_ids") or {}
+    if not isinstance(anchor_risk_ids, dict):
+        return None
+    risk_id = str(anchor_risk_ids.get(phase_key) or "").strip()
+    if not risk_id:
+        return None
+    if phase_key == "ffc" and risk_id in _LEG_RISKS:
+        return risk_id
+    if phase_key == "release" and risk_id in _RELEASE_RISKS:
+        return risk_id
+    return None
+
+
+def _root_cause_phase_target(
+    root_cause: Optional[Dict[str, Any]],
+    *,
+    phase_key: str,
+) -> Optional[Dict[str, Any]]:
+    guidance = ((root_cause or {}).get("renderer_guidance") or {})
+    phase_targets = guidance.get("phase_targets") or {}
+    if not isinstance(phase_targets, dict):
+        return None
+    target = phase_targets.get(phase_key)
+    return target if isinstance(target, dict) else None
+
+
+def _root_cause_controls_renderer(root_cause: Optional[Dict[str, Any]]) -> bool:
+    status = str((root_cause or {}).get("status") or "").strip().lower()
+    return status in {"clear", "holdback", "no_clear_problem", "not_interpretable"}
+
+
+def _story_risk_for_phase(
+    report_story: Optional[Dict[str, Any]],
+    *,
+    phase_key: str,
+    events: Optional[Dict[str, Any]],
+    root_cause: Optional[Dict[str, Any]] = None,
+) -> Optional[str]:
+    phase_target = _root_cause_phase_target(root_cause, phase_key=phase_key)
+    if isinstance(phase_target, dict):
+        phase_target_risk = str(phase_target.get("risk_id") or "").strip()
+        if _risk_supported_for_phase(phase_target_risk, phase_key=phase_key, events=events):
+            return phase_target_risk
+    root_cause_risk = _root_cause_anchor_risk_id(root_cause, phase_key=phase_key)
+    if root_cause_risk:
+        if phase_key == "ffc" and _supports_ffc_story(events):
+            return root_cause_risk
+        if phase_key == "release":
+            return root_cause_risk
+    if _root_cause_controls_renderer(root_cause):
+        return None
     if not isinstance(report_story, dict):
         return None
     hero = str(report_story.get("hero_risk_id") or "").strip()
@@ -81,20 +152,46 @@ def _story_risk_for_phase(report_story: Optional[Dict[str, Any]], *, phase_key: 
     return None
 
 
-def _preferred_ffc_cue_risk_id(risk_by_id: Dict[str, Dict[str, Any]], *, report_story: Optional[Dict[str, Any]], events: Optional[Dict[str, Any]]) -> Optional[str]:
-    preferred = _story_risk_for_phase(report_story, phase_key="ffc", events=events)
+def _preferred_ffc_cue_risk_id(
+    risk_by_id: Dict[str, Dict[str, Any]],
+    *,
+    report_story: Optional[Dict[str, Any]],
+    events: Optional[Dict[str, Any]],
+    root_cause: Optional[Dict[str, Any]] = None,
+) -> Optional[str]:
+    preferred = _story_risk_for_phase(
+        report_story,
+        phase_key="ffc",
+        events=events,
+        root_cause=root_cause,
+    )
     if preferred:
         return preferred
+    if _root_cause_controls_renderer(root_cause):
+        return None
     if not _supports_ffc_story(events):
         return None
     ranked = sorted(((rid, _risk_weight(risk_by_id.get(rid))) for rid in _LEG_RISKS), key=lambda item: item[1], reverse=True)
     return next((rid for rid, weight in ranked if weight > 0.0), None)
 
 
-def _release_hotspot_risk_id(risk_by_id: Dict[str, Dict[str, Any]], *, events: Optional[Dict[str, Any]], report_story: Optional[Dict[str, Any]]) -> Optional[str]:
-    preferred = _story_risk_for_phase(report_story, phase_key="release", events=events)
+def _release_hotspot_risk_id(
+    risk_by_id: Dict[str, Dict[str, Any]],
+    *,
+    events: Optional[Dict[str, Any]],
+    report_story: Optional[Dict[str, Any]],
+    root_cause: Optional[Dict[str, Any]] = None,
+) -> Optional[str]:
+    preferred = _story_risk_for_phase(
+        report_story,
+        phase_key="release",
+        events=events,
+        root_cause=root_cause,
+    )
     if preferred:
         return preferred
+    if _root_cause_controls_renderer(root_cause):
+        return None
     ranked = sorted(((rid, _risk_weight(risk_by_id.get(rid))) for rid in _RELEASE_RISKS), key=lambda item: item[1], reverse=True)
     return next((rid for rid, weight in ranked if weight > 0.0), None)
 
@@ -115,12 +212,33 @@ def _load_watch_label(risk_id: Optional[str]) -> Optional[str]:
     return None
 
 
-def _summary_symptom_text(risk_by_id: Dict[str, Dict[str, Any]], *, events: Optional[Dict[str, Any]] = None, report_story: Optional[Dict[str, Any]] = None) -> str:
+def _summary_symptom_text(
+    risk_by_id: Dict[str, Dict[str, Any]],
+    *,
+    events: Optional[Dict[str, Any]] = None,
+    report_story: Optional[Dict[str, Any]] = None,
+    root_cause: Optional[Dict[str, Any]] = None,
+) -> str:
+    root_cause_guidance = ((root_cause or {}).get("renderer_guidance") or {})
+    root_cause_simple_text = str(root_cause_guidance.get("simple_symptom_text") or "").strip()
+    if root_cause_simple_text:
+        return root_cause_simple_text
+    root_cause_text = str(root_cause_guidance.get("symptom_text") or "").strip()
+    if root_cause_text:
+        return root_cause_text
+    root_cause_status = str((root_cause or {}).get("status") or "").strip().lower()
+    if root_cause_status == "no_clear_problem":
+        return "Action stays connected through landing and release."
     if isinstance(report_story, dict) and str(report_story.get("theme") or "") in {"working_pattern", "good_base"}:
         label = str(((report_story.get("watch_focus") or {}).get("label")) or "").strip()
         if label:
             return f"Keep watching {label}"
-    release_risk_id = _release_hotspot_risk_id(risk_by_id, events=events, report_story=report_story)
+    release_risk_id = _release_hotspot_risk_id(
+        risk_by_id,
+        events=events,
+        report_story=report_story,
+        root_cause=root_cause,
+    )
     if release_risk_id == "lateral_trunk_lean":
         return "Body falls away at release"
     if release_risk_id == "trunk_rotation_snap":
@@ -128,7 +246,12 @@ def _summary_symptom_text(risk_by_id: Dict[str, Dict[str, Any]], *, events: Opti
     if release_risk_id == "hip_shoulder_mismatch":
         pattern = str((((risk_by_id.get("hip_shoulder_mismatch") or {}).get("debug")) or {}).get("sequence_pattern") or "").lower()
         return "Shoulders start too soon" if pattern == "shoulders_lead" else ("Hips lead too far" if pattern == "hips_lead" else "Hips and shoulders drift apart")
-    ffc_risk_id = _preferred_ffc_cue_risk_id(risk_by_id, report_story=report_story, events=events)
+    ffc_risk_id = _preferred_ffc_cue_risk_id(
+        risk_by_id,
+        report_story=report_story,
+        events=events,
+        root_cause=root_cause,
+    )
     if ffc_risk_id == "knee_brace_failure":
         return "Front leg softens at landing"
     if ffc_risk_id == "foot_line_deviation":
@@ -136,8 +259,47 @@ def _summary_symptom_text(risk_by_id: Dict[str, Dict[str, Any]], *, events: Opti
     return "What to watch"
 
 
-def _summary_load_watch_text(risk_by_id: Dict[str, Dict[str, Any]], *, events: Optional[Dict[str, Any]] = None, report_story: Optional[Dict[str, Any]] = None) -> str:
-    primary_risk_id = _story_risk_for_phase(report_story, phase_key="ffc", events=events) or _story_risk_for_phase(report_story, phase_key="release", events=events)
+def _summary_symptom_title(
+    *,
+    report_story: Optional[Dict[str, Any]] = None,
+    root_cause: Optional[Dict[str, Any]] = None,
+) -> str:
+    root_cause_status = str((root_cause or {}).get("status") or "").strip().lower()
+    if root_cause_status == "no_clear_problem":
+        return "What Is Working"
+    if isinstance(report_story, dict) and str(report_story.get("theme") or "") in {"working_pattern", "good_base"}:
+        return "What Is Working"
+    return "What To Notice"
+
+
+def _summary_load_watch_text(
+    risk_by_id: Dict[str, Dict[str, Any]],
+    *,
+    events: Optional[Dict[str, Any]] = None,
+    report_story: Optional[Dict[str, Any]] = None,
+    root_cause: Optional[Dict[str, Any]] = None,
+) -> str:
+    root_cause_guidance = ((root_cause or {}).get("renderer_guidance") or {})
+    root_cause_simple_text = str(root_cause_guidance.get("simple_load_watch_text") or "").strip()
+    if root_cause_simple_text:
+        return root_cause_simple_text
+    root_cause_text = str(root_cause_guidance.get("load_watch_text") or "").strip()
+    if root_cause_text:
+        return root_cause_text
+    root_cause_status = str((root_cause or {}).get("status") or "").strip().lower()
+    if root_cause_status == "no_clear_problem":
+        return "No one area is taking too much load."
+    primary_risk_id = _story_risk_for_phase(
+        report_story,
+        phase_key="ffc",
+        events=events,
+        root_cause=root_cause,
+    ) or _story_risk_for_phase(
+        report_story,
+        phase_key="release",
+        events=events,
+        root_cause=root_cause,
+    )
     ranked = sorted(risk_by_id.items(), key=lambda item: _risk_weight(item[1]), reverse=True)
     primary_risk_id = primary_risk_id or (ranked[0][0] if ranked else None)
     primary_label = _load_watch_label(primary_risk_id)
@@ -146,6 +308,16 @@ def _summary_load_watch_text(risk_by_id: Dict[str, Dict[str, Any]], *, events: O
     primary_family = _body_family(primary_risk_id)
     secondary = next((_load_watch_label(rid) for rid, risk in ranked if rid != primary_risk_id and _body_family(rid) != primary_family and _risk_weight(risk) >= 0.45), None)
     return primary_label if not secondary else f"{primary_label}\n{secondary}"
+
+
+def _summary_load_watch_title(
+    *,
+    root_cause: Optional[Dict[str, Any]] = None,
+) -> str:
+    root_cause_status = str((root_cause or {}).get("status") or "").strip().lower()
+    if root_cause_status == "no_clear_problem":
+        return "Load Stays Shared"
+    return "Works Harder Here"
 
 
 def _mix(a: Tuple[int, int], b: Tuple[int, int], t: float) -> Tuple[int, int]:

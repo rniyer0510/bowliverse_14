@@ -79,6 +79,34 @@ status_leads:
     reviewer: "Current clip is staying below the deterministic review threshold."
     clinician: "Current clip is staying below the deterministic clinician threshold."
 
+simple_language:
+  exact_overrides:
+    "The landing leg does not appear to hold a strong transfer shape through the release window.": "Front leg doesn't hold strong at landing."
+    "The chest and trunk continue travelling over the landing base instead of stabilizing into release.": "The body keeps moving past landing instead of settling."
+    "The arm appears to accelerate late because earlier chain segments did not set the release on time.": "The arm has to rush late because the body is late."
+    "A large share of visible pace generation appears to happen late, close to landing and release.": "Too much of the speed is being made late."
+    "The body appears to absorb deceleration unevenly after release, suggesting concentrated late-chain load.": "The finish lands too hard on one side of the body."
+    "The release window looks variable enough that the arm and trunk are arriving under late pressure.": "Release timing changes too much from ball to ball."
+    "The follow-through appears to dump deceleration abruptly into the trunk and side-body after a late push through release.": "The finish dumps too much force into the body after release."
+    "The landing window looks readable, but the action still fails to convert it into a calm transfer before release.": "The action reaches landing, but does not use it well."
+  replacements:
+    "front-foot contact": "landing"
+    "front-foot": "front leg"
+    "landing leg": "front leg"
+    "release window": "release"
+    "trunk": "body"
+    "pelvis": "hips"
+    "dissipation": "finish"
+    "distal chain": "arm"
+    "sequencing": "timing"
+    "terminal impulse": "late push"
+    "late-chain": "late"
+    "transfer point": "base"
+    "transfer": "power move"
+    "proximal-to-distal": "body-to-arm"
+    "deceleration": "slowing down"
+    "concentrated load": "harder body work"
+
 product_rules:
   - "Mechanism before remedy."
   - "Performance and load are sibling stories."

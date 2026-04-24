@@ -538,6 +538,7 @@ def _build_walkthrough_render(
     risks: list,
     estimated_release_speed: dict,
     report_story: Optional[dict],
+    root_cause: Optional[dict],
 ) -> dict:
     video_path = video.get("path")
     if not video_path or not os.path.exists(video_path):
@@ -561,6 +562,7 @@ def _build_walkthrough_render(
             risks=risks,
             estimated_release_speed=estimated_release_speed,
             report_story=report_story,
+            root_cause=root_cause,
             output_path=output_path,
             start_frame=start_frame,
             end_frame=end_frame,
@@ -1026,6 +1028,7 @@ def analyze(
             "history_plan_v1": deterministic_expert.get("history_plan_v1"),
             "coach_diagnosis_v1": deterministic_expert.get("coach_diagnosis_v1"),
             "presentation_payload_v1": deterministic_expert.get("presentation_payload_v1"),
+            "frontend_surface_v1": deterministic_expert.get("frontend_surface_v1"),
         }
         result["visual_walkthrough"] = _build_walkthrough_render(
             run_id=run_id,
@@ -1038,6 +1041,7 @@ def analyze(
             risks=risks,
             estimated_release_speed=estimated_release_speed,
             report_story=(clinician or {}).get("report_story_v1"),
+            root_cause=((deterministic_expert.get("coach_diagnosis_v1") or {}).get("root_cause")),
         )
 
         # ------------------------------------------------------------

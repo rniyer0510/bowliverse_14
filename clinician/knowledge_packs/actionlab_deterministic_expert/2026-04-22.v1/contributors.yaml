@@ -135,14 +135,14 @@ contributors:
     finding_type: risk
     source_type: risk
     source_key: front_foot_braking_shock
-    title: "Front-foot landing quality"
+    title: "Front-foot braking load"
     body_group: lower_body
     phase: FFC
-    summary: "Landing is not becoming a calm, stable transfer point."
-    definition: "Front-foot contact quality suggests braking shock or unstable support rather than calm transfer."
+    summary: "Front-foot contact is producing a sharper braking load signature than a calm transfer landing."
+    definition: "Front-foot contact appears to be generating a sharper braking load pattern. This can coexist with both effective and ineffective transfer, so it should not be treated as a break-point by itself."
     why_it_matters:
-      - "Landing quality shapes whether the chain can redirect momentum upward and through the ball."
-      - "Poor landing quality often drives soft-block and harsh-finish patterns."
+      - "Sharper braking loads can increase dissipation demand through the front leg and trunk."
+      - "This finding matters most when it coexists with weak brace, poor transfer, or harsh finish patterns; by itself it is not proof that the chain is breaking."
     evidence_inputs:
       - front_foot_braking_shock
       - front_leg_support_score
@@ -152,10 +152,8 @@ contributors:
       - trunk
       - line_of_travel
     related_symptom_ids:
-      - front_leg_softening
       - asymmetric_dissipation
     possible_mechanism_ids:
-      - soft_block_with_trunk_carry
       - high_terminal_impulse_with_high_dissipation_burden
       - underused_transfer_window_with_late_dump
     common_compensation_ids:
@@ -363,8 +361,8 @@ contributors:
   neck_tilt_left_bfc:
     id: neck_tilt_left_bfc
     finding_type: phase_anchor
-    source_type: event
-    source_key: bfc_head_tilt_left
+    source_type: risk
+    source_key: neck_tilt_left_bfc
     title: "Slight left neck tilt"
     body_group: upper_body
     phase: BFC

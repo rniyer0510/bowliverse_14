@@ -9,7 +9,7 @@ Goals:
 - Do NOT change risk/flow logic. Output as separate 'basics' block.
 
 Diagnostics:
-1) Knee bracing proxy  : pelvis drop after FFC (COM sink = likely no brace)
+1) Knee bracing proxy  : front-knee support through FFC→Release
 2) Back-foot stability : back ankle jitter near UAH (unstable base = upper-body bowling)
 3) Front-foot toe line : front foot angle vs batsman axis (toe drifting outside target line)
 """
@@ -21,6 +21,7 @@ import statistics
 from app.common.signal_quality import landmarks_visible
 from app.workers.action.geometry import compute_batsman_axis
 from app.workers.action.foot_orientation import compute_foot_intent
+from app.workers.risk.knee_brace_failure import compute_front_knee_brace_profile
 
 # MediaPipe indices
 LH, RH = 23, 24
@@ -31,13 +32,13 @@ L_ANKLE, R_ANKLE = 27, 28
 # NOTE: Move to config layer before commercial release.
 # -----------------------------
 CFG = {
-    # Knee brace proxy: if pelvis drops too much after FFC -> likely collapse / no brace
-    # units: normalized y in image space (MediaPipe)
+    # Knee brace proxy: front knee should hold or firm after FFC rather than collapsing deeper.
     "knee": {
-        "post_window": 8,          # frames after FFC to examine
-        "drop_warn": 0.020,        # mild drop
-        "drop_bad": 0.040,         # strong drop
-        "min_visible": 5,          # minimum frames with visible hips
+        "post_window": 8,
+        "collapse_warn_deg": 8.0,
+        "collapse_bad_deg": 16.0,
+        "support_warn_deg": 18.0,
+        "support_bad_deg": 30.0,
     },
     # Back-foot stability near UAH: ankle jitter
     "back_foot": {
@@ -114,45 +115,52 @@ def analyze_basics(
     }
 
     # -------------------------------------------------------------------------
-    # 1) Knee brace proxy: pelvis drop after FFC
+    # 1) Knee brace proxy: front-knee support through FFC -> Release
     # -------------------------------------------------------------------------
     if ffc is not None and 0 <= ffc < len(pose_frames):
-        post = int(CFG["knee"]["post_window"])
-        start = int(ffc)
-        end = min(len(pose_frames) - 1, int(ffc) + post)
+        profile = compute_front_knee_brace_profile(
+            pose_frames=pose_frames,
+            ffc_frame=ffc,
+            fps=30.0,
+            hand=hand,
+            post_window=int(CFG["knee"]["post_window"]),
+        )
 
-        ys: List[float] = []
-        used = 0
-
-        for i in range(start, end + 1):
-            y = _pelvis_y(pose_frames[i])
-            if y is None:
-                continue
-            ys.append(float(y))
-            used += 1
-
-        if used >= int(CFG["knee"]["min_visible"]) and ys:
-            y0 = ys[0]
-            y_peak = max(ys)  # larger y means pelvis "dropped" (down the image)
-            drop = float(y_peak - y0)
-
-            grade, strength = _grade_from_thresholds(
-                drop,
-                float(CFG["knee"]["drop_warn"]),
-                float(CFG["knee"]["drop_bad"]),
+        if profile is not None:
+            collapse_grade, _ = _grade_from_thresholds(
+                profile["collapse_deg"],
+                float(CFG["knee"]["collapse_warn_deg"]),
+                float(CFG["knee"]["collapse_bad_deg"]),
+            )
+            support_grade, _ = _grade_from_thresholds(
+                profile["support_deficit_deg"],
+                float(CFG["knee"]["support_warn_deg"]),
+                float(CFG["knee"]["support_bad_deg"]),
             )
 
-            conf = _clip01(used / max(1, (end - start + 1)))
+            if "bad" in (collapse_grade, support_grade):
+                grade = "bad"
+            elif "warn" in (collapse_grade, support_grade):
+                grade = "warn"
+            else:
+                grade = "ok"
 
             out["knee_brace_proxy"] = {
                 "status": grade,
-                "confidence": round(conf, 2),
-                "debug": {"pelvis_drop": round(drop, 4), "frames_used": used},
+                "confidence": round(_clip01(profile["mean_visibility"]), 2),
+                "debug": {
+                    "angle_ffc": round(profile["angle_ffc"], 2),
+                    "min_post_angle": round(profile["min_post_angle"], 2),
+                    "release_angle": round(profile["release_angle"], 2),
+                    "collapse_deg": round(profile["collapse_deg"], 2),
+                    "support_deficit_deg": round(profile["support_deficit_deg"], 2),
+                    "frames_used": profile["sample_count"],
+                },
             }
 
             if grade in ("warn", "bad"):
-                out["coach_cues"].append("Front knee brace: reduce pelvis sink after front-foot contact (stronger block).")
-                out["user_cues"].append("At front-foot landing, try to stay tall and stop your front knee from collapsing.")
+                out["coach_cues"].append("Front knee brace: keep the landing knee from yielding deeper between contact and release.")
+                out["user_cues"].append("After your front foot lands, let the front knee stay firmer instead of sinking through release.")
 
     # -------------------------------------------------------------------------
     # 2) Back-foot stability near UAH: ankle jitter

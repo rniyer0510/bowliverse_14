@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import Counter
+import re
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from app.clinician.knowledge_pack import load_knowledge_pack
@@ -160,11 +161,18 @@ def _risk_metric(
     risk_id: str,
     *,
     chain_quality: float,
+    acceptable_max: float = 0.25,
+    workable_max: float = 0.50,
 ) -> Dict[str, Any]:
     risk = risk_lookup.get(risk_id) or {}
     signal = _clip01(_safe_float(risk.get("signal_strength"), 0.0))
     confidence = _clip01(max(_safe_float(risk.get("confidence"), 0.0), chain_quality * 0.45))
-    return _metric(signal, confidence)
+    adjusted = _banded_signal(signal, acceptable_max=acceptable_max, workable_max=workable_max)
+    band = _acceptance_band(signal, acceptable_max=acceptable_max, workable_max=workable_max)
+    metric = _metric(adjusted, confidence, label=band)
+    metric["raw_value"] = _round3(signal)
+    metric["acceptance_band"] = band
+    return metric
 
 
 def _basic_metric(
@@ -175,6 +183,56 @@ def _basic_metric(
     score = _status_score(str(basic.get("status") or "unknown"))
     confidence = _clip01(_safe_float(basic.get("confidence"), 0.0))
     return _metric(score, confidence)
+
+
+def _acceptance_band(
+    score: float,
+    *,
+    acceptable_max: float = 0.25,
+    workable_max: float = 0.50,
+) -> str:
+    value = _clip01(score)
+    if value <= acceptable_max:
+        return "acceptable"
+    if value <= workable_max:
+        return "workable"
+    return "problematic"
+
+
+def _banded_signal(
+    score: float,
+    *,
+    acceptable_max: float = 0.25,
+    workable_max: float = 0.50,
+) -> float:
+    value = _clip01(score)
+    if value <= acceptable_max:
+        return 0.0
+    if value <= workable_max:
+        ratio = (value - acceptable_max) / max(1e-6, workable_max - acceptable_max)
+        return _clip01(0.08 + (0.20 * ratio))
+    ratio = (value - workable_max) / max(1e-6, 1.0 - workable_max)
+    return _clip01(0.28 + (0.72 * ratio))
+
+
+def _normalized_text(text: str) -> List[str]:
+    cleaned = "".join(ch.lower() if ch.isalnum() else " " for ch in str(text or ""))
+    return [token for token in cleaned.split() if len(token) > 2]
+
+
+def _is_duplicate_story(candidate: str, existing: Iterable[str]) -> bool:
+    candidate_tokens = set(_normalized_text(candidate))
+    if not candidate_tokens:
+        return True
+    for item in existing:
+        other_tokens = set(_normalized_text(item))
+        if not other_tokens:
+            continue
+        overlap = len(candidate_tokens.intersection(other_tokens))
+        smaller = max(1, min(len(candidate_tokens), len(other_tokens)))
+        if overlap / smaller >= 0.6:
+            return True
+    return False
 
 
 class DeterministicExpertSystem:
@@ -262,6 +320,46 @@ class DeterministicExpertSystem:
             ],
             "canonical_concept": concept,
         }
+
+    def _simple_text(self, text: Optional[str]) -> Optional[str]:
+        normalized = " ".join(str(text or "").split())
+        if not normalized:
+            return None
+        wording = self._pack.get("wording") or {}
+        simple_language = wording.get("simple_language") or {}
+        exact_overrides = simple_language.get("exact_overrides") or {}
+        if normalized in exact_overrides:
+            return str(exact_overrides[normalized]).strip() or None
+        rewritten = normalized
+        for source, target in sorted(
+            (simple_language.get("replacements") or {}).items(),
+            key=lambda item: len(str(item[0] or "")),
+            reverse=True,
+        ):
+            source_text = str(source or "").strip()
+            target_text = str(target or "").strip()
+            if not source_text or not target_text:
+                continue
+            rewritten = re.sub(
+                re.escape(source_text),
+                target_text,
+                rewritten,
+                flags=re.IGNORECASE,
+            )
+        if rewritten:
+            rewritten = rewritten[0].upper() + rewritten[1:]
+        return rewritten or None
+
+    def _cfg_simple_text(
+        self,
+        cfg: Optional[Dict[str, Any]],
+        key: str,
+        fallback: Optional[str] = None,
+    ) -> Optional[str]:
+        explicit = str(((cfg or {}).get(key) or "")).strip()
+        if explicit:
+            return explicit
+        return self._simple_text(fallback)
 
     def build(
         self,
@@ -364,7 +462,14 @@ class DeterministicExpertSystem:
             render_reasoning=render_reasoning,
             mechanism_explanation=mechanism_explanation,
             prescription_plan=prescription_plan,
+            coach_diagnosis=coach_diagnosis,
             archetype=archetype,
+        )
+        frontend_surface = self._build_frontend_surface(
+            account_role=account_role,
+            coach_diagnosis=coach_diagnosis,
+            presentation_payload=presentation_payload,
+            render_reasoning=render_reasoning,
         )
 
         return {
@@ -388,6 +493,7 @@ class DeterministicExpertSystem:
             "history_plan_v1": history_plan,
             "coach_diagnosis_v1": coach_diagnosis,
             "presentation_payload_v1": presentation_payload,
+            "frontend_surface_v1": frontend_surface,
         }
 
     def _build_capture_quality(
@@ -639,13 +745,55 @@ class DeterministicExpertSystem:
         back_foot_stability = _basic_metric(basic_lookup, "back_foot_stability")
         knee_brace_proxy = _basic_metric(basic_lookup, "knee_brace_proxy")
         toe_alignment = _basic_metric(basic_lookup, "front_foot_toe_alignment")
+        risk_acceptance_cfg = (
+            ((self._pack.get("globals") or {}).get("acceptance_bands") or {}).get("risk_signal")
+            or {}
+        )
+        risk_acceptable_max = _safe_float(risk_acceptance_cfg.get("acceptable_max"), 0.25)
+        risk_workable_max = _safe_float(risk_acceptance_cfg.get("workable_max"), 0.50)
 
-        front_foot_braking = _risk_metric(risk_lookup, "front_foot_braking_shock", chain_quality=chain_quality)
-        knee_brace_failure = _risk_metric(risk_lookup, "knee_brace_failure", chain_quality=chain_quality)
-        trunk_rotation_snap = _risk_metric(risk_lookup, "trunk_rotation_snap", chain_quality=chain_quality)
-        hip_shoulder_mismatch = _risk_metric(risk_lookup, "hip_shoulder_mismatch", chain_quality=chain_quality)
-        lateral_trunk_lean = _risk_metric(risk_lookup, "lateral_trunk_lean", chain_quality=chain_quality)
-        foot_line_deviation = _risk_metric(risk_lookup, "foot_line_deviation", chain_quality=chain_quality)
+        front_foot_braking = _risk_metric(
+            risk_lookup,
+            "front_foot_braking_shock",
+            chain_quality=chain_quality,
+            acceptable_max=risk_acceptable_max,
+            workable_max=risk_workable_max,
+        )
+        knee_brace_failure = _risk_metric(
+            risk_lookup,
+            "knee_brace_failure",
+            chain_quality=chain_quality,
+            acceptable_max=risk_acceptable_max,
+            workable_max=risk_workable_max,
+        )
+        trunk_rotation_snap = _risk_metric(
+            risk_lookup,
+            "trunk_rotation_snap",
+            chain_quality=chain_quality,
+            acceptable_max=risk_acceptable_max,
+            workable_max=risk_workable_max,
+        )
+        hip_shoulder_mismatch = _risk_metric(
+            risk_lookup,
+            "hip_shoulder_mismatch",
+            chain_quality=chain_quality,
+            acceptable_max=risk_acceptable_max,
+            workable_max=risk_workable_max,
+        )
+        lateral_trunk_lean = _risk_metric(
+            risk_lookup,
+            "lateral_trunk_lean",
+            chain_quality=chain_quality,
+            acceptable_max=risk_acceptable_max,
+            workable_max=risk_workable_max,
+        )
+        foot_line_deviation = _risk_metric(
+            risk_lookup,
+            "foot_line_deviation",
+            chain_quality=chain_quality,
+            acceptable_max=risk_acceptable_max,
+            workable_max=risk_workable_max,
+        )
 
         speed_conf = _clip01(_safe_float((estimated_release_speed or {}).get("confidence"), 0.0))
         speed_available = bool((estimated_release_speed or {}).get("available"))
@@ -668,7 +816,7 @@ class DeterministicExpertSystem:
                 (runup_rhythm_stability, 0.40),
                 (_metric(action_conf, action_conf), 0.25),
                 (_metric(speed_conf if speed_available else 0.45, speed_metric_conf), 0.20),
-                (_metric(1.0 - front_foot_braking["value"], front_foot_braking["confidence"]), 0.15),
+                (_metric(1.0 - front_foot_braking["value"], front_foot_braking["confidence"]), 0.10),
             ]
         )
         gather_line_stability = _combine_metrics(
@@ -689,23 +837,23 @@ class DeterministicExpertSystem:
         front_leg_support_score = _combine_metrics(
             [
                 (_metric(1.0 - knee_brace_failure["value"], knee_brace_failure["confidence"]), 0.60),
-                (knee_brace_proxy, 0.25),
-                (_metric(1.0 - front_foot_braking["value"], front_foot_braking["confidence"]), 0.15),
+                (knee_brace_proxy, 0.35),
+                (_metric(1.0 - front_foot_braking["value"], front_foot_braking["confidence"]), 0.05),
             ]
         )
         trunk_drift_after_ffc = _combine_metrics(
             [
-                (front_foot_braking, 0.45),
-                (lateral_trunk_lean, 0.35),
-                (_metric(1.0 - front_leg_support_score["value"], front_leg_support_score["confidence"]), 0.20),
+                (front_foot_braking, 0.15),
+                (lateral_trunk_lean, 0.55),
+                (_metric(1.0 - front_leg_support_score["value"], front_leg_support_score["confidence"]), 0.30),
             ]
         )
         transfer_efficiency_score = _combine_metrics(
             [
-                (front_leg_support_score, 0.30),
-                (_metric(1.0 - front_foot_braking["value"], front_foot_braking["confidence"]), 0.20),
-                (_metric(1.0 - hip_shoulder_mismatch["value"], hip_shoulder_mismatch["confidence"]), 0.20),
-                (_metric(1.0 - trunk_drift_after_ffc["value"], trunk_drift_after_ffc["confidence"]), 0.20),
+                (front_leg_support_score, 0.35),
+                (_metric(1.0 - front_foot_braking["value"], front_foot_braking["confidence"]), 0.05),
+                (_metric(1.0 - hip_shoulder_mismatch["value"], hip_shoulder_mismatch["confidence"]), 0.25),
+                (_metric(1.0 - trunk_drift_after_ffc["value"], trunk_drift_after_ffc["confidence"]), 0.25),
                 (_metric(chain_quality, chain_quality), 0.10),
             ]
         )
@@ -713,10 +861,21 @@ class DeterministicExpertSystem:
         sequence_pattern = str((((risk_lookup.get("hip_shoulder_mismatch") or {}).get("debug")) or {}).get("sequence_pattern") or "unknown").lower()
         shoulder_rotation_timing_value = {
             "hips_lead": 0.82,
-            "in_sync": 0.68,
+            "in_sync": 0.60,
             "shoulders_lead": 0.22,
         }.get(sequence_pattern, 0.45)
-        shoulder_rotation_timing = _metric(shoulder_rotation_timing_value, hip_shoulder_mismatch["confidence"])
+        shoulder_sequence_score = _metric(
+            shoulder_rotation_timing_value,
+            hip_shoulder_mismatch["confidence"],
+        )
+        shoulder_rotation_timing = _combine_metrics(
+            [
+                (shoulder_sequence_score, 0.40),
+                (_metric(1.0 - hip_shoulder_mismatch["value"], hip_shoulder_mismatch["confidence"]), 0.20),
+                (gather_line_stability, 0.20),
+                (pelvis_trunk_alignment, 0.20),
+            ]
+        )
 
         release_timing_stability = _combine_metrics(
             [
@@ -829,8 +988,9 @@ class DeterministicExpertSystem:
             "late_trunk_drift": metrics["trunk_drift_after_ffc"],
             "arm_chase": _combine_metrics(
                 [
-                    (_metric(1.0 - metrics["release_timing_stability"]["value"], metrics["release_timing_stability"]["confidence"]), 0.60),
-                    (metrics["distal_velocity_rescue"], 0.40),
+                    (_metric(1.0 - metrics["release_timing_stability"]["value"], metrics["release_timing_stability"]["confidence"]), 0.45),
+                    (metrics["distal_velocity_rescue"], 0.30),
+                    (_metric(1.0 - metrics["shoulder_rotation_timing"]["value"], metrics["shoulder_rotation_timing"]["confidence"]), 0.25),
                 ]
             ),
             "high_terminal_thrust": metrics["terminal_impulse_score"],
@@ -851,9 +1011,15 @@ class DeterministicExpertSystem:
                 {
                     "id": symptom_id,
                     "title": cfg["title"],
+                    "simple_title": self._cfg_simple_text(cfg, "simple_title", cfg["title"]),
                     "category": cfg["category"],
                     "phase": cfg["phase"],
                     "description": cfg["description"],
+                    "simple_description": self._cfg_simple_text(
+                        cfg,
+                        "simple_description",
+                        cfg["description"],
+                    ),
                     "score": _round3(score),
                     "confidence": _round3(confidence),
                     "present": bool(score >= 0.55 and confidence >= 0.15),
@@ -1358,11 +1524,15 @@ class DeterministicExpertSystem:
                 "diagnosis_status": selection["diagnosis_status"],
                 "primary_symptom": top_symptom["title"] if top_symptom else "No strong symptom bundle yet",
                 "primary_mechanism": selected_variant["primary_mechanism"],
+                "simple_primary_mechanism": self._simple_text(selected_variant["primary_mechanism"]),
                 "secondary_contributors": [],
                 "performance_impact": selected_variant["performance_impact"],
+                "simple_performance_impact": self._simple_text(selected_variant["performance_impact"]),
                 "load_impact": selected_variant["load_impact"],
+                "simple_load_impact": self._simple_text(selected_variant["load_impact"]),
                 "first_intervention": None,
                 "coach_check": selected_variant["coach_check"],
+                "simple_coach_check": self._simple_text(selected_variant["coach_check"]),
                 "selected_surface": selected_surface,
                 "surface_variants": surface_variants,
                 "selected_render_story_ids": [],
@@ -1411,12 +1581,25 @@ class DeterministicExpertSystem:
             "diagnosis_status": selection["diagnosis_status"],
             "primary_symptom": primary_symptom_title,
             "primary_mechanism": primary["title"],
+            "simple_primary_mechanism": self._cfg_simple_text(
+                primary_cfg,
+                "simple_title",
+                primary["title"],
+            ),
             "primary_mechanism_summary": selected_variant["primary_mechanism_summary"],
+            "simple_primary_mechanism_summary": self._cfg_simple_text(
+                primary_cfg,
+                "simple_summary",
+                selected_variant["primary_mechanism_summary"],
+            ),
             "secondary_contributors": secondary_contributors,
             "performance_impact": selected_variant["performance_impact"],
+            "simple_performance_impact": self._simple_text(selected_variant["performance_impact"]),
             "load_impact": selected_variant["load_impact"],
+            "simple_load_impact": self._simple_text(selected_variant["load_impact"]),
             "first_intervention": selected_variant["first_intervention"],
             "coach_check": selected_variant["coach_check"],
+            "simple_coach_check": self._simple_text(selected_variant["coach_check"]),
             "selected_surface": selected_surface,
             "surface_variants": surface_variants,
             "selected_render_story_ids": selection["selected_render_story_ids"],
@@ -1491,8 +1674,19 @@ class DeterministicExpertSystem:
             "title": cfg["title"],
             "short_label": cfg["short_label"],
             "summary": cfg["summary"],
+            "simple_summary": self._cfg_simple_text(cfg, "simple_summary", cfg["summary"]),
             "history_story_template": cfg["history_story_template"],
+            "simple_history_story_template": self._cfg_simple_text(
+                cfg,
+                "simple_history_story_template",
+                cfg["history_story_template"],
+            ),
             "coaching_priority_template": cfg["coaching_priority_template"],
+            "simple_coaching_priority_template": self._cfg_simple_text(
+                cfg,
+                "simple_coaching_priority_template",
+                cfg["coaching_priority_template"],
+            ),
             "selection_basis": (
                 "historical_consensus"
                 if dominant_archetype_id == archetype_id and dominant_ratio >= 0.5
@@ -1524,10 +1718,27 @@ class DeterministicExpertSystem:
                 {
                     "id": prescription_id,
                     "title": cfg["title"],
+                    "simple_title": self._cfg_simple_text(cfg, "simple_title", cfg["title"]),
                     "goal": cfg["goal"],
+                    "simple_goal": self._cfg_simple_text(cfg, "simple_goal", cfg["goal"]),
                     "primary_cue": cfg["primary_cue"],
+                    "simple_primary_cue": self._cfg_simple_text(
+                        cfg,
+                        "simple_primary_cue",
+                        cfg["primary_cue"],
+                    ),
                     "why_this_first": cfg["why_this_first"],
+                    "simple_why_this_first": self._cfg_simple_text(
+                        cfg,
+                        "simple_why_this_first",
+                        cfg["why_this_first"],
+                    ),
                     "coach_check": cfg["coach_check"],
+                    "simple_coach_check": self._cfg_simple_text(
+                        cfg,
+                        "simple_coach_check",
+                        cfg["coach_check"],
+                    ),
                     "reassess_after": cfg["reassess_after"],
                     "review_window_type": cfg["review_window_type"],
                     "followup_metric_targets": list(cfg["followup_metric_targets"]),
@@ -1561,9 +1772,15 @@ class DeterministicExpertSystem:
                 {
                     "id": binding_id,
                     "title": cfg["title"],
+                    "simple_title": self._cfg_simple_text(cfg, "simple_title", cfg["title"]),
                     "primary_metric": cfg["primary_metric"],
                     "metrics": list(cfg["metrics"]),
                     "chart_summary": cfg["chart_summary"],
+                    "simple_chart_summary": self._cfg_simple_text(
+                        cfg,
+                        "simple_chart_summary",
+                        cfg["chart_summary"],
+                    ),
                     "followup_check_ids": list(cfg["followup_check_ids"]),
                 }
             )
@@ -1590,10 +1807,19 @@ class DeterministicExpertSystem:
                 {
                     "id": check_id,
                     "title": cfg["title"],
+                    "simple_title": self._cfg_simple_text(cfg, "simple_title", cfg["title"]),
                     "recommended_review_window": cfg["recommended_review_window"],
                     "history_graph_binding": cfg["history_graph_binding"],
                     "success_signals": list(cfg["success_signals"]),
+                    "simple_success_signals": [
+                        self._simple_text(item) or str(item)
+                        for item in list(cfg.get("simple_success_signals") or cfg["success_signals"])
+                    ],
                     "failure_signals": list(cfg["failure_signals"]),
+                    "simple_failure_signals": [
+                        self._simple_text(item) or str(item)
+                        for item in list(cfg.get("simple_failure_signals") or cfg["failure_signals"])
+                    ],
                 }
             )
 
@@ -1617,8 +1843,18 @@ class DeterministicExpertSystem:
             "history_window_runs": self.history_window_runs,
             "prior_run_count": history_context["prior_run_count"],
             "history_story": history_context.get("history_story"),
+            "simple_history_story": (
+                archetype.get("simple_history_story_template")
+                if isinstance(archetype, dict)
+                else self._simple_text(history_context.get("history_story"))
+            ),
             "coaching_priority": (
                 archetype.get("coaching_priority_template")
+                if isinstance(archetype, dict)
+                else None
+            ),
+            "simple_coaching_priority": (
+                archetype.get("simple_coaching_priority_template")
                 if isinstance(archetype, dict)
                 else None
             ),
@@ -1700,6 +1936,35 @@ class DeterministicExpertSystem:
             primary=primary,
             visible_symptom=visible_symptom,
         )
+        acceptance_summary = self._acceptance_summary(
+            metrics=metrics,
+            contributors=supporting_contributors,
+        )
+        kinetic_chain_status = self._kinetic_chain_status(
+            metrics=metrics,
+            diagnosis_status=diagnosis_status,
+            primary_break_point=primary_break_point,
+            capture_quality=capture_quality,
+            acceptance_summary=acceptance_summary,
+        )
+        root_cause = self._root_cause(
+            diagnosis_status=diagnosis_status,
+            capture_quality=capture_quality,
+            primary=primary,
+            visible_symptom=visible_symptom,
+            contributors=supporting_contributors,
+            primary_break_point=primary_break_point,
+            kinetic_chain_status=kinetic_chain_status,
+            mechanism_explanation=mechanism_explanation,
+        )
+        if diagnosis_status == "no_match" and kinetic_chain_status.get("id") == "connected":
+            visible_symptom = None
+            phase_findings = []
+            primary_break_point = {
+                "phase_id": None,
+                "title": "No clear break point",
+                "summary": "No single phase is breaking the chain enough to justify intervention right now.",
+            }
         change_strategy = self._change_strategy(
             capture_quality=capture_quality,
             diagnosis_status=diagnosis_status,
@@ -1718,6 +1983,8 @@ class DeterministicExpertSystem:
             primary=primary,
             contributors=supporting_contributors,
         )
+        if diagnosis_status == "no_match" and kinetic_chain_status.get("id") == "connected":
+            what_is_not_ok = []
         compensations = self._compensation_patterns(symptoms)
 
         holdback = {
@@ -1736,6 +2003,32 @@ class DeterministicExpertSystem:
                 if isinstance(item, dict)
             ],
         }
+        if diagnosis_status == "no_match" and kinetic_chain_status.get("id") == "connected":
+            holdback["top_candidates"] = []
+
+        easy_explanation = self._build_easy_explanation(
+            {
+                "state": state,
+                "kinetic_chain_status": kinetic_chain_status,
+                "root_cause": root_cause,
+                "first_priority": (
+                    {
+                        "simple_primary_cue": primary_prescription.get("simple_primary_cue"),
+                        "primary_cue": primary_prescription.get("primary_cue"),
+                    }
+                    if primary_prescription
+                    else None
+                ),
+                "improvement_check": (
+                    {
+                        "simple_success_signals": list(primary_followup.get("simple_success_signals") or []),
+                        "simple_coach_check": mechanism_explanation.get("simple_coach_check"),
+                    }
+                    if (primary_followup or mechanism_explanation)
+                    else None
+                ),
+            }
+        )
 
         return {
             "version": "coach_diagnosis_v1",
@@ -1744,6 +2037,7 @@ class DeterministicExpertSystem:
             "state": state,
             "diagnosis_status": diagnosis_status,
             "capture_quality_status": capture_quality.get("status"),
+            "kinetic_chain_status": kinetic_chain_status,
             "visible_symptom": visible_symptom,
             "primary_mechanism": (
                 {
@@ -1758,12 +2052,15 @@ class DeterministicExpertSystem:
                 if primary
                 else None
             ),
+            "root_cause": root_cause,
             "supporting_contributors": supporting_contributors,
             "upper_body_contributors": upper_body,
             "lower_body_contributors": lower_body,
             "compensations": compensations,
             "what_is_ok": what_is_ok,
             "what_is_not_ok": what_is_not_ok,
+            "acceptance_summary": acceptance_summary,
+            "key_metrics": acceptance_summary.get("key_metrics"),
             "primary_break_point": primary_break_point,
             "near_term_effect": near_term,
             "medium_term_effect": medium_term,
@@ -1772,9 +2069,13 @@ class DeterministicExpertSystem:
                 {
                     "prescription_id": primary_prescription.get("id"),
                     "title": primary_prescription.get("title"),
+                    "simple_title": primary_prescription.get("simple_title"),
                     "goal": primary_prescription.get("goal"),
+                    "simple_goal": primary_prescription.get("simple_goal"),
                     "primary_cue": primary_prescription.get("primary_cue"),
+                    "simple_primary_cue": primary_prescription.get("simple_primary_cue"),
                     "why_this_first": primary_prescription.get("why_this_first"),
+                    "simple_why_this_first": primary_prescription.get("simple_why_this_first"),
                 }
                 if primary_prescription
                 else None
@@ -1785,11 +2086,19 @@ class DeterministicExpertSystem:
             "improvement_check": (
                 {
                     "coach_check": mechanism_explanation.get("coach_check"),
+                    "simple_coach_check": (
+                        primary_followup.get("simple_success_signals") or [mechanism_explanation.get("simple_coach_check")]
+                    )[0]
+                    if (primary_followup.get("simple_success_signals") or [mechanism_explanation.get("simple_coach_check")])
+                    else None,
                     "check_id": primary_followup.get("id"),
                     "title": primary_followup.get("title"),
+                    "simple_title": primary_followup.get("simple_title"),
                     "recommended_review_window": primary_followup.get("recommended_review_window"),
                     "success_signals": list(primary_followup.get("success_signals") or []),
+                    "simple_success_signals": list(primary_followup.get("simple_success_signals") or []),
                     "failure_signals": list(primary_followup.get("failure_signals") or []),
+                    "simple_failure_signals": list(primary_followup.get("simple_failure_signals") or []),
                     "history_graph_binding": primary_followup.get("history_graph_binding"),
                     "followup_metric_targets": list(primary_prescription.get("followup_metric_targets") or []),
                 }
@@ -1808,6 +2117,7 @@ class DeterministicExpertSystem:
                 "dominant_archetype_id": history_context.get("dominant_archetype_id"),
                 "bindings": history_bindings,
             },
+            "easy_explanation": easy_explanation,
             "evidence_basis": {
                 "primary_mechanism": self._evidence_basis_for_target(
                     "mechanism",
@@ -1846,8 +2156,10 @@ class DeterministicExpertSystem:
                 return {
                     "id": symptom.get("id"),
                     "title": symptom.get("title"),
+                    "simple_title": symptom.get("simple_title"),
                     "phase": str(symptom.get("phase") or "").upper(),
                     "summary": symptom.get("description"),
+                    "simple_summary": symptom.get("simple_description"),
                     "severity": symptom.get("severity"),
                     "confidence": symptom.get("confidence"),
                 }
@@ -1856,8 +2168,10 @@ class DeterministicExpertSystem:
             return {
                 "id": symptom.get("id"),
                 "title": symptom.get("title"),
+                "simple_title": symptom.get("simple_title"),
                 "phase": str(symptom.get("phase") or "").upper(),
                 "summary": symptom.get("description"),
+                "simple_summary": symptom.get("simple_description"),
                 "severity": symptom.get("severity"),
                 "confidence": symptom.get("confidence"),
             }
@@ -1906,6 +2220,180 @@ class DeterministicExpertSystem:
             }
         return filtered
 
+    def _frontend_headline(self, coach_diagnosis: Dict[str, Any]) -> str:
+        chain_status = coach_diagnosis.get("kinetic_chain_status") or {}
+        break_point = coach_diagnosis.get("primary_break_point") or {}
+        status_id = str(chain_status.get("id") or "")
+        phase_id = str(break_point.get("phase_id") or "")
+        if status_id == "connected":
+            return "Action is connected"
+        if phase_id == "transfer_and_block":
+            return "Leak at landing"
+        if phase_id in {"whip_and_release", "UAH", "RELEASE"}:
+            return "Late release leak"
+        if status_id == "workable_but_leaking":
+            return "Action is workable but leaking"
+        return str(chain_status.get("label") or "Kinetic chain review")
+
+    def _frontend_summary_lines(self, coach_diagnosis: Dict[str, Any]) -> List[str]:
+        chain_status = coach_diagnosis.get("kinetic_chain_status") or {}
+        break_point = coach_diagnosis.get("primary_break_point") or {}
+        lower = list(coach_diagnosis.get("lower_body_contributors") or [])
+        upper = list(coach_diagnosis.get("upper_body_contributors") or [])
+        first_priority = coach_diagnosis.get("first_priority") or {}
+        status_id = str(chain_status.get("id") or "")
+        phase_id = str(break_point.get("phase_id") or "")
+
+        if status_id == "connected":
+            return [
+                "The action is moving well through the chain.",
+                "No single phase is breaking enough to need a change right now.",
+                "Keep repeating what is working before changing anything bigger.",
+            ]
+
+        lines: List[str] = []
+        if phase_id == "transfer_and_block":
+            lines.append("The action is still working, but it gets weak around landing.")
+            if lower and upper:
+                lines.append(
+                    "The front side is not giving a strong base, so the upper body keeps moving through release."
+                )
+            elif lower:
+                lines.append(
+                    "The front side is not giving a strong base when the front foot lands."
+                )
+        elif phase_id in {"whip_and_release", "UAH", "RELEASE"}:
+            lines.append("The action is getting rushed close to release.")
+            lines.append("The upper body is having to rescue timing late instead of being carried there cleanly.")
+        else:
+            lines.append(
+                "The action can still work, but one part of the chain is leaking."
+            )
+
+        cue = str(first_priority.get("primary_cue") or "").strip()
+        if cue:
+            lines.append(f"Start with one small change first: {cue}.")
+        else:
+            lines.append("Start with one small change first, not a big rebuild.")
+        return lines[:3]
+
+    def _frontend_chips(
+        self,
+        coach_diagnosis: Dict[str, Any],
+        presentation_payload: Dict[str, Any],
+    ) -> List[Dict[str, Any]]:
+        chain_status = coach_diagnosis.get("kinetic_chain_status") or {}
+        break_point = coach_diagnosis.get("primary_break_point") or {}
+        change_strategy = coach_diagnosis.get("change_strategy") or {}
+        return [
+            {
+                "id": "state",
+                "label": str(chain_status.get("label") or presentation_payload.get("state") or "").strip(),
+                "tone": str(chain_status.get("acceptance_band") or "workable"),
+            },
+            {
+                "id": "break_point",
+                "label": str(break_point.get("title") or "No clear break point").strip(),
+                "tone": "neutral",
+            },
+            {
+                "id": "change_size",
+                "label": str(change_strategy.get("change_size") or "micro").replace("_", " ").title(),
+                "tone": str(change_strategy.get("adoption_risk") or "low"),
+            },
+        ]
+
+    def _build_easy_explanation(self, coach_diagnosis: Dict[str, Any]) -> Dict[str, Any]:
+        root_cause = coach_diagnosis.get("root_cause") or {}
+        renderer_guidance = root_cause.get("renderer_guidance") or {}
+        first_priority = coach_diagnosis.get("first_priority") or {}
+        improvement_check = coach_diagnosis.get("improvement_check") or {}
+        kinetic_chain_status = coach_diagnosis.get("kinetic_chain_status") or {}
+        mechanism_cfg = (self._pack.get("mechanisms") or {}).get(str(root_cause.get("mechanism_id") or "")) or {}
+        state_id = str(kinetic_chain_status.get("id") or "")
+
+        if state_id == "connected":
+            return {
+                "headline": "Action is working well.",
+                "what_to_notice": "The action stays connected through landing and release.",
+                "why_it_happens": "The body is carrying movement through the action without one obvious leak.",
+                "first_fix": None,
+                "check_next": "Keep repeating this shape before changing anything bigger.",
+            }
+
+        return {
+            "headline": self._cfg_simple_text(
+                mechanism_cfg,
+                "simple_title",
+                root_cause.get("title"),
+            )
+            or coach_diagnosis.get("state"),
+            "what_to_notice": renderer_guidance.get("simple_symptom_text")
+            or self._simple_text(root_cause.get("summary")),
+            "why_it_happens": self._cfg_simple_text(
+                mechanism_cfg,
+                "simple_summary",
+                root_cause.get("why_it_is_happening"),
+            ),
+            "first_fix": first_priority.get("simple_primary_cue") or self._simple_text(first_priority.get("primary_cue")),
+            "check_next": (
+                (improvement_check.get("simple_success_signals") or [improvement_check.get("simple_coach_check")])[0]
+                if (improvement_check.get("simple_success_signals") or [improvement_check.get("simple_coach_check")])
+                else None
+            ),
+        }
+
+    def _build_frontend_surface(
+        self,
+        *,
+        account_role: Optional[str],
+        coach_diagnosis: Dict[str, Any],
+        presentation_payload: Dict[str, Any],
+        render_reasoning: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        role = str(account_role or "player").strip().lower() or "player"
+        return {
+            "version": "frontend_surface_v1",
+            "role": role,
+            "detail_policy_id": coach_diagnosis.get("detail_policy_id"),
+            "state": coach_diagnosis.get("state") or presentation_payload.get("state"),
+            "headline": self._frontend_headline(coach_diagnosis),
+            "summary_lines": self._frontend_summary_lines(coach_diagnosis),
+            "chips": self._frontend_chips(coach_diagnosis, presentation_payload),
+            "hero": {
+                "kinetic_chain_status": coach_diagnosis.get("kinetic_chain_status"),
+                "visible_symptom": coach_diagnosis.get("visible_symptom"),
+                "primary_break_point": coach_diagnosis.get("primary_break_point"),
+                "primary_mechanism": coach_diagnosis.get("primary_mechanism"),
+                "root_cause": coach_diagnosis.get("root_cause"),
+            },
+            "body": {
+                "root_cause": coach_diagnosis.get("root_cause"),
+                "what_is_ok": coach_diagnosis.get("what_is_ok"),
+                "what_is_not_ok": coach_diagnosis.get("what_is_not_ok"),
+                "upper_body_contributors": coach_diagnosis.get("upper_body_contributors"),
+                "lower_body_contributors": coach_diagnosis.get("lower_body_contributors"),
+                "phase_anchored_findings": coach_diagnosis.get("phase_anchored_findings"),
+                "compensations": coach_diagnosis.get("compensations"),
+                "acceptance_summary": coach_diagnosis.get("acceptance_summary"),
+                "key_metrics": coach_diagnosis.get("key_metrics"),
+            },
+            "guidance": {
+                "first_priority": coach_diagnosis.get("first_priority"),
+                "do_not_change_yet": coach_diagnosis.get("do_not_change_yet"),
+                "change_strategy": coach_diagnosis.get("change_strategy"),
+                "improvement_check": coach_diagnosis.get("improvement_check"),
+                "change_reaction": coach_diagnosis.get("change_reaction"),
+            },
+            "renderer": {
+                "renderer_mode": render_reasoning.get("renderer_mode"),
+                "selected_story_id": render_reasoning.get("selected_story_id"),
+            },
+            "history": coach_diagnosis.get("history_bindings"),
+            "easy_explanation": coach_diagnosis.get("easy_explanation"),
+            "holdback": coach_diagnosis.get("holdback"),
+        }
+
     def _supporting_contributors(
         self,
         *,
@@ -1938,16 +2426,25 @@ class DeterministicExpertSystem:
             for cfg in self._pack["contributors"].values()
             if str(cfg.get("source_type") or "") == "event"
         ]
+        contributor_acceptance_cfg = (
+            ((self._pack.get("globals") or {}).get("acceptance_bands") or {}).get("contributor_severity")
+            or {}
+        )
+        contributor_acceptable_max = _safe_float(contributor_acceptance_cfg.get("acceptable_max"), 0.25)
+        contributor_workable_max = _safe_float(contributor_acceptance_cfg.get("workable_max"), 0.50)
 
         def _candidate(
             *,
             item_id: str,
             title: str,
+            simple_title: Optional[str],
             body_group: str,
             phase: str,
             role: str,
             summary: str,
+            simple_summary: Optional[str],
             signal_strength: float,
+            raw_signal_strength: Optional[float] = None,
             confidence: float,
             possible_mechanism_ids: Optional[List[str]] = None,
             target_type: str = "contributor",
@@ -1955,12 +2452,24 @@ class DeterministicExpertSystem:
             evidence_support = self._knowledge_support_score(target_type, item_id)
             canonical_concept = self._reconciliation_concept(target_type, item_id)
             possible_ids = set(possible_mechanism_ids or [])
+            acceptance_band = _acceptance_band(
+                raw_signal_strength if raw_signal_strength is not None else signal_strength,
+                acceptable_max=contributor_acceptable_max,
+                workable_max=contributor_workable_max,
+            )
             mechanism_affinity = 0.0
             if primary_mechanism_id and primary_mechanism_id in possible_ids:
                 mechanism_affinity = 0.16
             elif selected_mechanism_ids.intersection(possible_ids):
                 mechanism_affinity = 0.08
-            phase_anchor_boost = 0.08 if phase in {"BFC", "FFC", "UAH", "RELEASE"} else 0.0
+            phase_anchor_boost = {
+                "BFC": 0.08,
+                "FFC": 0.08,
+                "UAH": 0.08,
+                "RELEASE": 0.08,
+                "BFC_TO_FFC": 0.05,
+                "FFC_TO_RELEASE": 0.05,
+            }.get(phase, 0.0)
             ranking_score = _clip01(
                 (0.52 * _clip01(signal_strength))
                 + (0.18 * _clip01(confidence))
@@ -1971,13 +2480,17 @@ class DeterministicExpertSystem:
             return {
                 "id": item_id,
                 "title": title,
+                "simple_title": simple_title or self._simple_text(title),
                 "body_group": body_group,
                 "phase": phase,
                 "role": role,
                 "signal_strength": _round3(signal_strength),
+                "raw_signal_strength": _round3(raw_signal_strength if raw_signal_strength is not None else signal_strength),
+                "acceptance_band": acceptance_band,
                 "evidence_support": evidence_support,
                 "ranking_score": _round3(ranking_score),
                 "summary": summary,
+                "simple_summary": simple_summary or self._simple_text(summary),
                 "knowledge_evidence_ids": [
                     item["id"] for item in self._knowledge_evidence_items(target_type, item_id)
                 ],
@@ -1995,11 +2508,14 @@ class DeterministicExpertSystem:
                     _candidate(
                         item_id=str(symptom.get("id") or ""),
                         title=str(symptom.get("title") or ""),
+                        simple_title=str(symptom.get("simple_title") or ""),
                         body_group=self._symptom_body_group(str(symptom.get("id") or "")),
                         phase=str(symptom.get("phase") or "").upper(),
                         role="supporting_symptom",
                         summary=str(symptom.get("description") or ""),
+                        simple_summary=str(symptom.get("simple_description") or ""),
                         signal_strength=_safe_float(symptom.get("score"), 0.0),
+                        raw_signal_strength=_safe_float(symptom.get("score"), 0.0),
                         confidence=_safe_float(symptom.get("confidence"), 0.0),
                         possible_mechanism_ids=list(symptom.get("possible_mechanisms") or []),
                         target_type="symptom",
@@ -2013,19 +2529,27 @@ class DeterministicExpertSystem:
             cfg = risk_contributors.get(risk_id) or {}
             if not cfg:
                 continue
-            signal = _safe_float(risk.get("signal_strength"), 0.0)
+            raw_signal = _safe_float(risk.get("signal_strength"), 0.0)
             confidence = _safe_float(risk.get("confidence"), 0.0)
+            signal = _banded_signal(
+                raw_signal,
+                acceptable_max=contributor_acceptable_max,
+                workable_max=contributor_workable_max,
+            )
             if signal < 0.35:
                 continue
             candidates.append(
                 _candidate(
                     item_id=risk_id,
                     title=cfg["title"],
+                    simple_title=self._cfg_simple_text(cfg, "simple_title", cfg["title"]),
                     body_group=cfg["body_group"],
                     phase=cfg["phase"],
                     role="supporting_risk",
                     summary=cfg["summary"],
+                    simple_summary=self._cfg_simple_text(cfg, "simple_summary", cfg["summary"]),
                     signal_strength=signal,
+                    raw_signal_strength=raw_signal,
                     confidence=confidence,
                     possible_mechanism_ids=list(cfg.get("possible_mechanism_ids") or []),
                 )
@@ -2039,18 +2563,26 @@ class DeterministicExpertSystem:
             confidence = _safe_float(metric.get("confidence"), 0.0)
             if confidence < 0.15:
                 continue
-            severity = (1.0 - value) if metric_name != "trunk_drift_after_ffc" else value
+            raw_severity = (1.0 - value) if metric_name != "trunk_drift_after_ffc" else value
+            severity = _banded_signal(
+                raw_severity,
+                acceptable_max=contributor_acceptable_max,
+                workable_max=contributor_workable_max,
+            )
             if severity < 0.4:
                 continue
             candidates.append(
                 _candidate(
                     item_id=metric_name,
                     title=cfg["title"],
+                    simple_title=self._cfg_simple_text(cfg, "simple_title", cfg["title"]),
                     body_group=cfg["body_group"],
                     phase=cfg["phase"],
                     role="supporting_metric",
                     summary=cfg["summary"],
+                    simple_summary=self._cfg_simple_text(cfg, "simple_summary", cfg["summary"]),
                     signal_strength=severity,
+                    raw_signal_strength=raw_severity,
                     confidence=confidence,
                     possible_mechanism_ids=list(cfg.get("possible_mechanism_ids") or []),
                 )
@@ -2064,10 +2596,12 @@ class DeterministicExpertSystem:
                 _candidate(
                     item_id=str(cfg.get("id") or ""),
                     title=str(cfg.get("title") or ""),
+                    simple_title=self._cfg_simple_text(cfg, "simple_title", str(cfg.get("title") or "")),
                     body_group=str(cfg.get("body_group") or "whole_chain"),
                     phase=str(cfg.get("phase") or "").upper(),
                     role="supporting_phase_anchor",
                     summary=str(cfg.get("summary") or ""),
+                    simple_summary=self._cfg_simple_text(cfg, "simple_summary", str(cfg.get("summary") or "")),
                     signal_strength=signal,
                     confidence=confidence,
                     possible_mechanism_ids=list(cfg.get("possible_mechanism_ids") or []),
@@ -2075,11 +2609,12 @@ class DeterministicExpertSystem:
             )
 
         candidates.sort(key=lambda item: item["ranking_score"], reverse=True)
-        seen_ids: set[str] = set()
+        prepared_candidates: List[Dict[str, Any]] = []
         concept_scores: Dict[str, float] = {}
+        seen_candidate_ids: set[str] = set()
         for candidate in candidates:
             item_id = str(candidate.get("id") or "").strip()
-            if not item_id or item_id in seen_ids:
+            if not item_id or item_id in seen_candidate_ids:
                 continue
             concept = candidate.get("canonical_concept") or {}
             concept_id = str(concept.get("concept_id") or "").strip()
@@ -2092,12 +2627,36 @@ class DeterministicExpertSystem:
             candidate["ranking_score"] = _round3(adjusted_score)
             if concept_id and concept_id not in concept_scores:
                 concept_scores[concept_id] = adjusted_score
-            seen_ids.add(item_id)
+            seen_candidate_ids.add(item_id)
+            prepared_candidates.append(candidate)
+
+        selected_ids: set[str] = set()
+
+        def _pick_first(predicate) -> None:
+            for candidate in prepared_candidates:
+                item_id = str(candidate.get("id") or "").strip()
+                if not item_id or item_id in selected_ids:
+                    continue
+                if predicate(candidate):
+                    selected_ids.add(item_id)
+                    contributors.append(candidate)
+                    return
+
+        _pick_first(lambda _candidate: True)
+        _pick_first(lambda candidate: str(candidate.get("body_group") or "") == "upper_body")
+        _pick_first(lambda candidate: str(candidate.get("body_group") or "") == "lower_body")
+        _pick_first(lambda candidate: str(candidate.get("phase") or "") in {"BFC", "FFC", "BFC_TO_FFC"})
+
+        for candidate in prepared_candidates:
+            item_id = str(candidate.get("id") or "").strip()
+            if not item_id or item_id in selected_ids:
+                continue
+            selected_ids.add(item_id)
             contributors.append(candidate)
             if len(contributors) >= 6:
                 break
 
-        return contributors
+        return contributors[:6]
 
     def _event_contributor_signal(
         self,
@@ -2235,6 +2794,904 @@ class DeterministicExpertSystem:
         label = _PHASE_LABELS.get(phase_key, phase_key.replace("_", " ").title())
         return f"{label} is the main place where the chain is no longer carrying momentum cleanly."
 
+    def _preferred_root_cause_body_group(self, phase_id: str) -> Optional[str]:
+        normalized = str(phase_id or "").strip()
+        if normalized == "transfer_and_block":
+            return "lower_body"
+        if normalized in {"whip_and_release", "UAH", "RELEASE"}:
+            return "upper_body"
+        if normalized in {
+            "approach_build",
+            "gather_and_organize",
+            "dissipation_and_recovery",
+        }:
+            return "whole_chain"
+        return None
+
+    def _root_cause_driver(
+        self,
+        *,
+        contributors: List[Dict[str, Any]],
+        preferred_body_group: Optional[str],
+        preferred_ids: Optional[List[str]] = None,
+        exclude_ids: Optional[set[str]] = None,
+    ) -> Optional[Dict[str, Any]]:
+        excluded = exclude_ids or set()
+        ranked = [
+            item
+            for item in contributors
+            if str(item.get("id") or "").strip() not in excluded
+        ]
+        problematic = [
+            item
+            for item in ranked
+            if str(item.get("acceptance_band") or "") == "problematic"
+        ]
+        candidates = problematic or ranked
+        preferred = [
+            str(item_id or "").strip()
+            for item_id in (preferred_ids or [])
+            if str(item_id or "").strip()
+        ]
+
+        if preferred:
+            for preferred_id in preferred:
+                for item in candidates:
+                    if str(item.get("id") or "").strip() == preferred_id:
+                        return {
+                            "id": item.get("id"),
+                            "title": item.get("title"),
+                            "role": item.get("role"),
+                            "body_group": item.get("body_group"),
+                            "phase": item.get("phase"),
+                            "summary": item.get("summary"),
+                            "acceptance_band": item.get("acceptance_band"),
+                        }
+
+        if preferred_body_group:
+            for item in candidates:
+                if str(item.get("body_group") or "") == preferred_body_group:
+                    return {
+                        "id": item.get("id"),
+                        "title": item.get("title"),
+                        "role": item.get("role"),
+                        "body_group": item.get("body_group"),
+                        "phase": item.get("phase"),
+                        "summary": item.get("summary"),
+                        "acceptance_band": item.get("acceptance_band"),
+                    }
+
+        for item in candidates:
+            return {
+                "id": item.get("id"),
+                "title": item.get("title"),
+                "role": item.get("role"),
+                "body_group": item.get("body_group"),
+                "phase": item.get("phase"),
+                "summary": item.get("summary"),
+                "acceptance_band": item.get("acceptance_band"),
+            }
+        return None
+
+    def _root_cause_load_watch_label(self, body_group: Optional[str]) -> str:
+        normalized = str(body_group or "").strip()
+        if normalized == "lower_body":
+            return "Front knee / leg chain"
+        if normalized == "upper_body":
+            return "Lower back / side trunk"
+        return "Whole chain load watch"
+
+    def _root_cause_compensation(
+        self,
+        *,
+        mechanism_id: Optional[str],
+        primary_driver: Optional[Dict[str, Any]],
+        contributors: List[Dict[str, Any]],
+        exclude_ids: Optional[set[str]] = None,
+    ) -> Optional[Dict[str, Any]]:
+        excluded = set(exclude_ids or set())
+        if isinstance(primary_driver, dict):
+            driver_id = str(primary_driver.get("id") or "").strip()
+            if driver_id:
+                excluded.add(driver_id)
+        mechanism_cfg = (self._pack.get("mechanisms") or {}).get(str(mechanism_id or "")) or {}
+        contributor_cfg = (
+            (self._pack.get("contributors") or {}).get(str((primary_driver or {}).get("id") or ""))
+            or {}
+        )
+        preferred_ids = [
+            str(item_id or "").strip()
+            for item_id in (
+                list(mechanism_cfg.get("common_compensation_ids") or [])
+                + list(contributor_cfg.get("common_compensation_ids") or [])
+            )
+            if str(item_id or "").strip() and str(item_id or "").strip() not in excluded
+        ]
+        compensation = self._root_cause_driver(
+            contributors=contributors,
+            preferred_body_group=None,
+            preferred_ids=preferred_ids,
+            exclude_ids=excluded,
+        )
+        if compensation:
+            compensation = dict(compensation)
+            compensation["relationship"] = "downstream_compensation"
+        return compensation
+
+    def _root_cause_symptom_text(
+        self,
+        *,
+        primary_driver: Optional[Dict[str, Any]],
+        compensation: Optional[Dict[str, Any]],
+        visible_symptom: Optional[Dict[str, Any]],
+    ) -> Optional[str]:
+        compensation_summary = str((compensation or {}).get("summary") or "").strip()
+        if compensation_summary:
+            return compensation_summary
+        visible_summary = str((visible_symptom or {}).get("summary") or "").strip()
+        if visible_summary:
+            return visible_summary
+        driver_summary = str((primary_driver or {}).get("summary") or "").strip()
+        return driver_summary or None
+
+    def _root_cause_load_watch_text(
+        self,
+        *,
+        primary_driver: Optional[Dict[str, Any]],
+        compensation: Optional[Dict[str, Any]],
+    ) -> Optional[str]:
+        primary_label = self._root_cause_load_watch_label(
+            (primary_driver or {}).get("body_group"),
+        )
+        compensation_label = self._root_cause_load_watch_label(
+            (compensation or {}).get("body_group"),
+        )
+        if compensation and compensation_label != primary_label:
+            return f"{primary_label}\n{compensation_label}"
+        return primary_label
+
+    def _root_cause_simple_symptom_text(
+        self,
+        *,
+        primary_driver: Optional[Dict[str, Any]],
+        compensation: Optional[Dict[str, Any]],
+        visible_symptom: Optional[Dict[str, Any]],
+    ) -> Optional[str]:
+        primary_id = str((primary_driver or {}).get("id") or "").strip()
+        compensation_id = str((compensation or {}).get("id") or "").strip()
+        symptom_id = str((visible_symptom or {}).get("id") or "").strip()
+
+        if primary_id in {"front_leg_support_score", "knee_brace_failure"}:
+            if compensation_id == "lateral_trunk_lean":
+                return "Front leg doesn't hold strong at landing, then the body falls away."
+            return "Front leg doesn't hold strong at landing."
+        if primary_id == "foot_line_deviation":
+            return "Front foot lands a bit across the line."
+        if primary_id in {"shoulder_rotation_timing", "hip_shoulder_mismatch"}:
+            if compensation_id in {"trunk_rotation_snap", "lateral_trunk_lean"}:
+                return "Top half gets late, then has to rush near release."
+            return "Top half gets late near release."
+        if primary_id == "trunk_rotation_snap":
+            return "Top half turns too sharply near release."
+
+        if compensation_id == "lateral_trunk_lean":
+            return "Body falls away at release."
+        if compensation_id == "trunk_rotation_snap":
+            return "Body turns too sharply near release."
+        if symptom_id == "front_leg_softening":
+            return "Front leg gets soft at landing."
+        if symptom_id in {"arm_chase", "release_window_instability"}:
+            return "The arm has to rush late."
+        return "This is the main thing to notice."
+
+    def _root_cause_simple_load_watch_text(
+        self,
+        *,
+        primary_driver: Optional[Dict[str, Any]],
+        compensation: Optional[Dict[str, Any]],
+    ) -> Optional[str]:
+        primary_group = str((primary_driver or {}).get("body_group") or "").strip()
+        compensation_group = str((compensation or {}).get("body_group") or "").strip()
+
+        if primary_group == "lower_body" and compensation_group == "upper_body":
+            return "Front leg works hard.\nLower back works hard too."
+        if primary_group == "lower_body":
+            return "Front leg works harder here."
+        if primary_group == "upper_body":
+            return "Lower back works harder here."
+        if compensation_group == "upper_body":
+            return "Lower back works harder here."
+        return "This is where the body works harder."
+
+    def _root_cause_anchor_risk_ids(
+        self,
+        *,
+        primary_driver: Optional[Dict[str, Any]],
+        compensation: Optional[Dict[str, Any]],
+        visible_symptom: Optional[Dict[str, Any]],
+    ) -> Dict[str, Optional[str]]:
+        ffc_risk_ids = {
+            "knee_brace_failure",
+            "foot_line_deviation",
+            "front_foot_braking_shock",
+        }
+        release_risk_ids = {
+            "lateral_trunk_lean",
+            "hip_shoulder_mismatch",
+            "trunk_rotation_snap",
+            "front_foot_braking_shock",
+        }
+        anchors = {"ffc": None, "release": None}
+        for item in (primary_driver, compensation):
+            item_id = str((item or {}).get("id") or "").strip()
+            if not item_id:
+                continue
+            if anchors["ffc"] is None and item_id in ffc_risk_ids:
+                anchors["ffc"] = item_id
+            if anchors["release"] is None and item_id in release_risk_ids:
+                anchors["release"] = item_id
+        symptom_id = str((visible_symptom or {}).get("id") or "").strip()
+        if anchors["ffc"] is None and symptom_id == "front_leg_softening":
+            anchors["ffc"] = "knee_brace_failure"
+        if anchors["ffc"] is None and symptom_id == "underused_transfer_window":
+            anchors["ffc"] = "foot_line_deviation"
+        if anchors["release"] is None and symptom_id == "late_trunk_drift":
+            anchors["release"] = "lateral_trunk_lean"
+        if anchors["release"] is None and symptom_id in {
+            "arm_chase",
+            "release_window_instability",
+        }:
+            anchors["release"] = "hip_shoulder_mismatch"
+        return anchors
+
+    def _root_cause_region_priority(
+        self,
+        *,
+        risk_id: Optional[str],
+    ) -> List[str]:
+        normalized = str(risk_id or "").strip()
+        if normalized == "knee_brace_failure":
+            return ["knee", "shin", "groin"]
+        if normalized == "foot_line_deviation":
+            return ["shin", "knee", "groin"]
+        if normalized == "front_foot_braking_shock":
+            return ["knee", "shin", "groin"]
+        if normalized == "lateral_trunk_lean":
+            return ["side_trunk", "upper_trunk", "lumbar"]
+        if normalized == "hip_shoulder_mismatch":
+            return ["lumbar", "side_trunk", "upper_trunk"]
+        if normalized == "trunk_rotation_snap":
+            return ["lumbar", "side_trunk", "upper_trunk"]
+        return []
+
+    def _renderer_storyboard_cue(
+        self,
+        *,
+        story_id: Optional[str],
+        phase_key: str,
+    ) -> Optional[str]:
+        story_cfg = (self._pack.get("render_stories") or {}).get(str(story_id or "")) or {}
+        if not story_cfg:
+            return None
+        phase_aliases = {
+            "ffc": {"front_foot_contact", "transfer_and_block", "ffc", "bfc_to_ffc"},
+            "release": {"release", "whip_and_release", "ffc_to_release"},
+        }
+        valid_phases = phase_aliases.get(str(phase_key or "").strip().lower(), set())
+        for item in list(story_cfg.get("storyboard") or []):
+            if not isinstance(item, dict):
+                continue
+            raw_phase = str(item.get("phase") or "").strip().lower()
+            cue = str(item.get("cue") or "").strip()
+            if cue and raw_phase in valid_phases:
+                return cue
+        return None
+
+    def _root_cause_phase_proof_headline(
+        self,
+        *,
+        phase_key: str,
+        risk_id: Optional[str],
+        primary_driver: Optional[Dict[str, Any]],
+        compensation: Optional[Dict[str, Any]],
+    ) -> Optional[str]:
+        normalized_phase = str(phase_key or "").strip().lower()
+        normalized_risk = str(risk_id or "").strip()
+        primary_id = str((primary_driver or {}).get("id") or "").strip()
+        compensation_id = str((compensation or {}).get("id") or "").strip()
+
+        if normalized_phase == "ffc":
+            if normalized_risk in {"knee_brace_failure", "front_leg_support_score"} or primary_id in {
+                "knee_brace_failure",
+                "front_leg_support_score",
+            }:
+                return "Front leg doesn't hold strong at landing."
+            if normalized_risk == "foot_line_deviation" or primary_id == "foot_line_deviation":
+                return "Front foot lands a bit across the line."
+            if normalized_risk == "front_foot_braking_shock":
+                return "Landing hits too sharply here."
+        if normalized_phase == "release":
+            if normalized_risk == "lateral_trunk_lean" or compensation_id == "lateral_trunk_lean":
+                return "Then the body falls away through release."
+            if normalized_risk == "hip_shoulder_mismatch" or compensation_id == "hip_shoulder_mismatch":
+                return "Then hips and shoulders stop working together."
+            if normalized_risk == "trunk_rotation_snap" or compensation_id == "trunk_rotation_snap":
+                return "Then the top half turns too sharply."
+        return None
+
+    def _root_cause_phase_proof_body(
+        self,
+        *,
+        phase_key: str,
+        risk_id: Optional[str],
+        primary_driver: Optional[Dict[str, Any]],
+        compensation: Optional[Dict[str, Any]],
+    ) -> Optional[str]:
+        normalized_phase = str(phase_key or "").strip().lower()
+        normalized_risk = str(risk_id or "").strip()
+        primary_group = str((primary_driver or {}).get("body_group") or "").strip()
+
+        if normalized_phase == "ffc":
+            if normalized_risk in {"knee_brace_failure", "front_leg_support_score"}:
+                return "The landing leg is not becoming a clear transfer point."
+            if normalized_risk == "foot_line_deviation":
+                return "The landing foot is not lining force up cleanly toward target."
+            if normalized_risk == "front_foot_braking_shock":
+                return "The front foot is taking force sharply instead of turning it into calm transfer."
+        if normalized_phase == "release":
+            if normalized_risk == "lateral_trunk_lean":
+                if primary_group == "lower_body":
+                    return "Because the landing base stays soft, the trunk keeps travelling past it."
+                return "The trunk keeps travelling instead of stacking cleanly into release."
+            if normalized_risk == "hip_shoulder_mismatch":
+                return "The top and bottom halves are not arriving together cleanly into release."
+            if normalized_risk == "trunk_rotation_snap":
+                return "The top half has to turn sharply because timing is arriving late."
+        return None
+
+    def _root_cause_phase_proof_step(
+        self,
+        *,
+        phase_key: str,
+        risk_id: Optional[str],
+        story_id: Optional[str],
+        primary_driver: Optional[Dict[str, Any]],
+        compensation: Optional[Dict[str, Any]],
+    ) -> Optional[Dict[str, Any]]:
+        normalized_phase = str(phase_key or "").strip().lower()
+        normalized_risk = str(risk_id or "").strip()
+        if normalized_phase not in {"ffc", "release"} or not normalized_risk:
+            return None
+
+        title = "Where It Starts" if normalized_phase == "ffc" else "What Happens Next"
+        step_role = "where_it_starts" if normalized_phase == "ffc" else "compensation"
+        headline = self._root_cause_phase_proof_headline(
+            phase_key=normalized_phase,
+            risk_id=normalized_risk,
+            primary_driver=primary_driver,
+            compensation=compensation,
+        )
+        body = self._root_cause_phase_proof_body(
+            phase_key=normalized_phase,
+            risk_id=normalized_risk,
+            primary_driver=primary_driver,
+            compensation=compensation,
+        )
+        proof_line = self._renderer_storyboard_cue(
+            story_id=story_id,
+            phase_key=normalized_phase,
+        )
+        if not headline and not body and not proof_line:
+            return None
+        return {
+            "step_role": step_role,
+            "title": title,
+            "headline": headline,
+            "body": body,
+            "proof_line": proof_line,
+        }
+
+    def _root_cause_phase_targets(
+        self,
+        *,
+        story_id: Optional[str],
+        primary_driver: Optional[Dict[str, Any]],
+        compensation: Optional[Dict[str, Any]],
+        visible_symptom: Optional[Dict[str, Any]],
+    ) -> Dict[str, Dict[str, Any]]:
+        anchor_risk_ids = self._root_cause_anchor_risk_ids(
+            primary_driver=primary_driver,
+            compensation=compensation,
+            visible_symptom=visible_symptom,
+        )
+
+        def _target_for_phase(phase_key: str) -> Optional[Dict[str, Any]]:
+            risk_id = str(anchor_risk_ids.get(phase_key) or "").strip()
+            if not risk_id:
+                return None
+            source_role = None
+            source_item: Optional[Dict[str, Any]] = None
+            if str((primary_driver or {}).get("id") or "").strip() == risk_id:
+                source_role = "primary_driver"
+                source_item = primary_driver
+            elif str((compensation or {}).get("id") or "").strip() == risk_id:
+                source_role = "compensation"
+                source_item = compensation
+            else:
+                source_role = "phase_anchor"
+                source_item = primary_driver if phase_key == "ffc" else compensation
+            body_group = str((source_item or {}).get("body_group") or "").strip() or None
+            return {
+                "risk_id": risk_id,
+                "source_role": source_role,
+                "body_group": body_group,
+                "load_watch_label": self._root_cause_load_watch_label(body_group),
+                "region_priority": self._root_cause_region_priority(risk_id=risk_id),
+                "proof_step": self._root_cause_phase_proof_step(
+                    phase_key=phase_key,
+                    risk_id=risk_id,
+                    story_id=story_id,
+                    primary_driver=primary_driver,
+                    compensation=compensation,
+                ),
+            }
+
+        targets: Dict[str, Dict[str, Any]] = {}
+        for phase_key in ("ffc", "release"):
+            target = _target_for_phase(phase_key)
+            if target:
+                targets[phase_key] = target
+        return targets
+
+    def _focus_regions_for_target(self, target_type: str, target_id: Optional[str]) -> List[str]:
+        normalized_id = str(target_id or "").strip()
+        if not normalized_id:
+            return []
+        if target_type == "contributor":
+            cfg = (self._pack.get("contributors") or {}).get(normalized_id) or {}
+            return list(cfg.get("renderer_focus_regions") or [])
+        if target_type == "symptom":
+            cfg = (self._pack.get("symptoms") or {}).get(normalized_id) or {}
+            return list(cfg.get("render_focus_regions") or [])
+        return []
+
+    def _root_cause_target_type_for_driver(self, driver: Optional[Dict[str, Any]]) -> str:
+        role = str((driver or {}).get("role") or "").strip()
+        if role == "supporting_symptom":
+            return "symptom"
+        return "contributor"
+
+    def _root_cause_biomechanics_basis(
+        self,
+        *,
+        mechanism_id: Optional[str],
+        primary_driver: Optional[Dict[str, Any]],
+        visible_symptom: Optional[Dict[str, Any]],
+    ) -> Optional[Dict[str, Any]]:
+        mechanism_cfg = (self._pack.get("mechanisms") or {}).get(str(mechanism_id or "")) or {}
+        candidates: List[Tuple[str, str]] = []
+        if mechanism_id:
+            candidates.append(("mechanism", mechanism_id))
+        if isinstance(primary_driver, dict):
+            candidates.append(
+                (
+                    self._root_cause_target_type_for_driver(primary_driver),
+                    str(primary_driver.get("id") or ""),
+                )
+            )
+        symptom_id = str((visible_symptom or {}).get("id") or "").strip()
+        if symptom_id:
+            candidates.append(("symptom", symptom_id))
+
+        selected_basis: Optional[Dict[str, Any]] = None
+        selected_target: Optional[Tuple[str, str]] = None
+        for target_type, target_id in candidates:
+            if not target_id:
+                continue
+            basis = self._evidence_basis_for_target(target_type, target_id)
+            if basis:
+                selected_basis = basis
+                selected_target = (target_type, target_id)
+                break
+
+        if not selected_basis:
+            return None
+
+        evidence_items = list(selected_basis.get("evidence_items") or [])
+        primary_claim = (
+            str((evidence_items[0] or {}).get("claim_summary") or "").strip()
+            if evidence_items
+            else ""
+        )
+        supporting_claims = [
+            str(item.get("claim_summary") or "").strip()
+            for item in evidence_items[1:3]
+            if str(item.get("claim_summary") or "").strip()
+        ]
+        canonical = selected_basis.get("canonical_concept") or {}
+        primary_evidence = evidence_items[0] if evidence_items else {}
+        principle_claims = [
+            str(item).strip()
+            for item in list(mechanism_cfg.get("biomechanics_principles") or [])
+            if str(item).strip()
+        ]
+        proof_lines = [
+            str(item).strip()
+            for item in list(mechanism_cfg.get("cue_ready_proof_lines") or [])
+            if str(item).strip()
+        ]
+
+        return {
+            "target_type": selected_target[0] if selected_target else None,
+            "target_id": selected_target[1] if selected_target else None,
+            "knowledge_support": selected_basis.get("knowledge_support"),
+            "canonical_concept": {
+                "concept_id": canonical.get("concept_id"),
+                "title": canonical.get("title"),
+                "reconciliation_note": canonical.get("reconciliation_note"),
+            }
+            if canonical
+            else None,
+            "primary_claim": primary_claim or None,
+            "supporting_claims": supporting_claims,
+            "evidence_kind": primary_evidence.get("evidence_kind"),
+            "evidence_tier": primary_evidence.get("evidence_tier"),
+            "principle_claims": principle_claims,
+            "cue_ready_proof_lines": proof_lines,
+        }
+
+    def _root_cause_renderer_guidance(
+        self,
+        *,
+        mechanism_id: Optional[str],
+        primary_driver: Optional[Dict[str, Any]],
+        compensation: Optional[Dict[str, Any]],
+        visible_symptom: Optional[Dict[str, Any]],
+    ) -> Optional[Dict[str, Any]]:
+        mechanism_cfg = (self._pack.get("mechanisms") or {}).get(str(mechanism_id or "")) or {}
+        story_ids = list(mechanism_cfg.get("render_story_ids") or [])
+        story_id = str(story_ids[0] or "").strip() if story_ids else ""
+        proof_lines = [
+            str(item).strip()
+            for item in list(mechanism_cfg.get("cue_ready_proof_lines") or [])
+            if str(item).strip()
+        ]
+        anchor_risk_ids = self._root_cause_anchor_risk_ids(
+            primary_driver=primary_driver,
+            compensation=compensation,
+            visible_symptom=visible_symptom,
+        )
+        symptom_text = self._root_cause_symptom_text(
+            primary_driver=primary_driver,
+            compensation=compensation,
+            visible_symptom=visible_symptom,
+        )
+        load_watch_text = self._root_cause_load_watch_text(
+            primary_driver=primary_driver,
+            compensation=compensation,
+        )
+        simple_symptom_text = self._root_cause_simple_symptom_text(
+            primary_driver=primary_driver,
+            compensation=compensation,
+            visible_symptom=visible_symptom,
+        )
+        simple_load_watch_text = self._root_cause_simple_load_watch_text(
+            primary_driver=primary_driver,
+            compensation=compensation,
+        )
+        phase_targets = self._root_cause_phase_targets(
+            story_id=story_id or None,
+            primary_driver=primary_driver,
+            compensation=compensation,
+            visible_symptom=visible_symptom,
+        )
+        if story_ids:
+            story_cfg = (self._pack.get("render_stories") or {}).get(story_id) or {}
+            focus_regions = list(story_cfg.get("focus_regions") or [])
+            cue_points: List[str] = []
+            for cue in proof_lines:
+                if cue and cue not in cue_points:
+                    cue_points.append(cue)
+            for cue in [
+                str(item.get("cue") or "").strip()
+                for item in list(story_cfg.get("storyboard") or [])[:3]
+                if str(item.get("cue") or "").strip()
+            ]:
+                if cue and cue not in cue_points:
+                    cue_points.append(cue)
+            return {
+                "story_id": story_id or None,
+                "title": story_cfg.get("title"),
+                "focus_regions": focus_regions,
+                "phases": list(story_cfg.get("phases") or []),
+                "cue_points": cue_points[:4],
+                "anchor_risk_ids": anchor_risk_ids,
+                "phase_targets": phase_targets,
+                "warning_hotspots_allowed": True,
+                "symptom_text": symptom_text,
+                "load_watch_text": load_watch_text,
+                "simple_symptom_text": simple_symptom_text,
+                "simple_load_watch_text": simple_load_watch_text,
+            }
+
+        if isinstance(primary_driver, dict):
+            target_type = self._root_cause_target_type_for_driver(primary_driver)
+            focus_regions = self._focus_regions_for_target(
+                target_type,
+                primary_driver.get("id"),
+            )
+            if focus_regions:
+                return {
+                    "story_id": None,
+                    "title": primary_driver.get("title"),
+                    "focus_regions": focus_regions,
+                    "phases": [primary_driver.get("phase")] if primary_driver.get("phase") else [],
+                    "cue_points": list(
+                        dict.fromkeys(
+                            [
+                                cue
+                                for cue in [
+                                    *proof_lines,
+                                    str(primary_driver.get("summary") or "").strip(),
+                                ]
+                                if cue
+                            ]
+                        )
+                    )[:4],
+                    "anchor_risk_ids": anchor_risk_ids,
+                    "phase_targets": phase_targets,
+                    "warning_hotspots_allowed": True,
+                    "symptom_text": symptom_text,
+                    "load_watch_text": load_watch_text,
+                    "simple_symptom_text": simple_symptom_text,
+                    "simple_load_watch_text": simple_load_watch_text,
+                }
+
+        symptom_id = str((visible_symptom or {}).get("id") or "").strip()
+        if symptom_id:
+            focus_regions = self._focus_regions_for_target("symptom", symptom_id)
+            if focus_regions:
+                return {
+                    "story_id": None,
+                    "title": (visible_symptom or {}).get("title"),
+                    "focus_regions": focus_regions,
+                    "phases": [str((visible_symptom or {}).get("phase") or "").strip()],
+                    "cue_points": list(
+                        dict.fromkeys(
+                            [
+                                cue
+                                for cue in [
+                                    *proof_lines,
+                                    str((visible_symptom or {}).get("summary") or "").strip(),
+                                ]
+                                if cue
+                            ]
+                        )
+                    )[:4],
+                    "anchor_risk_ids": anchor_risk_ids,
+                    "phase_targets": phase_targets,
+                    "warning_hotspots_allowed": True,
+                    "symptom_text": symptom_text,
+                    "load_watch_text": load_watch_text,
+                    "simple_symptom_text": simple_symptom_text,
+                    "simple_load_watch_text": simple_load_watch_text,
+                }
+        return None
+
+    def _root_cause(
+        self,
+        *,
+        diagnosis_status: str,
+        capture_quality: Dict[str, Any],
+        primary: Dict[str, Any],
+        visible_symptom: Optional[Dict[str, Any]],
+        contributors: List[Dict[str, Any]],
+        primary_break_point: Optional[Dict[str, Any]],
+        kinetic_chain_status: Dict[str, Any],
+        mechanism_explanation: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        capture_status = str(capture_quality.get("status") or "").upper()
+        break_phase_id = str((primary_break_point or {}).get("phase_id") or "").strip()
+        break_title = str((primary_break_point or {}).get("title") or "").strip()
+        preferred_body_group = self._preferred_root_cause_body_group(break_phase_id)
+        mechanism_cfg = (self._pack.get("mechanisms") or {}).get(str(primary.get("id") or "")) or {}
+        primary_driver = self._root_cause_driver(
+            contributors=contributors,
+            preferred_body_group=preferred_body_group,
+            preferred_ids=list(mechanism_cfg.get("primary_driver_ids") or []),
+        )
+        primary_driver_id = (
+            str(primary_driver.get("id") or "").strip()
+            if isinstance(primary_driver, dict)
+            else ""
+        )
+        compensation = self._root_cause_compensation(
+            mechanism_id=str(primary.get("id") or "").strip() or None,
+            primary_driver=primary_driver,
+            contributors=contributors,
+            exclude_ids={primary_driver_id} if primary_driver_id else set(),
+        )
+        compensation_id = (
+            str(compensation.get("id") or "").strip()
+            if isinstance(compensation, dict)
+            else ""
+        )
+        secondary_driver = self._root_cause_driver(
+            contributors=contributors,
+            preferred_body_group=None,
+            exclude_ids={
+                item_id
+                for item_id in {primary_driver_id, compensation_id}
+                if item_id
+            },
+        )
+        mechanism_id = str(primary.get("id") or "").strip() or None
+        mechanism_title = str(primary.get("title") or "").strip()
+        mechanism_summary = str(
+            primary.get("summary")
+            or mechanism_explanation.get("primary_mechanism_summary")
+            or ""
+        ).strip()
+        performance_impact = str(mechanism_explanation.get("performance_impact") or "").strip()
+        load_impact = str(mechanism_explanation.get("load_impact") or "").strip()
+        visible_summary = str((visible_symptom or {}).get("summary") or "").strip()
+        biomechanics_basis = self._root_cause_biomechanics_basis(
+            mechanism_id=mechanism_id,
+            primary_driver=primary_driver,
+            visible_symptom=visible_symptom,
+        )
+        renderer_guidance = self._root_cause_renderer_guidance(
+            mechanism_id=mechanism_id,
+            primary_driver=primary_driver,
+            compensation=compensation,
+            visible_symptom=visible_symptom,
+        )
+
+        if capture_status == "UNUSABLE":
+            return {
+                "status": "not_interpretable",
+                "mechanism_id": None,
+                "title": "Root cause not interpretable yet",
+                "summary": "Capture quality is too weak to call a root cause from this clip.",
+                "why_it_is_happening": "The clip does not show the chain clearly enough to justify a root-cause story yet.",
+                "where_it_starts": None,
+                "primary_driver": None,
+                "compensation": None,
+                "secondary_driver": None,
+                "chain_story": "ActionLab should improve the clip evidence first before claiming why the chain is breaking.",
+                "performance_impact": None,
+                "load_impact": None,
+                "biomechanics_basis": None,
+                "renderer_guidance": None,
+            }
+
+        if diagnosis_status == "no_match" and str(kinetic_chain_status.get("id") or "") == "connected":
+            return {
+                "status": "no_clear_problem",
+                "mechanism_id": None,
+                "title": "No clear root cause",
+                "summary": "No single phase is breaking the chain enough to justify a root-cause intervention right now.",
+                "why_it_is_happening": "The action looks connected enough that ActionLab should not force a pathology story from this clip.",
+                "where_it_starts": None,
+                "primary_driver": None,
+                "compensation": None,
+                "secondary_driver": None,
+                "chain_story": "Momentum is carrying through the action cleanly enough that there is no obvious break point to explain away.",
+                "performance_impact": None,
+                "load_impact": None,
+                "biomechanics_basis": None,
+                "renderer_guidance": None,
+            }
+
+        if not primary:
+            summary = "The clip shows a leak, but ActionLab is not yet confident enough to call one primary root cause."
+            why_lines = [
+                "The action is showing a problem pattern, but the evidence is still short of a confident mechanism match."
+            ]
+            if break_title:
+                why_lines.append(
+                    f"The best current clue is around {break_title}, where the chain is starting to look less connected."
+                )
+            if isinstance(primary_driver, dict):
+                why_lines.append(
+                    f"{primary_driver['title']} is the strongest current driver signal: {primary_driver['summary']}"
+                )
+
+            chain_lines: List[str] = []
+            if break_title:
+                chain_lines.append(f"The leak appears to start around {break_title}.")
+            if isinstance(primary_driver, dict):
+                driver_summary = str(primary_driver.get("summary") or "").strip()
+                if driver_summary:
+                    chain_lines.append(driver_summary)
+            elif visible_summary:
+                chain_lines.append(visible_summary)
+            if performance_impact and not _is_duplicate_story(performance_impact, chain_lines):
+                chain_lines.append(performance_impact)
+            if load_impact and not _is_duplicate_story(load_impact, chain_lines):
+                chain_lines.append(load_impact)
+
+            return {
+                "status": "holdback",
+                "mechanism_id": None,
+                "title": "Root cause still being narrowed",
+                "summary": summary,
+                "why_it_is_happening": " ".join(why_lines),
+                "where_it_starts": (
+                    {
+                        "phase_id": break_phase_id or None,
+                        "title": break_title,
+                    }
+                    if break_title
+                    else None
+                ),
+                "primary_driver": primary_driver,
+                "compensation": compensation,
+                "secondary_driver": secondary_driver,
+                "chain_story": " ".join(line for line in chain_lines if line),
+                "performance_impact": performance_impact or None,
+                "load_impact": load_impact or None,
+                "biomechanics_basis": biomechanics_basis,
+                "renderer_guidance": renderer_guidance,
+            }
+
+        why_it_is_happening = (
+            mechanism_summary
+            or f"{mechanism_title} is the main root-cause story on this clip."
+        )
+        chain_lines = []
+        if break_title:
+            chain_lines.append(f"It starts at {break_title}.")
+        chain_lines.append(why_it_is_happening)
+        if isinstance(primary_driver, dict):
+            driver_summary = str(primary_driver.get("summary") or "").strip()
+            if driver_summary and not _is_duplicate_story(driver_summary, chain_lines):
+                chain_lines.append(driver_summary)
+        if isinstance(compensation, dict):
+            compensation_line = (
+                f"{compensation['title']} is the visible compensation that shows up after the main leak starts."
+            )
+            if not _is_duplicate_story(compensation_line, chain_lines):
+                chain_lines.append(compensation_line)
+        elif visible_summary and not _is_duplicate_story(visible_summary, chain_lines):
+            chain_lines.append(visible_summary)
+        if (
+            isinstance(secondary_driver, dict)
+            and str(secondary_driver.get("body_group") or "") != str((primary_driver or {}).get("body_group") or "")
+        ):
+            secondary_line = (
+                f"{secondary_driver['title']} shows how the leak is carrying into the "
+                f"{str(secondary_driver.get('body_group') or 'rest of the chain').replace('_', ' ')}."
+            )
+            if not _is_duplicate_story(secondary_line, chain_lines):
+                chain_lines.append(secondary_line)
+        if performance_impact and not _is_duplicate_story(performance_impact, chain_lines):
+            chain_lines.append(performance_impact)
+
+        return {
+            "status": "clear",
+            "mechanism_id": mechanism_id,
+            "title": mechanism_title or "Primary root cause",
+            "summary": why_it_is_happening,
+            "why_it_is_happening": why_it_is_happening,
+            "where_it_starts": (
+                {
+                    "phase_id": break_phase_id or None,
+                    "title": break_title,
+                }
+                if break_title
+                else None
+            ),
+            "primary_driver": primary_driver,
+            "compensation": compensation,
+            "secondary_driver": secondary_driver,
+            "chain_story": " ".join(line for line in chain_lines if line),
+            "performance_impact": performance_impact or None,
+            "load_impact": load_impact or None,
+            "biomechanics_basis": biomechanics_basis,
+            "renderer_guidance": renderer_guidance,
+        }
+
     def _change_strategy(
         self,
         *,
@@ -2322,6 +3779,126 @@ class DeterministicExpertSystem:
             ),
         }
 
+    def _acceptance_cfg(self, key: str) -> Dict[str, float]:
+        cfg = (((self._pack.get("globals") or {}).get("acceptance_bands") or {}).get(key) or {})
+        return {
+            "acceptable_max": _safe_float(cfg.get("acceptable_max"), 0.25),
+            "workable_max": _safe_float(cfg.get("workable_max"), 0.50),
+        }
+
+    def _metric_acceptance_band(
+        self,
+        metric: Dict[str, Any],
+        *,
+        inverse_good: bool = False,
+        band_key: str = "contributor_severity",
+    ) -> str:
+        cfg = self._acceptance_cfg(band_key)
+        raw_value = metric.get("raw_value")
+        base_value = _safe_float(raw_value if isinstance(raw_value, (int, float)) else metric.get("value"), 0.0)
+        severity = 1.0 - base_value if inverse_good else base_value
+        return _acceptance_band(
+            severity,
+            acceptable_max=cfg["acceptable_max"],
+            workable_max=cfg["workable_max"],
+        )
+
+    def _key_metrics(self, metrics: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
+        metric_defs = {
+            "front_leg_support_score": {"title": "Front-leg support", "inverse_good": True},
+            "trunk_drift_after_ffc": {"title": "Late trunk drift", "inverse_good": False},
+            "transfer_efficiency_score": {"title": "Transfer efficiency", "inverse_good": True},
+            "pelvis_trunk_alignment": {"title": "Pelvis-trunk alignment", "inverse_good": True},
+            "shoulder_rotation_timing": {"title": "Shoulder rotation timing", "inverse_good": True},
+        }
+        out: Dict[str, Dict[str, Any]] = {}
+        for metric_id, cfg in metric_defs.items():
+            metric = metrics.get(metric_id) or {}
+            if not isinstance(metric, dict):
+                continue
+            out[metric_id] = {
+                "id": metric_id,
+                "title": cfg["title"],
+                "score": _round3(_safe_float(metric.get("value"), 0.0)),
+                "confidence": _round3(_safe_float(metric.get("confidence"), 0.0)),
+                "acceptance_band": self._metric_acceptance_band(
+                    metric,
+                    inverse_good=bool(cfg["inverse_good"]),
+                ),
+            }
+        return out
+
+    def _acceptance_summary(
+        self,
+        *,
+        metrics: Dict[str, Any],
+        contributors: List[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        key_metrics = self._key_metrics(metrics)
+        counts = {"acceptable": 0, "workable": 0, "problematic": 0}
+        for metric in key_metrics.values():
+            band = str(metric.get("acceptance_band") or "workable")
+            if band in counts:
+                counts[band] += 1
+        for contributor in contributors:
+            band = str(contributor.get("acceptance_band") or "").strip()
+            if band in counts:
+                counts[band] += 1
+        overall = "acceptable"
+        if counts["problematic"] > 0:
+            overall = "problematic"
+        elif counts["workable"] > 0:
+            overall = "workable"
+        return {
+            "overall_band": overall,
+            "counts": counts,
+            "key_metrics": key_metrics,
+        }
+
+    def _kinetic_chain_status(
+        self,
+        *,
+        metrics: Dict[str, Any],
+        diagnosis_status: str,
+        primary_break_point: Dict[str, Any],
+        capture_quality: Dict[str, Any],
+        acceptance_summary: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        chain_statuses = (self._pack.get("coach_judgments") or {}).get("chain_statuses") or {}
+        if str(capture_quality.get("status") or "").upper() == "UNUSABLE":
+            status_id = "not_interpretable_with_confidence"
+        else:
+            break_phase_id = str(primary_break_point.get("phase_id") or "")
+            overall_band = str(acceptance_summary.get("overall_band") or "workable")
+            release_cost = _safe_float((metrics.get("dissipation_burden_score") or {}).get("value"), 0.0)
+            release_gap = 1.0 - _safe_float((metrics.get("release_timing_stability") or {}).get("value"), 0.0)
+            if diagnosis_status == "no_match":
+                if overall_band == "acceptable":
+                    status_id = "connected"
+                elif release_cost >= 0.62 and release_gap <= 0.45:
+                    status_id = "effective_but_expensive"
+                else:
+                    status_id = "workable_but_leaking"
+            elif diagnosis_status == "ambiguous_match":
+                status_id = "workable_but_leaking"
+            elif break_phase_id == "transfer_and_block":
+                status_id = "breaking_at_transfer"
+            elif break_phase_id in {"whip_and_release", "UAH", "RELEASE"}:
+                status_id = "breaking_at_release_timing"
+            elif release_cost >= 0.62:
+                status_id = "effective_but_expensive"
+            else:
+                status_id = "workable_but_leaking"
+
+        cfg = chain_statuses.get(status_id) or {}
+        return {
+            "id": status_id,
+            "label": cfg.get("title"),
+            "summary": cfg.get("summary"),
+            "coach_prompt": cfg.get("coach_prompt"),
+            "acceptance_band": acceptance_summary.get("overall_band"),
+        }
+
     def _what_is_ok(
         self,
         *,
@@ -2353,15 +3930,30 @@ class DeterministicExpertSystem:
         contributors: List[Dict[str, Any]],
     ) -> List[str]:
         issues: List[str] = []
-        if visible_symptom and visible_symptom.get("summary"):
-            issues.append(str(visible_symptom["summary"]))
-        if primary.get("summary"):
-            issues.append(str(primary["summary"]))
-        for contributor in contributors[:3]:
+        visible_summary = str((visible_symptom or {}).get("summary") or "").strip()
+        if visible_summary and not _is_duplicate_story(visible_summary, issues):
+            issues.append(visible_summary)
+
+        grouped: Dict[str, str] = {}
+        for contributor in contributors:
+            if str(contributor.get("acceptance_band") or "") != "problematic":
+                continue
+            body_group = str(contributor.get("body_group") or "whole_chain")
             summary = str(contributor.get("summary") or "").strip()
+            if not summary or body_group in grouped or _is_duplicate_story(summary, issues):
+                continue
+            grouped[body_group] = summary
+
+        for body_group in ("lower_body", "upper_body", "whole_chain"):
+            summary = grouped.get(body_group)
             if summary:
                 issues.append(summary)
-        return list(dict.fromkeys(issues))[:4]
+
+        primary_summary = str(primary.get("summary") or "").strip()
+        if primary_summary and not _is_duplicate_story(primary_summary, issues):
+            issues.append(primary_summary)
+
+        return issues[:3]
 
     def _compensation_patterns(self, symptoms: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         compensation_ids = set(
@@ -2658,6 +4250,7 @@ class DeterministicExpertSystem:
         render_reasoning: Dict[str, Any],
         mechanism_explanation: Dict[str, Any],
         prescription_plan: Dict[str, Any],
+        coach_diagnosis: Dict[str, Any],
         archetype: Optional[Dict[str, Any]],
     ) -> Dict[str, Any]:
         diagnosis_status = str(selection.get("diagnosis_status") or "no_match")
@@ -2695,6 +4288,7 @@ class DeterministicExpertSystem:
                 "load_impact": mechanism_explanation.get("load_impact"),
                 "first_intervention": mechanism_explanation.get("first_intervention"),
                 "coach_check": mechanism_explanation.get("coach_check"),
+                "root_cause": coach_diagnosis.get("root_cause"),
                 "primary_prescription_id": prescription_plan.get("primary_prescription_id"),
                 "coaching_priority": (prescription_plan.get("prescriptions") or [{}])[0].get("goal")
                 if prescription_plan.get("prescriptions")
@@ -2715,12 +4309,14 @@ class DeterministicExpertSystem:
                 ],
                 "holdback_reason": mechanism_explanation.get("performance_impact"),
                 "coach_check": mechanism_explanation.get("coach_check"),
+                "root_cause": coach_diagnosis.get("root_cause"),
             }
         else:
             payload["no_match"] = {
                 "holdback_reason": mechanism_explanation.get("performance_impact"),
                 "load_holdback_reason": mechanism_explanation.get("load_impact"),
                 "coach_check": mechanism_explanation.get("coach_check"),
+                "root_cause": coach_diagnosis.get("root_cause"),
                 "selected_render_story_ids": list(selection.get("selected_render_story_ids") or []),
             }
         return payload

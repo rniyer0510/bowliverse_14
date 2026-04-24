@@ -314,6 +314,7 @@ def _extract_kinetic_chain_summary(result_json: Optional[Dict[str, Any]]) -> Opt
     explanation = result_json.get("mechanism_explanation_v1")
     prescription_plan = result_json.get("prescription_plan_v1")
     render_reasoning = result_json.get("render_reasoning_v1")
+    root_cause_summary = _extract_root_cause_summary(result_json)
     if not isinstance(kinetic_chain, dict):
         return None
 
@@ -340,6 +341,7 @@ def _extract_kinetic_chain_summary(result_json: Optional[Dict[str, Any]]) -> Opt
         "primary_mechanism": (explanation or {}).get("primary_mechanism") if isinstance(explanation, dict) else None,
         "first_intervention": (explanation or {}).get("first_intervention") if isinstance(explanation, dict) else None,
         "primary_prescription_title": prescription_title,
+        "root_cause": root_cause_summary,
         "renderer_mode": (
             render_reasoning.get("renderer_mode")
             if isinstance(render_reasoning, dict)
@@ -361,19 +363,78 @@ def _extract_kinetic_chain_summary(result_json: Optional[Dict[str, Any]]) -> Opt
     }
 
 
+def _extract_root_cause_summary(result_json: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    if not isinstance(result_json, dict):
+        return None
+    coach_diagnosis = result_json.get("coach_diagnosis_v1") or {}
+    root_cause = coach_diagnosis.get("root_cause")
+    if not isinstance(root_cause, dict):
+        presentation_payload = result_json.get("presentation_payload_v1") or {}
+        for key in ("match", "ambiguous", "no_match"):
+            payload = presentation_payload.get(key) or {}
+            if isinstance(payload, dict) and isinstance(payload.get("root_cause"), dict):
+                root_cause = payload.get("root_cause")
+                break
+    if not isinstance(root_cause, dict):
+        frontend_surface = result_json.get("frontend_surface_v1") or {}
+        hero = frontend_surface.get("hero") or {}
+        if isinstance(hero, dict):
+            root_cause = hero.get("root_cause")
+    if not isinstance(root_cause, dict):
+        return None
+
+    primary_driver = root_cause.get("primary_driver") or {}
+    compensation = root_cause.get("compensation") or {}
+    renderer_guidance = root_cause.get("renderer_guidance") or {}
+    where_it_starts = root_cause.get("where_it_starts") or {}
+    return {
+        "status": root_cause.get("status"),
+        "mechanism_id": root_cause.get("mechanism_id"),
+        "title": root_cause.get("title"),
+        "summary": root_cause.get("summary"),
+        "why_it_is_happening": root_cause.get("why_it_is_happening"),
+        "chain_story": root_cause.get("chain_story"),
+        "phase_id": where_it_starts.get("phase_id") if isinstance(where_it_starts, dict) else None,
+        "primary_driver_id": primary_driver.get("id") if isinstance(primary_driver, dict) else None,
+        "primary_driver_title": primary_driver.get("title") if isinstance(primary_driver, dict) else None,
+        "compensation_id": compensation.get("id") if isinstance(compensation, dict) else None,
+        "compensation_title": compensation.get("title") if isinstance(compensation, dict) else None,
+        "render_story_id": renderer_guidance.get("story_id") if isinstance(renderer_guidance, dict) else None,
+        "cue_points": list(renderer_guidance.get("cue_points") or [])[:3]
+        if isinstance(renderer_guidance, dict)
+        else [],
+        "symptom_text": renderer_guidance.get("symptom_text") if isinstance(renderer_guidance, dict) else None,
+        "load_watch_text": renderer_guidance.get("load_watch_text") if isinstance(renderer_guidance, dict) else None,
+    }
+
+
 def _extract_history_plan_summary(result_json: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
     if not isinstance(result_json, dict):
         return None
     history_plan = result_json.get("history_plan_v1")
     if not isinstance(history_plan, dict):
         return None
+    root_cause_summary = _extract_root_cause_summary(result_json)
     bindings = history_plan.get("history_bindings") or []
     binding_trends = history_plan.get("binding_trends") or []
     followup_checks = history_plan.get("followup_checks") or []
     render_stories = history_plan.get("render_stories") or []
+    render_story_ids = [
+        story.get("id")
+        for story in render_stories
+        if isinstance(story, dict) and story.get("id")
+    ]
+    root_cause_story_id = (
+        root_cause_summary.get("render_story_id")
+        if isinstance(root_cause_summary, dict)
+        else None
+    )
+    if root_cause_story_id and root_cause_story_id not in render_story_ids:
+        render_story_ids = [root_cause_story_id, *render_story_ids]
     return {
         "history_story": history_plan.get("history_story"),
         "coaching_priority": history_plan.get("coaching_priority"),
+        "root_cause": root_cause_summary,
         "history_binding_ids": [
             binding.get("id")
             for binding in bindings
@@ -389,11 +450,7 @@ def _extract_history_plan_summary(result_json: Optional[Dict[str, Any]]) -> Opti
             for check in followup_checks
             if isinstance(check, dict) and check.get("id")
         ],
-        "render_story_ids": [
-            story.get("id")
-            for story in render_stories
-            if isinstance(story, dict) and story.get("id")
-        ],
+        "render_story_ids": render_story_ids,
     }
 
 
@@ -1631,6 +1688,7 @@ def list_analysis_runs(
             "score_summary": score_summary,
             "rating_summary_v2": rating_summary_v2,
             "visual_walkthrough": _extract_visual_walkthrough(raw.result_json if raw else None),
+            "root_cause_summary_v1": _extract_root_cause_summary(raw.result_json if raw else None),
             "kinetic_chain_summary_v1": _extract_kinetic_chain_summary(raw.result_json if raw else None),
             "history_plan_summary_v1": _extract_history_plan_summary(raw.result_json if raw else None),
             "explanation_trace_summary_v1": _explanation_trace_summary(trace_by_run_id.get(r.run_id)),

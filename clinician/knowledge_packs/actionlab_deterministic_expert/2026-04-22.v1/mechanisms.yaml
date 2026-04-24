@@ -4,7 +4,21 @@ mechanisms:
   low_build_forcing_late_rescue:
     id: low_build_forcing_late_rescue
     title: "Low build forcing late rescue"
+    simple_title: "Not enough build, so speed is made late"
     summary: "The approach is not building enough usable momentum, so pace has to be generated close to release."
+    simple_summary: "The run-up is not bringing enough energy in, so the body has to make speed late."
+    primary_driver_ids:
+      - shoulder_rotation_timing
+      - trunk_rotation_snap
+    common_compensation_ids:
+      - hip_shoulder_mismatch
+      - lateral_trunk_lean
+    biomechanics_principles:
+      - "Pace is easier to repeat when usable momentum is carried forward earlier instead of being recreated in the last part of the chain."
+      - "When the build phase stays underpowered, upper-chain timing usually has to steepen late to rescue the release window."
+    cue_ready_proof_lines:
+      - "Show that the approach arrives without enough carry, so the release has to create pace late."
+      - "Show the upper chain accelerating sharply because the action did not bring enough momentum into the crease."
     family: build_deficit
     primary_phases:
       - approach_build
@@ -44,7 +58,21 @@ mechanisms:
   gather_disorganization_before_block:
     id: gather_disorganization_before_block
     title: "Gather disorganization before block"
+    simple_title: "The body arrives messy before landing"
     summary: "The bowler arrives with intent, but the body is not organized well enough before landing to transfer momentum cleanly."
+    simple_summary: "The body is not lined up well before landing, so power leaks before release."
+    primary_driver_ids:
+      - pelvis_trunk_alignment
+      - foot_line_deviation
+    common_compensation_ids:
+      - trunk_drift_after_ffc
+      - knee_brace_failure
+    biomechanics_principles:
+      - "Transfer quality depends on how well the body arrives organized into landing, not only on what happens after the front foot hits."
+      - "If pelvis-to-trunk organization is drifting before block, the landing base is more likely to accept force late and leak it forward."
+    cue_ready_proof_lines:
+      - "Show that the body is arriving off the clean transfer line before landing even though intent is present."
+      - "Show that the softer landing base is a downstream result of earlier gather disorganization."
     family: gather_deficit
     primary_phases:
       - gather_and_organize
@@ -84,7 +112,21 @@ mechanisms:
   soft_block_with_trunk_carry:
     id: soft_block_with_trunk_carry
     title: "Soft block with trunk carry"
+    simple_title: "Front leg does not hold, so the body spills through"
     summary: "The landing leg does not become a stable base, so the trunk keeps travelling through the block instead of transferring cleanly."
+    simple_summary: "The front leg does not hold strong at landing, so the body keeps moving through release."
+    primary_driver_ids:
+      - front_leg_support_score
+      - knee_brace_failure
+    common_compensation_ids:
+      - lateral_trunk_lean
+      - trunk_drift_after_ffc
+    biomechanics_principles:
+      - "Front-foot-contact organization and landing-leg support strongly influence whether momentum is transferred or leaked through landing."
+      - "If the block does not firm up enough, the trunk keeps travelling and the release window becomes a carry problem instead of a clean transfer."
+    cue_ready_proof_lines:
+      - "Show that the landing leg never becomes a strong transfer point."
+      - "Show that the trunk keeps travelling past that soft base into release."
     family: block_bracing_deficit
     primary_phases:
       - transfer_and_block
@@ -124,7 +166,21 @@ mechanisms:
   late_arm_acceleration_due_to_chain_delay:
     id: late_arm_acceleration_due_to_chain_delay
     title: "Late arm acceleration due to chain delay"
+    simple_title: "The body gets late, then the arm has to rush"
     summary: "Earlier chain segments are late enough that the arm has to chase the release window."
+    simple_summary: "The body gets late, so the arm has to rush to catch up."
+    primary_driver_ids:
+      - shoulder_rotation_timing
+      - hip_shoulder_mismatch
+    common_compensation_ids:
+      - trunk_rotation_snap
+      - lateral_trunk_lean
+    biomechanics_principles:
+      - "Upper-arm rescue is usually a downstream timing symptom rather than the first problem in the chain."
+      - "When proximal segments arrive late, the arm has to accelerate into a window that is already narrowing."
+    cue_ready_proof_lines:
+      - "Show that the chain arrives late enough that the arm is forced to chase the ball."
+      - "Show that the late arm speed is compensation for delayed chain timing, not the root cause by itself."
     family: sequencing_deficit
     primary_phases:
       - gather_and_organize
@@ -165,7 +221,21 @@ mechanisms:
   high_terminal_impulse_with_high_dissipation_burden:
     id: high_terminal_impulse_with_high_dissipation_burden
     title: "High terminal impulse with high dissipation burden"
+    simple_title: "Speed is made late and paid for in the finish"
     summary: "The bowler can create pace late, but the cost shows up immediately after release through a concentrated deceleration burden."
+    simple_summary: "The action can still make speed, but it pays for it with a hard finish."
+    primary_driver_ids:
+      - trunk_rotation_snap
+      - front_foot_braking_shock
+    common_compensation_ids:
+      - lateral_trunk_lean
+      - knee_brace_failure
+    biomechanics_principles:
+      - "Visible pace can still be produced when terminal impulse is high, but the action pays for it if deceleration is concentrated late."
+      - "A harsher finish pattern usually means force creation and force dissipation are both happening too abruptly at the end of the chain."
+    cue_ready_proof_lines:
+      - "Show that pace is being created late and expensively rather than carried calmly."
+      - "Show that the follow-through is absorbing a larger load burden immediately after release."
     family: dissipation_deficit
     primary_phases:
       - whip_and_release
@@ -205,7 +275,21 @@ mechanisms:
   release_window_instability_under_load:
     id: release_window_instability_under_load
     title: "Release-window instability under load"
+    simple_title: "Release timing gets shaky when effort goes up"
     summary: "The action can find the release on calmer balls, but under higher intent the window tightens and the arm has to rescue timing late."
+    simple_summary: "Release timing gets shaky when effort goes up, so the arm has to rescue it late."
+    primary_driver_ids:
+      - shoulder_rotation_timing
+      - trunk_rotation_snap
+    common_compensation_ids:
+      - hip_shoulder_mismatch
+      - lateral_trunk_lean
+    biomechanics_principles:
+      - "Release calmness should be judged under intent, because higher effort often exposes whether the chain can keep timing stable."
+      - "When the release window tightens under load, late upper-chain rescue usually becomes more visible even if the clip still looks workable."
+    cue_ready_proof_lines:
+      - "Show that the release window looks calmer on easier effort and tighter once intent rises."
+      - "Show that the late upper-chain rescue is the compensation pattern that appears when the window narrows."
     family: sequencing_deficit
     primary_phases:
       - whip_and_release
@@ -245,7 +329,21 @@ mechanisms:
   underused_transfer_window_with_late_dump:
     id: underused_transfer_window_with_late_dump
     title: "Underused transfer window with late dump"
+    simple_title: "Landing is there, but the action does not use it well"
     summary: "The landing window is readable, but too little of it is converted into a calm transfer before the finish dumps load late."
+    simple_summary: "The action reaches landing, but does not use it well, so too much force gets dumped late in the finish."
+    primary_driver_ids:
+      - front_leg_support_score
+      - front_foot_braking_shock
+    common_compensation_ids:
+      - trunk_drift_after_ffc
+      - lateral_trunk_lean
+    biomechanics_principles:
+      - "A visible transfer window only helps if the action actually converts momentum through it before release and recovery."
+      - "When transfer is left unused, the finish often has to absorb the leftover deceleration burden late."
+    cue_ready_proof_lines:
+      - "Show that the landing window is present but not being converted into clean transfer."
+      - "Show that the late dump in the finish is the cost of leaving that transfer window underused."
     family: dissipation_deficit
     primary_phases:
       - transfer_and_block

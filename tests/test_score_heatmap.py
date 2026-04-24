@@ -11,6 +11,7 @@ from app.persistence.read_api import (
     _extract_action_change_traits,
     _extract_history_plan_summary,
     _extract_kinetic_chain_summary,
+    _extract_root_cause_summary,
     _extract_rating_summary_v2,
     _extract_score_summary,
     _extract_visual_walkthrough,
@@ -394,6 +395,25 @@ class ScoreHeatmapTests(unittest.TestCase):
                 {"id": "stack_over_landing_leg", "title": "Stack over the landing leg sooner"},
             ]
         }
+        result_json["coach_diagnosis_v1"] = {
+            "root_cause": {
+                "status": "clear",
+                "mechanism_id": "soft_block_with_trunk_carry",
+                "title": "Soft block with trunk carry",
+                "summary": "The landing leg does not become a stable base.",
+                "why_it_is_happening": "The landing leg does not become a stable base, so the trunk keeps travelling.",
+                "chain_story": "It starts at transfer and block and then carries into the trunk.",
+                "where_it_starts": {"phase_id": "transfer_and_block"},
+                "primary_driver": {"id": "front_leg_support_score", "title": "Front-leg support"},
+                "compensation": {"id": "lateral_trunk_lean", "title": "Trunk lean"},
+                "renderer_guidance": {
+                    "story_id": "soft_block_trunk_carry_story",
+                    "cue_points": ["Show the soft base", "Show the trunk carry"],
+                    "symptom_text": "Front leg softens at landing",
+                    "load_watch_text": "Front knee / leg chain\nLower back / side trunk",
+                },
+            }
+        }
 
         summary = _extract_kinetic_chain_summary(result_json)
 
@@ -401,6 +421,7 @@ class ScoreHeatmapTests(unittest.TestCase):
         self.assertEqual(summary["archetype"], "Soft block leakage")
         self.assertEqual(summary["primary_mechanism"], "Soft block with trunk carry")
         self.assertEqual(summary["primary_prescription_title"], "Stack over the landing leg sooner")
+        self.assertEqual(summary["root_cause"]["mechanism_id"], "soft_block_with_trunk_carry")
         self.assertEqual(summary["block"]["label"], "weak")
         self.assertEqual(summary["pace_translation"]["leakage_at_block"], 0.71)
 
@@ -422,6 +443,25 @@ class ScoreHeatmapTests(unittest.TestCase):
                 {"id": "soft_block_trunk_carry_story"},
             ],
         }
+        result_json["coach_diagnosis_v1"] = {
+            "root_cause": {
+                "status": "clear",
+                "mechanism_id": "soft_block_with_trunk_carry",
+                "title": "Soft block with trunk carry",
+                "summary": "The landing leg does not become a stable base.",
+                "why_it_is_happening": "The landing leg does not become a stable base, so the trunk keeps travelling.",
+                "chain_story": "The leak begins at landing and shows up as trunk carry later.",
+                "where_it_starts": {"phase_id": "transfer_and_block"},
+                "primary_driver": {"id": "front_leg_support_score", "title": "Front-leg support"},
+                "compensation": {"id": "lateral_trunk_lean", "title": "Trunk lean"},
+                "renderer_guidance": {
+                    "story_id": "soft_block_trunk_carry_story",
+                    "cue_points": ["Show the soft base", "Show the trunk carry"],
+                    "symptom_text": "Front leg softens at landing",
+                    "load_watch_text": "Front knee / leg chain\nLower back / side trunk",
+                },
+            }
+        }
 
         summary = _extract_history_plan_summary(result_json)
 
@@ -429,6 +469,7 @@ class ScoreHeatmapTests(unittest.TestCase):
             summary["history_story"],
             "Recent clips keep showing a soft-block leakage pattern at landing.",
         )
+        self.assertEqual(summary["root_cause"]["compensation_title"], "Trunk lean")
         self.assertEqual(summary["history_binding_ids"], ["transfer_block_stability"])
         self.assertEqual(
             summary["binding_trend_statuses"],
@@ -436,6 +477,35 @@ class ScoreHeatmapTests(unittest.TestCase):
         )
         self.assertEqual(summary["followup_check_ids"], ["reduced_trunk_drift_after_ffc"])
         self.assertEqual(summary["render_story_ids"], ["soft_block_trunk_carry_story"])
+
+    def test_extract_root_cause_summary_from_result_json(self):
+        result_json = self._result_json()
+        result_json["coach_diagnosis_v1"] = {
+            "root_cause": {
+                "status": "clear",
+                "mechanism_id": "late_arm_acceleration_due_to_chain_delay",
+                "title": "Late arm acceleration due to chain delay",
+                "summary": "Earlier chain segments are late enough that the arm has to chase the release window.",
+                "why_it_is_happening": "The arm is rescuing a delayed chain rather than causing the leak by itself.",
+                "chain_story": "The chain arrives late, then the arm speeds up to catch the ball.",
+                "where_it_starts": {"phase_id": "whip_and_release"},
+                "primary_driver": {"id": "shoulder_rotation_timing", "title": "Shoulder rotation timing"},
+                "compensation": {"id": "trunk_rotation_snap", "title": "Shoulder rotation snap"},
+                "renderer_guidance": {
+                    "story_id": "delayed_chain_arm_chase_story",
+                    "cue_points": ["Show the late chain", "Show the arm chase"],
+                    "symptom_text": "Arm has to chase release late",
+                    "load_watch_text": "Lower back / side trunk",
+                },
+            }
+        }
+
+        summary = _extract_root_cause_summary(result_json)
+
+        self.assertEqual(summary["mechanism_id"], "late_arm_acceleration_due_to_chain_delay")
+        self.assertEqual(summary["primary_driver_id"], "shoulder_rotation_timing")
+        self.assertEqual(summary["compensation_id"], "trunk_rotation_snap")
+        self.assertEqual(summary["render_story_id"], "delayed_chain_arm_chase_story")
 
     def test_build_player_baseline_state_marks_refresh_candidate_on_sustained_action_shift(self):
         baseline_state = _build_player_baseline_state(

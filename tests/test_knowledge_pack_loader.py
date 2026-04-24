@@ -47,6 +47,9 @@ class KnowledgePackLoaderTests(unittest.TestCase):
         self.assertIn("glazier_wheat_2014", pack["research_sources"])
         self.assertIn("agastya_blog_2", pack["research_sources"])
         self.assertIn("evidence_soft_block_ffc", pack["knowledge_evidence"])
+        self.assertIn("evidence_neck_tilt_bfc", pack["knowledge_evidence"])
+        self.assertIn("evidence_shoulder_rotation_timing", pack["knowledge_evidence"])
+        self.assertIn("evidence_pelvis_trunk_alignment", pack["knowledge_evidence"])
         self.assertIn(
             "canonical_front_leg_transfer_support",
             pack["reconciliation"]["canonical_concepts"],
@@ -63,6 +66,7 @@ class KnowledgePackLoaderTests(unittest.TestCase):
         self.assertIn("release_fragility_bowler", pack["archetypes"])
         self.assertIn("hedges", pack["wording"])
         self.assertIn("surfaces", pack["wording"])
+        self.assertIn("simple_language", pack["wording"])
         self.assertIn("internal_metrics", pack["globals"])
         self.assertIn("confidence_bands", pack["globals"])
         self.assertIn("severity_bands", pack["globals"])
@@ -80,6 +84,30 @@ class KnowledgePackLoaderTests(unittest.TestCase):
         self.assertEqual(
             pack["prescriptions"]["stabilize_release_window_under_load"]["change_reaction"]["match_pressure_risk"],
             "high",
+        )
+        self.assertEqual(
+            pack["symptoms"]["front_leg_softening"]["simple_description"],
+            "Front leg doesn't hold strong at landing.",
+        )
+        self.assertEqual(
+            pack["mechanisms"]["soft_block_with_trunk_carry"]["simple_summary"],
+            "The front leg does not hold strong at landing, so the body keeps moving through release.",
+        )
+        self.assertEqual(
+            pack["prescriptions"]["stack_over_landing_leg"]["simple_primary_cue"],
+            "Feel the chest get over the front leg sooner instead of drifting past it.",
+        )
+        self.assertEqual(
+            pack["followup_checks"]["reduced_trunk_drift_after_ffc"]["simple_title"],
+            "Body stays over the front leg better",
+        )
+        self.assertEqual(
+            pack["history_bindings"]["transfer_block_stability"]["simple_chart_summary"],
+            "Tracks whether the front leg and body are turning landing into a cleaner power move.",
+        )
+        self.assertEqual(
+            pack["archetypes"]["soft_block_leakage_bowler"]["simple_summary"],
+            "Landing is not becoming a strong base, so speed leaks there.",
         )
         self.assertEqual(
             pack["manifest"]["min_engine_version"],

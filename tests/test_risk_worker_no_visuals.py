@@ -66,6 +66,9 @@ class RiskWorkerNoVisualsTests(unittest.TestCase):
             "app.workers.risk.risk_worker.compute_foot_line_deviation",
             return_value={"signal_strength": 0.2, "confidence": 0.5},
         ) as foot_line_mock, patch(
+            "app.workers.risk.risk_worker.compute_neck_tilt_left_bfc",
+            return_value={"signal_strength": 0.2, "confidence": 0.5},
+        ), patch(
             "app.workers.risk.risk_worker.attach_deviation_and_impact",
             side_effect=lambda risk, **_: risk,
         ):
@@ -77,11 +80,13 @@ class RiskWorkerNoVisualsTests(unittest.TestCase):
                 run_id="run-1",
             )
 
-        self.assertEqual(len(out), 6)
+        self.assertEqual(len(out), 7)
         self.assertEqual(braking_mock.call_args.args[1], 2)
         self.assertEqual(knee_mock.call_args.args[1], 2)
         self.assertEqual(foot_line_mock.call_args.args[1], 1)
         self.assertEqual(foot_line_mock.call_args.args[2], 2)
+        for risk in out:
+            self.assertIn("acceptance_band", risk)
 
     def test_run_risk_worker_does_not_emit_visual_fields(self):
         pose_frames = [_front_frame() for _ in range(4)]
@@ -111,6 +116,9 @@ class RiskWorkerNoVisualsTests(unittest.TestCase):
             "app.workers.risk.risk_worker.compute_foot_line_deviation",
             return_value={"signal_strength": 0.3, "confidence": 0.6},
         ), patch(
+            "app.workers.risk.risk_worker.compute_neck_tilt_left_bfc",
+            return_value={"signal_strength": 0.3, "confidence": 0.6},
+        ), patch(
             "app.workers.risk.risk_worker.attach_deviation_and_impact",
             side_effect=lambda risk, **_: {
                 **risk,
@@ -126,7 +134,7 @@ class RiskWorkerNoVisualsTests(unittest.TestCase):
                 run_id="run-2",
             )
 
-        self.assertEqual(len(out), 6)
+        self.assertEqual(len(out), 7)
         for risk in out:
             self.assertNotIn("visual", risk)
             self.assertNotIn("visual_window", risk)
@@ -134,6 +142,11 @@ class RiskWorkerNoVisualsTests(unittest.TestCase):
             self.assertNotIn("capture_feedback", risk)
             self.assertIn("deviation", risk)
             self.assertIn("impact", risk)
+            self.assertIn("acceptance_band", risk)
+            self.assertEqual(
+                risk["deviation"].get("acceptance_band"),
+                risk["acceptance_band"],
+            )
 
 
 if __name__ == "__main__":

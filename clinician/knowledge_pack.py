@@ -1500,6 +1500,17 @@ def _validate_wording(document: Mapping[str, Any]) -> Dict[str, Any]:
                 normalized_status_leads[status_name]["coach"],
             )
 
+    simple_language_raw = document.get("simple_language") or {}
+    if simple_language_raw and not isinstance(simple_language_raw, Mapping):
+        raise ValueError("knowledge pack wording simple_language must be a mapping")
+    simple_language_raw = dict(simple_language_raw)
+    exact_overrides = simple_language_raw.get("exact_overrides") or {}
+    if exact_overrides and not isinstance(exact_overrides, Mapping):
+        raise ValueError("knowledge pack wording simple_language exact_overrides must be a mapping")
+    replacements = simple_language_raw.get("replacements") or {}
+    if replacements and not isinstance(replacements, Mapping):
+        raise ValueError("knowledge pack wording simple_language replacements must be a mapping")
+
     product_rules = _require_str_list(document, "product_rules", "knowledge pack wording")
     return {
         "version": document["version"],
@@ -1508,6 +1519,16 @@ def _validate_wording(document: Mapping[str, Any]) -> Dict[str, Any]:
         "surfaces": normalized_surfaces,
         "unknown_path_surfaces": normalized_unknown_surfaces,
         "status_leads": normalized_status_leads,
+        "simple_language": {
+            "exact_overrides": {
+                str(key): str(value)
+                for key, value in dict(exact_overrides).items()
+            },
+            "replacements": {
+                str(key): str(value)
+                for key, value in dict(replacements).items()
+            },
+        },
         "product_rules": product_rules,
     }
 

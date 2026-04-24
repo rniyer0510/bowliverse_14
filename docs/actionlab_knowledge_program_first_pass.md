@@ -112,6 +112,10 @@ Explicit backend architecture principles for:
 
 This section is inspired by the Nadi-architecture references you shared and is meant to keep ActionLab honest as the product scales.
 
+## Decision Log
+
+Key architecture decisions are now tracked in [actionlab_decision_log.md](./actionlab_decision_log.md).
+
 ## Runtime Usage
 
 The deterministic expert now reads contributor descriptions from the knowledge pack rather than hard-coded Python catalogs.

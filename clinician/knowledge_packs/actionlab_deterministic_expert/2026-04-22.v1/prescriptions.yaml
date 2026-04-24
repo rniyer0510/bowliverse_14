@@ -4,9 +4,13 @@ prescriptions:
   build_momentum_earlier:
     id: build_momentum_earlier
     title: "Build momentum earlier"
+    simple_title: "Build speed earlier"
     goal: "Bring more usable momentum into the crease so pace does not have to be rescued at the end."
+    simple_goal: "Build useful speed earlier so the action does not have to rush at the end."
     primary_cue: "Let the last few strides arrive with intent before release rather than trying to create the hit right at the end."
+    simple_primary_cue: "Let the last few strides bring energy in before release instead of trying to make it all happen at the end."
     why_this_first: "A better build gives the rest of the chain a calmer job before we coach finer release details."
+    simple_why_this_first: "If speed builds earlier, the rest of the action has an easier job."
     avoid_for_now:
       - "Do not cue the bowler to simply bowl harder."
       - "Do not add a bracing cue before the run-up and gather are cleaner."
@@ -14,6 +18,7 @@ prescriptions:
       - "Approach momentum rises without a matching jump in terminal rush."
       - "The release looks less rescued and more carried."
     coach_check: "On the next few balls, check whether the final strides arrive with intent before the arm speeds up."
+    simple_coach_check: "On the next few balls, check whether the last strides arrive with more intent before the arm speeds up."
     reassess_after: "Review after the next 3 to 5 deliveries and again after the next session."
     review_window_type: next_3_runs
     works_best_when:
@@ -49,9 +54,13 @@ prescriptions:
   organize_the_gather_line:
     id: organize_the_gather_line
     title: "Organize the gather line"
+    simple_title: "Arrive in a cleaner line"
     goal: "Arrive at back-foot and landing phases in a cleaner line so momentum can be transferred instead of cleaned up late."
+    simple_goal: "Help the body arrive to landing in a straighter, calmer line."
     primary_cue: "Keep the pelvis and chest arriving on the same line into the crease before trying to add more effort."
+    simple_primary_cue: "Let the hips and chest arrive on the same line into landing before adding more effort."
     why_this_first: "A cleaner gather often removes multiple downstream compensations at once."
+    simple_why_this_first: "A cleaner entry can remove more than one leak at once."
     avoid_for_now:
       - "Do not overload the bowler with separate hips, shoulders, and feet cues on the same ball."
       - "Do not chase arm-speed fixes before the gather line is calmer."
@@ -59,6 +68,7 @@ prescriptions:
       - "Landing looks less rushed."
       - "Transfer into the front foot looks more organized."
     coach_check: "Watch whether the body arrives to landing in a calmer line over the next few balls."
+    simple_coach_check: "Watch whether the body arrives to landing in a calmer line."
     reassess_after: "Review over the next 3 deliveries, then again after 1 to 2 sessions."
     review_window_type: next_3_runs
     works_best_when:
@@ -94,9 +104,13 @@ prescriptions:
   stack_over_landing_leg:
     id: stack_over_landing_leg
     title: "Stack over the landing leg sooner"
+    simple_title: "Get over the front leg sooner"
     goal: "Let the chest and pelvis arrive more stacked over the landing base before release."
+    simple_goal: "Let the chest and hips get over the front leg sooner before release."
     primary_cue: "Feel the chest arrive over the front leg sooner instead of letting it keep travelling past the landing base."
+    simple_primary_cue: "Feel the chest get over the front leg sooner instead of drifting past it."
     why_this_first: "This is a smaller and safer first cue than telling the bowler to brace harder."
+    simple_why_this_first: "This is a smaller, safer first change than telling the bowler to brace harder."
     avoid_for_now:
       - "Do not cue brace harder before the body is stacked."
       - "Do not ask for a longer stride while the landing base is already soft."
@@ -104,6 +118,7 @@ prescriptions:
       - "Trunk drift after front-foot contact reduces."
       - "The front leg looks more supportive without forcing stiffness."
     coach_check: "Check whether the chest stops travelling so far past landing on the next few deliveries."
+    simple_coach_check: "Check whether the chest stops moving so far past landing."
     reassess_after: "Review on the next 3 balls and again after 1 session."
     review_window_type: next_3_runs
     works_best_when:
@@ -139,9 +154,13 @@ prescriptions:
   brace_without_reaching:
     id: brace_without_reaching
     title: "Brace without reaching"
+    simple_title: "Hold the front leg without reaching"
     goal: "Create a firmer transfer point without forcing an overstride or a stiff, reaching landing."
+    simple_goal: "Create a firmer landing without reaching too far out in front."
     primary_cue: "Let the front leg support the action under the body instead of reaching too far out for the block."
+    simple_primary_cue: "Let the front leg support the action under the body instead of reaching out for the block."
     why_this_first: "It targets the transfer point while protecting against the common mistake of overreaching for stiffness."
+    simple_why_this_first: "It improves landing support without pushing the bowler into overstriding."
     avoid_for_now:
       - "Do not ask the bowler to lock the knee."
       - "Do not pair this with a bigger stride cue on the same session."
@@ -149,6 +168,7 @@ prescriptions:
       - "The landing leg supports more cleanly."
       - "The action carries through without the chest spilling so far forward."
     coach_check: "Check whether landing support improves without the stride suddenly getting longer."
+    simple_coach_check: "Check whether the front leg supports better without the stride suddenly getting longer."
     reassess_after: "Review within the same session and again after the next spell."
     review_window_type: next_session
     works_best_when:
@@ -183,9 +203,13 @@ prescriptions:
   sync_trunk_and_arm_delivery:
     id: sync_trunk_and_arm_delivery
     title: "Sync trunk and arm delivery"
+    simple_title: "Let body and arm arrive together"
     goal: "Reduce the feeling that the arm has to chase the release window on its own."
+    simple_goal: "Stop the arm from having to rush the release on its own."
     primary_cue: "Let the trunk set the release earlier so the arm can arrive on time instead of rescuing the ball."
+    simple_primary_cue: "Let the body set release a little earlier so the arm can arrive on time."
     why_this_first: "It treats the sequencing problem directly without turning the fix into an arm-only instruction."
+    simple_why_this_first: "It fixes timing without turning it into an arm-only change."
     avoid_for_now:
       - "Do not cue the arm to whip faster by itself."
       - "Do not layer this on top of a brand-new run-up cue in the same first rep."
@@ -193,6 +217,7 @@ prescriptions:
       - "Release timing looks calmer."
       - "The arm no longer needs such a visible late rescue."
     coach_check: "Watch whether the arm looks less rushed relative to trunk rotation over the next few balls."
+    simple_coach_check: "Watch whether the arm looks less rushed next to the body."
     reassess_after: "Review after the next 3 deliveries and again after 1 session."
     review_window_type: next_3_runs
     works_best_when:
@@ -227,9 +252,13 @@ prescriptions:
   quiet_the_end_rush:
     id: quiet_the_end_rush
     title: "Quiet the end rush"
+    simple_title: "Calm the late rush"
     goal: "Reduce how much the action relies on a violent final push into release."
+    simple_goal: "Stop the action from depending on a big late push at the end."
     primary_cue: "Keep the body carrying pace through the chain so the finish does not have to do all the work."
+    simple_primary_cue: "Keep speed moving through the action so the finish does not have to do all the work."
     why_this_first: "It is the smallest useful intervention when pace is being produced late but expensively."
+    simple_why_this_first: "It is the smallest useful change when too much speed is being made late."
     avoid_for_now:
       - "Do not ask the bowler to slow down artificially."
       - "Do not remove intent; redistribute it earlier."
@@ -237,6 +266,7 @@ prescriptions:
       - "Terminal impulse softens slightly while pace carry stays connected."
       - "Follow-through looks less abrupt and more balanced."
     coach_check: "Check whether the finish looks less violent without losing overall carry into the ball."
+    simple_coach_check: "Check whether the finish looks less violent without losing carry."
     reassess_after: "Review after one short set and again after the next session."
     review_window_type: next_session
     works_best_when:
@@ -271,9 +301,13 @@ prescriptions:
   stabilize_release_window_under_load:
     id: stabilize_release_window_under_load
     title: "Stabilize the release window under load"
+    simple_title: "Keep release calmer under effort"
     goal: "Keep the release window calmer when pace intent rises so the arm does not have to chase late."
+    simple_goal: "Keep release calmer when effort goes up so the arm does not have to rush late."
     primary_cue: "Let the trunk arrive a fraction earlier into the release window so the arm can stay connected instead of rescuing the finish."
+    simple_primary_cue: "Let the body arrive a little earlier into release so the arm stays connected."
     why_this_first: "It targets timing drift under effort without turning the fix into an arm-only instruction."
+    simple_why_this_first: "It targets timing drift under effort without turning it into an arm-only fix."
     avoid_for_now:
       - "Do not ask for more arm speed on top of a rushed release window."
       - "Do not stack this on the same first rep as a new run-up cue."
@@ -281,6 +315,7 @@ prescriptions:
       - "Release timing stays calmer when the bowler keeps intent high."
       - "The finish looks less like a last-second rescue."
     coach_check: "Check whether higher-intent balls still show the same calm release window over the next short set."
+    simple_coach_check: "Check whether higher-effort balls still look calm at release."
     reassess_after: "Review after the next 3 to 5 deliveries and again in the next session."
     review_window_type: next_3_runs
     works_best_when:
@@ -315,9 +350,13 @@ prescriptions:
   absorb_through_balanced_finish:
     id: absorb_through_balanced_finish
     title: "Absorb through a balanced finish"
+    simple_title: "Finish in better balance"
     goal: "Spread the finish more evenly through the body instead of dumping load abruptly after a late push."
+    simple_goal: "Spread the finish more evenly through the body instead of dumping it hard at the end."
     primary_cue: "Let the finish keep moving through the ball instead of collapsing sharply into the trunk and side body."
+    simple_primary_cue: "Let the finish keep moving through the ball instead of collapsing into the body."
     why_this_first: "It protects the finish pattern without asking for a larger technical rebuild before the bowler can feel the end shape."
+    simple_why_this_first: "It protects the finish shape without asking for a bigger rebuild first."
     avoid_for_now:
       - "Do not cue a dramatic slow-down through release."
       - "Do not pair this with a harder bracing cue until the finish is more balanced."
@@ -325,6 +364,7 @@ prescriptions:
       - "Follow-through looks less abrupt and more shared through the chain."
       - "Trunk fold and one-sided finish cues soften."
     coach_check: "Check whether the finish looks more balanced and less dumped over the next session."
+    simple_coach_check: "Check whether the finish looks more balanced and less dumped."
     reassess_after: "Review at the next session and again over the next 2 weeks."
     review_window_type: next_2_weeks
     works_best_when:

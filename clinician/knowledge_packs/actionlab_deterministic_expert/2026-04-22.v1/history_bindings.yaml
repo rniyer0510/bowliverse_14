@@ -4,6 +4,7 @@ history_bindings:
   pace_translation_profile:
     id: pace_translation_profile
     title: "Pace translation profile"
+    simple_title: "Where speed is being made"
     mechanism_ids:
       - low_build_forcing_late_rescue
       - late_arm_acceleration_due_to_chain_delay
@@ -20,10 +21,12 @@ history_bindings:
       - release_timing_stability
     primary_metric: terminal_impulse_score
     chart_summary: "Tracks whether pace is being built earlier in the chain instead of being rescued near release."
+    simple_chart_summary: "Tracks whether speed is being built earlier instead of being rescued near release."
 
   transfer_block_stability:
     id: transfer_block_stability
     title: "Transfer and block stability"
+    simple_title: "Landing stability"
     mechanism_ids:
       - gather_disorganization_before_block
       - soft_block_with_trunk_carry
@@ -41,10 +44,12 @@ history_bindings:
       - transfer_efficiency_score
     primary_metric: transfer_efficiency_score
     chart_summary: "Tracks whether the landing leg and trunk are turning landing into a cleaner transfer point."
+    simple_chart_summary: "Tracks whether the front leg and body are turning landing into a cleaner power move."
 
   dissipation_profile:
     id: dissipation_profile
     title: "Dissipation profile"
+    simple_title: "Finish load pattern"
     mechanism_ids:
       - soft_block_with_trunk_carry
       - high_terminal_impulse_with_high_dissipation_burden
@@ -58,10 +63,12 @@ history_bindings:
       - trunk_fold_severity
     primary_metric: dissipation_burden_score
     chart_summary: "Tracks whether the body is spreading deceleration load more evenly after release."
+    simple_chart_summary: "Tracks whether the finish is spreading load more evenly after release."
 
   release_window_control:
     id: release_window_control
     title: "Release-window control"
+    simple_title: "Release timing control"
     mechanism_ids:
       - late_arm_acceleration_due_to_chain_delay
       - release_window_instability_under_load
@@ -78,10 +85,12 @@ history_bindings:
       - dissipation_burden_score
     primary_metric: release_timing_stability
     chart_summary: "Tracks whether the release window stays calm and connected even when the bowler adds intent."
+    simple_chart_summary: "Tracks whether release stays calm and connected even when effort goes up."
 
   late_chain_load_cost:
     id: late_chain_load_cost
     title: "Late-chain load cost"
+    simple_title: "Cost of the late finish"
     mechanism_ids:
       - high_terminal_impulse_with_high_dissipation_burden
       - release_window_instability_under_load
@@ -100,3 +109,4 @@ history_bindings:
       - terminal_impulse_score
     primary_metric: dissipation_burden_score
     chart_summary: "Tracks whether late pace creation is still being paid for through a harsh or concentrated finish."
+    simple_chart_summary: "Tracks whether late speed is still being paid for with a harsh finish."

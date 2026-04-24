@@ -34,6 +34,14 @@ evidence_bands:
   supporting: { min: 0.55 }
   weak: { min: 0.35 }
 
+acceptance_bands:
+  risk_signal:
+    acceptable_max: 0.25
+    workable_max: 0.50
+  contributor_severity:
+    acceptable_max: 0.25
+    workable_max: 0.50
+
 presentation_downgrade_rules:
   full_causal_story_requires: confident_match
   full_causal_story_min_evidence_completeness: 0.55
