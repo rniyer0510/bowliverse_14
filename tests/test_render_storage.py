@@ -114,6 +114,7 @@ class WalkthroughRenderRouteTest(unittest.TestCase):
                     risks=[],
                     estimated_release_speed={},
                     report_story=None,
+                    root_cause=None,
                 )
 
             self.assertTrue(result["available"])
@@ -121,6 +122,10 @@ class WalkthroughRenderRouteTest(unittest.TestCase):
             self.assertEqual(
                 result["url"],
                 "https://api.actionlabcricket.in/renders/run-1_walkthrough.mp4",
+            )
+            self.assertEqual(
+                result["renderer_version"],
+                self.module.WALKTHROUGH_RENDERER_VERSION,
             )
             self.assertEqual(result["storage_backend"], "gcs")
             self.assertTrue(result["storage_uploaded"])

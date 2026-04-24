@@ -99,6 +99,7 @@ RENDERS_DIR = RENDER_DIR
 WALKTHROUGH_PAUSE_SECONDS = 3.0
 WALKTHROUGH_SLOW_MOTION_FACTOR = 3.0
 WALKTHROUGH_END_SUMMARY_SECONDS = 2.5
+WALKTHROUGH_RENDERER_VERSION = "coach_video_renderer_v2_2026_04_24"
 
 @app.on_event("startup")
 def _startup_housekeeping() -> None:
@@ -608,7 +609,7 @@ def _build_walkthrough_render(
 
     return {
         **render_result,
-        "renderer_version": "coach_video_renderer_v1",
+        "renderer_version": WALKTHROUGH_RENDERER_VERSION,
         "artifact_type": "walkthrough_mp4",
         "storage_backend": upload_result.get("storage_backend") or "local",
         "storage_uploaded": bool(upload_result.get("uploaded")),
