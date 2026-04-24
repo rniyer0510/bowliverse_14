@@ -637,15 +637,6 @@ def get_walkthrough_render(filename: str):
     if not safe_name or safe_name != filename:
         raise HTTPException(status_code=404, detail="Render not found")
 
-    local_path = os.path.join(RENDERS_DIR, safe_name)
-    if os.path.exists(local_path):
-        logger.info(
-            "[renders:get] filename=%s source=local path=%s",
-            safe_name,
-            local_path,
-        )
-        return FileResponse(local_path, media_type="video/mp4")
-
     remote_bytes = download_render_artifact(safe_name)
     if remote_bytes is not None:
         logger.info(
@@ -654,6 +645,15 @@ def get_walkthrough_render(filename: str):
             len(remote_bytes),
         )
         return Response(content=remote_bytes, media_type="video/mp4")
+
+    local_path = os.path.join(RENDERS_DIR, safe_name)
+    if os.path.exists(local_path):
+        logger.info(
+            "[renders:get] filename=%s source=local path=%s",
+            safe_name,
+            local_path,
+        )
+        return FileResponse(local_path, media_type="video/mp4")
 
     logger.warning("[renders:get] filename=%s source=missing", safe_name)
     raise HTTPException(status_code=404, detail="Render not found")

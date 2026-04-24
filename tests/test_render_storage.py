@@ -41,12 +41,36 @@ class WalkthroughRenderRouteTest(unittest.TestCase):
             with open(target, "wb") as handle:
                 handle.write(payload)
 
-            with mock.patch.object(self.module, "RENDERS_DIR", tmpdir):
+            with mock.patch.object(self.module, "RENDERS_DIR", tmpdir), mock.patch.object(
+                self.module,
+                "download_render_artifact",
+                return_value=None,
+            ) as download_render:
                 response = self.module.get_walkthrough_render("local.mp4")
 
             self.assertIsInstance(response, FileResponse)
             self.assertEqual(response.path, target)
             self.assertEqual(response.media_type, "video/mp4")
+            download_render.assert_called_once_with("local.mp4")
+
+    def test_get_walkthrough_render_prefers_remote_bytes_over_local_file(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = os.path.join(tmpdir, "remote.mp4")
+            with open(target, "wb") as handle:
+                handle.write(b"stale-local-video")
+
+            payload = b"fresh-remote-video"
+            with mock.patch.object(self.module, "RENDERS_DIR", tmpdir), mock.patch.object(
+                self.module,
+                "download_render_artifact",
+                return_value=payload,
+            ) as download_render:
+                response = self.module.get_walkthrough_render("remote.mp4")
+
+            self.assertIsInstance(response, Response)
+            self.assertEqual(response.body, payload)
+            self.assertEqual(response.media_type, "video/mp4")
+            download_render.assert_called_once_with("remote.mp4")
 
     def test_get_walkthrough_render_falls_back_to_remote_bytes(self):
         with tempfile.TemporaryDirectory() as tmpdir:
