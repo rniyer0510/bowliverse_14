@@ -305,7 +305,11 @@ def _load_recent_expert_history(
         return []
 
     rows = (
-        db.query(AnalysisRun, AnalysisResultRaw)
+        db.query(
+            AnalysisRun.run_id,
+            AnalysisRun.created_at,
+            AnalysisResultRaw.result_json,
+        )
         .join(AnalysisResultRaw, AnalysisResultRaw.run_id == AnalysisRun.run_id)
         .filter(AnalysisRun.player_id == player_id)
         .order_by(AnalysisRun.created_at.desc())
@@ -313,14 +317,13 @@ def _load_recent_expert_history(
         .all()
     )
     history: List[Dict[str, Any]] = []
-    for run_row, raw_row in rows:
-        result_json = getattr(raw_row, "result_json", None)
+    for run_id, created_at, result_json in rows:
         if not isinstance(result_json, dict):
             continue
         history.append(
             {
-                "run_id": str(run_row.run_id),
-                "created_at": run_row.created_at,
+                "run_id": str(run_id),
+                "created_at": created_at,
                 "result_json": result_json,
             }
         )

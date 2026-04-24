@@ -1075,8 +1075,8 @@ def _draw_top_risk_panel(
 ) -> None:
     width = frame.shape[1]
     height = frame.shape[0]
-    card_w = int(round(width * 0.58))
-    card_h = int(round(height * 0.16))
+    card_w = int(round(width * 0.62))
+    card_h = int(round(height * 0.18))
     x0 = int(round(width * 0.05))
     y0 = int(round(height * 0.05))
     x1 = min(width - 18, x0 + card_w)
@@ -1700,18 +1700,18 @@ def _draw_themed_summary_card(
         outline=_bgr_to_rgb(THEME_STROKE, 255),
         width=max(1, int(round(min(width, height) * 0.004))),
     )
-    inner_pad_x = max(16, int(round((x1 - x0) * 0.08)))
-    inner_pad_y = max(14, int(round((y1 - y0) * 0.12)))
+    inner_pad_x = max(18, int(round((x1 - x0) * 0.09)))
+    inner_pad_y = max(16, int(round((y1 - y0) * 0.13)))
     title_font = _load_theme_font(
-        DISPLAY_FONT_FILE,
-        max(14, int(round(min(width, height) * 0.048))),
+        BODY_FONT_FILE,
+        max(16, int(round(min(width, height) * 0.052))),
     )
     body_font, lines = _fit_pil_wrapped_text(
         draw,
         str(body or ""),
         font_file=BODY_FONT_MEDIUM_FILE,
-        base_size=max(13, int(round(min(width, height) * 0.034))),
-        min_size=max(10, int(round(min(width, height) * 0.025))),
+        base_size=max(15, int(round(min(width, height) * 0.038))),
+        min_size=max(12, int(round(min(width, height) * 0.029))),
         max_width=max(40, x1 - x0 - inner_pad_x * 2),
         max_lines=3,
     )
@@ -1726,7 +1726,7 @@ def _draw_themed_summary_card(
     else:
         title_h = max(12, int(round((y1 - y0) * 0.18)))
     line_gap = max(5, int(round(min(width, height) * 0.010)))
-    current_y = y0 + inner_pad_y + title_h + max(8, int(round((y1 - y0) * 0.12)))
+    current_y = y0 + inner_pad_y + title_h + max(10, int(round((y1 - y0) * 0.13)))
     for line in lines:
         if body_font is None:
             break
@@ -1768,18 +1768,18 @@ def _draw_themed_story_card(
         outline=_bgr_to_rgb(accent, 255),
         width=max(1, int(round(min(width, height) * 0.004))),
     )
-    inner_pad_x = max(16, int(round((x1 - x0) * 0.08)))
-    inner_pad_y = max(14, int(round((y1 - y0) * 0.12)))
+    inner_pad_x = max(18, int(round((x1 - x0) * 0.09)))
+    inner_pad_y = max(16, int(round((y1 - y0) * 0.13)))
     title_font = _load_theme_font(
-        DISPLAY_FONT_FILE,
-        max(13, int(round(min(width, height) * 0.036))),
+        BODY_FONT_FILE,
+        max(15, int(round(min(width, height) * 0.040))),
     )
     headline_font, headline_lines = _fit_pil_wrapped_text(
         draw,
         str(headline or ""),
         font_file=BODY_FONT_FILE,
-        base_size=max(14, int(round(min(width, height) * 0.040))),
-        min_size=max(11, int(round(min(width, height) * 0.028))),
+        base_size=max(18, int(round(min(width, height) * 0.048))),
+        min_size=max(14, int(round(min(width, height) * 0.035))),
         max_width=max(40, x1 - x0 - inner_pad_x * 2),
         max_lines=2,
     )
@@ -1787,8 +1787,8 @@ def _draw_themed_story_card(
         draw,
         str(body or ""),
         font_file=BODY_FONT_MEDIUM_FILE,
-        base_size=max(11, int(round(min(width, height) * 0.027))),
-        min_size=max(9, int(round(min(width, height) * 0.021))),
+        base_size=max(13, int(round(min(width, height) * 0.031))),
+        min_size=max(11, int(round(min(width, height) * 0.025))),
         max_width=max(40, x1 - x0 - inner_pad_x * 2),
         max_lines=2,
     )
@@ -1802,8 +1802,8 @@ def _draw_themed_story_card(
         _, title_h = _pil_text_size(draw, title, title_font)
     else:
         title_h = max(12, int(round((y1 - y0) * 0.18)))
-    line_gap = max(4, int(round(min(width, height) * 0.008)))
-    current_y = y0 + inner_pad_y + title_h + max(8, int(round((y1 - y0) * 0.12)))
+    line_gap = max(5, int(round(min(width, height) * 0.010)))
+    current_y = y0 + inner_pad_y + title_h + max(10, int(round((y1 - y0) * 0.13)))
     for line in headline_lines:
         if headline_font is None:
             break
@@ -1850,15 +1850,15 @@ def _draw_themed_stat_card(
         outline=_bgr_to_rgb(accent, 255),
         width=max(1, int(round(min(width, height) * 0.004))),
     )
-    inner_pad_x = max(14, int(round((x1 - x0) * 0.09)))
-    inner_pad_y = max(10, int(round((y1 - y0) * 0.16)))
+    inner_pad_x = max(16, int(round((x1 - x0) * 0.10)))
+    inner_pad_y = max(12, int(round((y1 - y0) * 0.18)))
     title_font = _load_theme_font(
-        DISPLAY_FONT_FILE,
-        max(12, int(round(min(width, height) * 0.032))),
+        BODY_FONT_MEDIUM_FILE,
+        max(13, int(round(min(width, height) * 0.034))),
     )
     value_font = _load_theme_font(
         BODY_FONT_FILE,
-        max(14, int(round(min(width, height) * 0.040))),
+        max(17, int(round(min(width, height) * 0.047))),
     )
     if title_font is not None:
         draw.text(
@@ -2033,8 +2033,8 @@ def _draw_end_summary(
     draw = ImageDraw.Draw(overlay)
 
     top_y = int(round(height * 0.06))
-    top_h = int(round(height * 0.21))
-    top_w = int(round(width * 0.42))
+    top_h = int(round(height * 0.23))
+    top_w = int(round(width * 0.43))
     left_x = int(round(width * 0.05))
     right_x = int(round(width * 0.53))
     symptom_title = _summary_symptom_title(
@@ -2061,7 +2061,7 @@ def _draw_end_summary(
         )
 
     bottom_y = int(round(height * 0.73))
-    stat_h = int(round(height * 0.13))
+    stat_h = int(round(height * 0.15))
     gap = int(round(width * 0.03))
     stat_w = int(round((width - (left_x * 2) - (gap * 2)) / 3.0))
     stats = [
@@ -2358,8 +2358,8 @@ def _draw_load_watch_card(
 ) -> None:
     width = frame.shape[1]
     height = frame.shape[0]
-    card_w = int(round(width * 0.48))
-    card_h = int(round(height * 0.16))
+    card_w = int(round(width * 0.52))
+    card_h = int(round(height * 0.18))
     top_y = int(round(height * 0.05))
     left_x = int(round(width * 0.05))
     x1 = min(width - 18, left_x + card_w)

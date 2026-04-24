@@ -93,6 +93,63 @@ class WalkthroughRenderRouteTest(unittest.TestCase):
 
         self.assertEqual(ctx.exception.status_code, 404)
 
+    def test_load_recent_expert_history_queries_only_required_fields(self):
+        expected_rows = [
+            ("run-1", "2026-04-24T09:00:00Z", {"frontend_surface_v1": {}}),
+            ("run-2", "2026-04-23T09:00:00Z", None),
+        ]
+
+        class _FakeQuery:
+            def __init__(self, rows):
+                self._rows = rows
+
+            def join(self, *args, **kwargs):
+                return self
+
+            def filter(self, *args, **kwargs):
+                return self
+
+            def order_by(self, *args, **kwargs):
+                return self
+
+            def limit(self, *args, **kwargs):
+                return self
+
+            def all(self):
+                return list(self._rows)
+
+        class _FakeDb:
+            def __init__(self, rows):
+                self.rows = rows
+                self.query_args = None
+
+            def query(self, *args):
+                self.query_args = args
+                return _FakeQuery(self.rows)
+
+        fake_db = _FakeDb(expected_rows)
+
+        history = self.module._load_recent_expert_history(
+            db=fake_db,
+            player_id="player-1",
+            limit=5,
+        )
+
+        self.assertEqual(len(fake_db.query_args), 3)
+        self.assertIs(fake_db.query_args[0], self.module.AnalysisRun.run_id)
+        self.assertIs(fake_db.query_args[1], self.module.AnalysisRun.created_at)
+        self.assertIs(fake_db.query_args[2], self.module.AnalysisResultRaw.result_json)
+        self.assertEqual(
+            history,
+            [
+                {
+                    "run_id": "run-1",
+                    "created_at": "2026-04-24T09:00:00Z",
+                    "result_json": {"frontend_surface_v1": {}},
+                }
+            ],
+        )
+
     def test_build_walkthrough_render_keeps_url_shape_and_records_upload_metadata(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             video_path = os.path.join(tmpdir, "input.mp4")
