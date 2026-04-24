@@ -155,9 +155,9 @@ MIN_POST_RELEASE_TRACK_QUALITY = 0.58
 TEXT_FONT = cv2.FONT_HERSHEY_SIMPLEX
 THEME_FONT_DIR_ENV = "ACTIONLAB_THEME_FONT_DIR"
 THEME_FRONTEND_REPO_ENV = "ACTIONLAB_FRONTEND_REPO"
-DISPLAY_FONT_FILE = "BarlowCondensed-Bold.ttf"
-BODY_FONT_FILE = "Barlow-SemiBold.ttf"
-BODY_FONT_MEDIUM_FILE = "Barlow-Medium.ttf"
+DISPLAY_FONT_FILE = "Inter-Bold.ttf"
+BODY_FONT_FILE = "Inter-SemiBold.ttf"
+BODY_FONT_MEDIUM_FILE = "Inter-Medium.ttf"
 _THEME_FONT_CACHE: Dict[Tuple[str, int], Any] = {}
 
 
@@ -1909,10 +1909,10 @@ def _draw_end_summary_legacy(
     width = frame.shape[1]
     height = frame.shape[0]
     top_y = int(round(height * 0.05))
-    top_h = int(round(height * 0.16))
-    top_w = int(round(width * 0.42))
+    top_h = int(round(height * 0.14))
+    top_gap = int(round(height * 0.018))
+    top_w = int(round(width * 0.90))
     left_x = int(round(width * 0.05))
-    right_x = int(round(width * 0.53))
     symptom_text = _summary_symptom_text(
         risk_by_id,
         events=events,
@@ -1930,28 +1930,32 @@ def _draw_end_summary_legacy(
         root_cause=root_cause,
     )
     load_watch_title = _summary_load_watch_title(root_cause=root_cause)
-    for x0, title, body, accent in (
-        (left_x, symptom_title, symptom_text, (92, 220, 255)),
-        (right_x, load_watch_title, load_watch_text, (0, 132, 255)),
+    for idx, (title, body, accent) in enumerate(
+        (
+            (symptom_title, symptom_text, (92, 220, 255)),
+            (load_watch_title, load_watch_text, (0, 132, 255)),
+        )
     ):
+        x0 = left_x
+        y0 = top_y + idx * (top_h + top_gap)
         x1 = min(width - 18, x0 + top_w)
-        y1 = top_y + top_h
+        y1 = y0 + top_h
         inner_w = max(40, x1 - x0 - 32)
-        _overlay_panel(frame, x0=x0, y0=top_y, x1=x1, y1=y1, fill_color=PANEL_BG, edge_color=accent, alpha=0.84)
-        cv2.putText(frame, title, (x0 + 16, top_y + int(top_h * 0.22)), TEXT_FONT, max(0.40, min(width, height) / 1500.0), accent, 1, cv2.LINE_AA)
+        _overlay_panel(frame, x0=x0, y0=y0, x1=x1, y1=y1, fill_color=PANEL_BG, edge_color=accent, alpha=0.84)
+        cv2.putText(frame, title, (x0 + 16, y0 + int(top_h * 0.22)), TEXT_FONT, max(0.44, min(width, height) / 1400.0), accent, 1, cv2.LINE_AA)
         lines, body_scale = _fit_wrapped_text(
             str(body or ""),
             max_width=inner_w,
-            max_lines=2,
-            base_scale=max(0.54, min(width, height) / 1150.0),
-            min_scale=max(0.42, min(width, height) / 1450.0),
+            max_lines=3,
+            base_scale=max(0.68, min(width, height) / 980.0),
+            min_scale=max(0.52, min(width, height) / 1260.0),
             thickness=2,
         )
         for idx, line in enumerate(lines):
             cv2.putText(
                 frame,
                 line,
-                (x0 + 16, top_y + int(top_h * (0.48 + idx * 0.20))),
+                (x0 + 16, y0 + int(top_h * (0.48 + idx * 0.18))),
                 TEXT_FONT,
                 body_scale,
                 TEXT_COLOR,
@@ -2032,27 +2036,31 @@ def _draw_end_summary(
     overlay = Image.new("RGBA", image.size, (0, 0, 0, 0))
     draw = ImageDraw.Draw(overlay)
 
-    top_y = int(round(height * 0.06))
-    top_h = int(round(height * 0.23))
-    top_w = int(round(width * 0.43))
+    top_y = int(round(height * 0.05))
+    top_h = int(round(height * 0.14))
+    top_gap = int(round(height * 0.018))
+    top_w = int(round(width * 0.90))
     left_x = int(round(width * 0.05))
-    right_x = int(round(width * 0.53))
     symptom_title = _summary_symptom_title(
         report_story=report_story,
         root_cause=root_cause,
     )
     load_watch_title = _summary_load_watch_title(root_cause=root_cause)
-    for x0, title, body, accent in (
-        (left_x, symptom_title, symptom_text, (92, 220, 255)),
-        (right_x, load_watch_title, load_watch_text, THEME_PRIMARY),
+    for idx, (title, body, accent) in enumerate(
+        (
+            (symptom_title, symptom_text, (92, 220, 255)),
+            (load_watch_title, load_watch_text, THEME_PRIMARY),
+        )
     ):
+        x0 = left_x
+        y0 = top_y + idx * (top_h + top_gap)
         x1 = min(width - 18, x0 + top_w)
         _draw_themed_summary_card(
             draw,
             x0=x0,
-            y0=top_y,
+            y0=y0,
             x1=x1,
-            y1=top_y + top_h,
+            y1=y0 + top_h,
             title=title,
             body=str(body or ""),
             accent=accent,
