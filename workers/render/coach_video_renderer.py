@@ -35,21 +35,22 @@ from .render_load_watch import (
 logger = get_logger(__name__)
 
 RENDER_DIR = get_render_dir()
+DESIGN_BASE_WIDTH = 1080  # Documentation anchor for our portrait walkthrough sizing assumptions.
 
 MIN_VISIBILITY = 0.35
 SKELETON_COLOR = (255, 240, 88)
 SKELETON_SHADOW = (10, 10, 10)
 JOINT_OUTER = (255, 255, 255)
-TEXT_COLOR = (246, 248, 252)
-MUTED_TEXT = (214, 220, 228)
-PANEL_BG = (14, 17, 22)
+TEXT_COLOR = (255, 255, 255)
+MUTED_TEXT = (236, 240, 246)
+PANEL_BG = (10, 12, 16)
 PANEL_EDGE = (96, 112, 132)
 THEME_PRIMARY = (26, 86, 232)
 THEME_SURFACE = (27, 23, 23)
-THEME_SURFACE_RAISED = (39, 32, 32)
+THEME_SURFACE_RAISED = (30, 28, 30)
 THEME_STROKE = (49, 42, 42)
 THEME_TEXT_PRIMARY = (255, 255, 255)
-THEME_TEXT_SECONDARY = (198, 188, 187)
+THEME_TEXT_SECONDARY = (236, 240, 246)
 ACTIVE_FILL = (74, 194, 242)
 ACTIVE_EDGE = (105, 222, 255)
 INACTIVE_FILL = (44, 52, 62)
@@ -298,6 +299,24 @@ def _fit_pil_wrapped_text(
         max_width=max_width,
         max_lines=max_lines,
     ) if fallback_font is not None else []
+
+
+def _pil_text_block_height(
+    draw: Any,
+    lines: List[str],
+    font: Any,
+    *,
+    line_gap: int,
+) -> int:
+    if font is None or not lines:
+        return 0
+    total = 0
+    for idx, line in enumerate(lines):
+        _, line_h = _pil_text_size(draw, line, font)
+        total += line_h
+        if idx < len(lines) - 1:
+            total += line_gap
+    return total
 
 
 def _safe_float(value: Any) -> Optional[float]:
@@ -807,6 +826,31 @@ def _overlay_panel(
     cv2.rectangle(frame, (x0, y0), (x1, y1), edge_color, edge_thickness, cv2.LINE_AA)
 
 
+def _apply_bottom_scrim(
+    frame: np.ndarray,
+    *,
+    start_y: int,
+    end_y: Optional[int] = None,
+    max_alpha: float = 0.48,
+) -> None:
+    height, width = frame.shape[:2]
+    y0 = max(0, min(height - 1, int(start_y)))
+    y1 = height if end_y is None else max(y0 + 1, min(height, int(end_y)))
+    if y1 <= y0:
+        return
+    span = max(1, y1 - y0)
+    overlay = frame.copy()
+    cv2.rectangle(overlay, (0, y0), (width, y1), (0, 0, 0), -1)
+    alpha_mask = np.zeros((height, width), dtype=np.float32)
+    gradient = np.linspace(0.0, float(max_alpha), span, dtype=np.float32)
+    alpha_mask[y0:y1, :] = gradient[:, None]
+    blended = (
+        frame.astype(np.float32) * (1.0 - alpha_mask[..., None])
+        + overlay.astype(np.float32) * alpha_mask[..., None]
+    )
+    frame[:, :] = np.clip(blended, 0, 255).astype(np.uint8)
+
+
 def _phase_cut_points(
     *,
     start: int,
@@ -1014,7 +1058,7 @@ def _draw_phase_rail(
             image, overlay, draw = pil_context
             label_font = _load_theme_font(
                 DISPLAY_FONT_FILE,
-                max(10, int(round(min(width, height) * 0.020))),
+                max(12, int(round(min(width, height) * 0.023))),
             )
             if label_font is not None:
                 text_w, text_h = _pil_text_size(draw, label, label_font)
@@ -1027,7 +1071,7 @@ def _draw_phase_rail(
                     fill=_bgr_to_rgb(TEXT_COLOR if active else MUTED_TEXT),
                 )
         else:
-            text_scale = max(0.38, min(width, height) / 1800.0)
+            text_scale = max(0.42, min(width, height) / 1650.0)
             text_size, _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, text_scale, 1)
             text_x = seg_x0 + max(10, (segment_w - text_size[0]) // 2)
             text_y = rail_y0 + int(rail_h * 0.63)
@@ -1075,8 +1119,8 @@ def _draw_top_risk_panel(
 ) -> None:
     width = frame.shape[1]
     height = frame.shape[0]
-    card_w = int(round(width * 0.62))
-    card_h = int(round(height * 0.18))
+    card_w = int(round(width * 0.78))
+    card_h = int(round(height * 0.34))
     x0 = int(round(width * 0.05))
     y0 = int(round(height * 0.05))
     x1 = min(width - 18, x0 + card_w)
@@ -1098,17 +1142,17 @@ def _draw_top_risk_panel(
         )
         _commit_frame_draw_context(frame, image, overlay)
         return
-    inner_w = max(40, x1 - x0 - 36)
+    inner_w = max(40, x1 - x0 - 32)
     _overlay_panel(frame, x0=x0, y0=y0, x1=x1, y1=y1, fill_color=PANEL_BG, edge_color=accent, alpha=0.84)
-    cv2.putText(frame, title, (x0 + 18, y0 + int(card_h * 0.28)), TEXT_FONT, max(0.44, min(width, height) / 1400.0), accent, 1, cv2.LINE_AA)
-    headline_lines, headline_scale = _fit_wrapped_text(headline, max_width=inner_w, max_lines=2, base_scale=max(0.58, min(width, height) / 1100.0), min_scale=max(0.46, min(width, height) / 1380.0), thickness=2)
+    cv2.putText(frame, title, (x0 + 18, y0 + int(card_h * 0.26)), TEXT_FONT, max(0.56, min(width, height) / 1140.0), accent, 1, cv2.LINE_AA)
+    headline_lines, headline_scale = _fit_wrapped_text(headline, max_width=inner_w, max_lines=2, base_scale=max(0.76, min(width, height) / 860.0), min_scale=max(0.60, min(width, height) / 1080.0), thickness=2)
     headline_y = y0 + int(card_h * 0.48)
     headline_step = max(20, int(round(card_h * 0.20)))
     for idx, line in enumerate(headline_lines):
         cv2.putText(frame, line, (x0 + 18, headline_y + idx * headline_step), TEXT_FONT, headline_scale, TEXT_COLOR, 2, cv2.LINE_AA)
-    body_lines, body_scale = _fit_wrapped_text(body, max_width=inner_w, max_lines=2, base_scale=max(0.38, min(width, height) / 1550.0), min_scale=max(0.30, min(width, height) / 1880.0), thickness=1)
-    body_y = y0 + int(card_h * 0.81)
-    body_step = max(15, int(round(card_h * 0.15)))
+    body_lines, body_scale = _fit_wrapped_text(body, max_width=inner_w, max_lines=2, base_scale=max(0.50, min(width, height) / 1220.0), min_scale=max(0.38, min(width, height) / 1540.0), thickness=1)
+    body_y = y0 + int(card_h * 0.79)
+    body_step = max(16, int(round(card_h * 0.14)))
     for idx, line in enumerate(body_lines):
         cv2.putText(frame, line, (x0 + 18, body_y + idx * body_step), TEXT_FONT, body_scale, MUTED_TEXT, 1, cv2.LINE_AA)
 
@@ -1422,8 +1466,8 @@ def _draw_speed_chip(
     accent = (110, 210, 255) if low_conf else (70, 225, 140)
     title = "Ball Speed"
     value = display
-    card_w = int(round(width * 0.28))
-    card_h = int(round(height * 0.10))
+    card_w = int(round(width * 0.29))
+    card_h = int(round(height * 0.11))
     x1 = int(round(width * 0.95))
     x0 = x1 - card_w
     y0 = int(round(height * 0.05))
@@ -1459,7 +1503,7 @@ def _draw_speed_chip(
         title,
         (x0 + 16, y0 + int(card_h * 0.34)),
         cv2.FONT_HERSHEY_SIMPLEX,
-        max(0.40, min(width, height) / 1500.0),
+        max(0.46, min(width, height) / 1320.0),
         accent,
         1,
         cv2.LINE_AA,
@@ -1469,7 +1513,7 @@ def _draw_speed_chip(
         value,
         (x0 + 16, y0 + int(card_h * 0.72)),
         cv2.FONT_HERSHEY_SIMPLEX,
-        max(0.58, min(width, height) / 1100.0),
+        max(0.66, min(width, height) / 960.0),
         TEXT_COLOR,
         2,
         cv2.LINE_AA,
@@ -1489,8 +1533,8 @@ def _draw_action_chip(
     height = frame.shape[0]
     accent = (130, 214, 255)
     title = "Action Type"
-    card_w = int(round(width * 0.28))
-    card_h = int(round(height * 0.10))
+    card_w = int(round(width * 0.29))
+    card_h = int(round(height * 0.11))
     x1 = int(round(width * 0.95))
     x0 = x1 - card_w
     base_y = int(round(height * 0.05))
@@ -1529,7 +1573,7 @@ def _draw_action_chip(
         title,
         (x0 + 16, y0 + int(card_h * 0.34)),
         cv2.FONT_HERSHEY_SIMPLEX,
-        max(0.40, min(width, height) / 1500.0),
+        max(0.46, min(width, height) / 1320.0),
         accent,
         1,
         cv2.LINE_AA,
@@ -1539,7 +1583,7 @@ def _draw_action_chip(
         label,
         (x0 + 16, y0 + int(card_h * 0.72)),
         cv2.FONT_HERSHEY_SIMPLEX,
-        max(0.56, min(width, height) / 1120.0),
+        max(0.64, min(width, height) / 980.0),
         TEXT_COLOR,
         2,
         cv2.LINE_AA,
@@ -1567,8 +1611,8 @@ def _draw_legality_chip(
     else:
         value = verdict.title()
         accent = (120, 210, 255)
-    card_w = int(round(width * 0.28))
-    card_h = int(round(height * 0.10))
+    card_w = int(round(width * 0.29))
+    card_h = int(round(height * 0.11))
     x1 = int(round(width * 0.95))
     x0 = x1 - card_w
     y0 = int(round(height * 0.05)) + stack_index * (
@@ -1606,7 +1650,7 @@ def _draw_legality_chip(
         title,
         (x0 + 16, y0 + int(card_h * 0.34)),
         cv2.FONT_HERSHEY_SIMPLEX,
-        max(0.40, min(width, height) / 1500.0),
+        max(0.46, min(width, height) / 1320.0),
         accent,
         1,
         cv2.LINE_AA,
@@ -1616,7 +1660,7 @@ def _draw_legality_chip(
         value,
         (x0 + 16, y0 + int(card_h * 0.72)),
         cv2.FONT_HERSHEY_SIMPLEX,
-        max(0.56, min(width, height) / 1120.0),
+        max(0.64, min(width, height) / 980.0),
         TEXT_COLOR,
         2,
         cv2.LINE_AA,
@@ -1673,6 +1717,41 @@ def _bgr_to_rgb(color: Tuple[int, int, int], alpha: Optional[int] = None) -> Tup
     return rgb + (int(alpha),)
 
 
+def _draw_themed_card_shell(
+    draw: Any,
+    *,
+    x0: int,
+    y0: int,
+    x1: int,
+    y1: int,
+    accent: Tuple[int, int, int],
+    width: int,
+    height: int,
+) -> int:
+    radius = max(16, int(round(min(width, height) * 0.028)))
+    shadow_shift = max(3, int(round(min(width, height) * 0.008)))
+    draw.rounded_rectangle(
+        (x0 + shadow_shift, y0 + shadow_shift, x1 + shadow_shift, y1 + shadow_shift),
+        radius=radius,
+        fill=(0, 0, 0, 86),
+    )
+    draw.rounded_rectangle(
+        (x0, y0, x1, y1),
+        radius=radius,
+        fill=_bgr_to_rgb((14, 16, 15), 244),
+        outline=_bgr_to_rgb((42, 44, 43), 128),
+        width=1,
+    )
+    rail_w = max(5, int(round((x1 - x0) * 0.020)))
+    rail_inset = max(3, int(round(min(width, height) * 0.006)))
+    draw.rounded_rectangle(
+        (x0 + rail_inset, y0 + rail_inset, x0 + rail_inset + rail_w, y1 - rail_inset),
+        radius=max(rail_w * 2, 10),
+        fill=_bgr_to_rgb(accent, 255),
+    )
+    return rail_inset + rail_w
+
+
 def _draw_themed_summary_card(
     draw: Any,
     *,
@@ -1686,47 +1765,45 @@ def _draw_themed_summary_card(
     width: int,
     height: int,
 ) -> None:
-    radius = max(16, int(round(min(width, height) * 0.028)))
-    shadow_shift = max(4, int(round(min(width, height) * 0.010)))
-    draw.rounded_rectangle(
-        (x0 + shadow_shift, y0 + shadow_shift, x1 + shadow_shift, y1 + shadow_shift),
-        radius=radius,
-        fill=(0, 0, 0, 110),
+    card_w = max(1, x1 - x0)
+    card_h = max(1, y1 - y0)
+    rail_offset = _draw_themed_card_shell(
+        draw,
+        x0=x0,
+        y0=y0,
+        x1=x1,
+        y1=y1,
+        accent=accent,
+        width=width,
+        height=height,
     )
-    draw.rounded_rectangle(
-        (x0, y0, x1, y1),
-        radius=radius,
-        fill=_bgr_to_rgb(THEME_SURFACE_RAISED, 228),
-        outline=_bgr_to_rgb(THEME_STROKE, 255),
-        width=max(1, int(round(min(width, height) * 0.004))),
-    )
-    inner_pad_x = max(18, int(round((x1 - x0) * 0.09)))
-    inner_pad_y = max(16, int(round((y1 - y0) * 0.13)))
+    inner_pad_x = max(16, int(round(card_w * 0.070))) + rail_offset
+    inner_pad_y = max(13, int(round(card_h * 0.11)))
     title_font = _load_theme_font(
         BODY_FONT_FILE,
-        max(16, int(round(min(width, height) * 0.052))),
+        max(22, int(round(card_h * 0.16))),
     )
     body_font, lines = _fit_pil_wrapped_text(
         draw,
         str(body or ""),
         font_file=BODY_FONT_MEDIUM_FILE,
-        base_size=max(15, int(round(min(width, height) * 0.038))),
-        min_size=max(12, int(round(min(width, height) * 0.029))),
+        base_size=max(19, int(round(card_h * 0.13))),
+        min_size=max(15, int(round(card_h * 0.095))),
         max_width=max(40, x1 - x0 - inner_pad_x * 2),
         max_lines=3,
     )
     if title_font is not None:
         draw.text(
             (x0 + inner_pad_x, y0 + inner_pad_y),
-            title,
+            str(title or "").upper(),
             font=title_font,
             fill=_bgr_to_rgb(accent),
         )
-        _, title_h = _pil_text_size(draw, title, title_font)
+        _, title_h = _pil_text_size(draw, str(title or "").upper(), title_font)
     else:
-        title_h = max(12, int(round((y1 - y0) * 0.18)))
-    line_gap = max(5, int(round(min(width, height) * 0.010)))
-    current_y = y0 + inner_pad_y + title_h + max(10, int(round((y1 - y0) * 0.13)))
+        title_h = max(12, int(round(card_h * 0.18)))
+    line_gap = max(4, int(round(min(width, height) * 0.008)))
+    current_y = y0 + inner_pad_y + title_h + max(16, int(round(card_h * 0.20)))
     for line in lines:
         if body_font is None:
             break
@@ -1754,56 +1831,101 @@ def _draw_themed_story_card(
     width: int,
     height: int,
 ) -> None:
-    radius = max(16, int(round(min(width, height) * 0.028)))
-    shadow_shift = max(4, int(round(min(width, height) * 0.010)))
-    draw.rounded_rectangle(
-        (x0 + shadow_shift, y0 + shadow_shift, x1 + shadow_shift, y1 + shadow_shift),
-        radius=radius,
-        fill=(0, 0, 0, 110),
-    )
-    draw.rounded_rectangle(
-        (x0, y0, x1, y1),
-        radius=radius,
-        fill=_bgr_to_rgb(THEME_SURFACE_RAISED, 226),
-        outline=_bgr_to_rgb(accent, 255),
-        width=max(1, int(round(min(width, height) * 0.004))),
-    )
-    inner_pad_x = max(18, int(round((x1 - x0) * 0.09)))
-    inner_pad_y = max(16, int(round((y1 - y0) * 0.13)))
-    title_font = _load_theme_font(
-        BODY_FONT_FILE,
-        max(15, int(round(min(width, height) * 0.040))),
-    )
-    headline_font, headline_lines = _fit_pil_wrapped_text(
+    card_w = max(1, x1 - x0)
+    card_h = max(1, y1 - y0)
+    rail_offset = _draw_themed_card_shell(
         draw,
-        str(headline or ""),
-        font_file=BODY_FONT_FILE,
-        base_size=max(18, int(round(min(width, height) * 0.048))),
-        min_size=max(14, int(round(min(width, height) * 0.035))),
-        max_width=max(40, x1 - x0 - inner_pad_x * 2),
-        max_lines=2,
+        x0=x0,
+        y0=y0,
+        x1=x1,
+        y1=y1,
+        accent=accent,
+        width=width,
+        height=height,
     )
-    body_font, body_lines = _fit_pil_wrapped_text(
-        draw,
-        str(body or ""),
-        font_file=BODY_FONT_MEDIUM_FILE,
-        base_size=max(13, int(round(min(width, height) * 0.031))),
-        min_size=max(11, int(round(min(width, height) * 0.025))),
-        max_width=max(40, x1 - x0 - inner_pad_x * 2),
-        max_lines=2,
-    )
-    if title_font is not None:
+    inner_pad_x = max(14, int(round(card_w * 0.064))) + rail_offset
+    inner_pad_y = max(11, int(round(card_h * 0.09)))
+    content_width = max(40, x1 - x0 - inner_pad_x * 2)
+    content_height = max(36, y1 - y0 - inner_pad_y * 2)
+    title_base = max(19, int(round(card_h * 0.13)))
+    title_min = max(16, int(round(card_h * 0.10)))
+    headline_base = max(28, int(round(card_h * 0.22)))
+    headline_min = max(21, int(round(card_h * 0.15)))
+    body_base = max(18, int(round(card_h * 0.14)))
+    body_min = max(14, int(round(card_h * 0.10)))
+    title_font = None
+    title_lines: List[str] = []
+    headline_font = None
+    headline_lines: List[str] = []
+    body_font = None
+    body_lines: List[str] = []
+    line_gap = max(4, int(round(card_h * 0.040)))
+    section_gap = max(12, int(round(card_h * 0.090)))
+    current_title_base = title_base
+    current_headline_base = headline_base
+    current_body_base = body_base
+    for _ in range(8):
+        title_font, title_lines = _fit_pil_wrapped_text(
+            draw,
+            str(title or ""),
+            font_file=BODY_FONT_FILE,
+            base_size=current_title_base,
+            min_size=title_min,
+            max_width=content_width,
+            max_lines=2,
+        )
+        headline_font, headline_lines = _fit_pil_wrapped_text(
+            draw,
+            str(headline or ""),
+            font_file=BODY_FONT_FILE,
+            base_size=current_headline_base,
+            min_size=headline_min,
+            max_width=content_width,
+            max_lines=2,
+        )
+        body_font, body_lines = _fit_pil_wrapped_text(
+            draw,
+            str(body or ""),
+            font_file=BODY_FONT_MEDIUM_FILE,
+            base_size=current_body_base,
+            min_size=body_min,
+            max_width=content_width,
+            max_lines=1,
+        )
+        total_h = 0
+        title_h = _pil_text_block_height(draw, title_lines, title_font, line_gap=line_gap)
+        headline_h = _pil_text_block_height(draw, headline_lines, headline_font, line_gap=line_gap)
+        body_h = _pil_text_block_height(draw, body_lines, body_font, line_gap=line_gap)
+        if title_h:
+            total_h += title_h
+        if headline_h:
+            if total_h:
+                total_h += section_gap
+            total_h += headline_h
+        if body_h:
+            if total_h:
+                total_h += max(3, section_gap - 1)
+            total_h += body_h
+        if total_h <= content_height:
+            break
+        current_title_base = max(title_min, current_title_base - 1)
+        current_headline_base = max(headline_min, current_headline_base - 2)
+        current_body_base = max(body_min, current_body_base - 1)
+
+    current_y = y0 + inner_pad_y
+    for line in title_lines:
+        if title_font is None:
+            break
         draw.text(
-            (x0 + inner_pad_x, y0 + inner_pad_y),
-            title,
+            (x0 + inner_pad_x, current_y),
+            str(line or "").upper(),
             font=title_font,
             fill=_bgr_to_rgb(accent),
         )
-        _, title_h = _pil_text_size(draw, title, title_font)
-    else:
-        title_h = max(12, int(round((y1 - y0) * 0.18)))
-    line_gap = max(5, int(round(min(width, height) * 0.010)))
-    current_y = y0 + inner_pad_y + title_h + max(10, int(round((y1 - y0) * 0.13)))
+        _, line_h = _pil_text_size(draw, str(line or "").upper(), title_font)
+        current_y += line_h + line_gap
+    if title_lines:
+        current_y += section_gap
     for line in headline_lines:
         if headline_font is None:
             break
@@ -1815,7 +1937,8 @@ def _draw_themed_story_card(
         )
         _, line_h = _pil_text_size(draw, line, headline_font)
         current_y += line_h + line_gap
-    current_y += max(4, int(round((y1 - y0) * 0.04)))
+    if headline_lines and body_lines:
+        current_y += max(3, section_gap - 1)
     for line in body_lines:
         if body_font is None:
             break
@@ -1823,7 +1946,7 @@ def _draw_themed_story_card(
             (x0 + inner_pad_x, current_y),
             line,
             font=body_font,
-            fill=_bgr_to_rgb(THEME_TEXT_SECONDARY),
+            fill=_bgr_to_rgb(THEME_TEXT_PRIMARY),
         )
         _, line_h = _pil_text_size(draw, line, body_font)
         current_y += line_h + line_gap
@@ -1842,41 +1965,62 @@ def _draw_themed_stat_card(
     width: int,
     height: int,
 ) -> None:
+    card_w = max(1, x1 - x0)
+    card_h = max(1, y1 - y0)
     radius = max(14, int(round(min(width, height) * 0.024)))
     draw.rounded_rectangle(
         (x0, y0, x1, y1),
         radius=radius,
-        fill=_bgr_to_rgb(THEME_SURFACE, 220),
+        fill=_bgr_to_rgb(THEME_SURFACE, 235),
         outline=_bgr_to_rgb(accent, 255),
         width=max(1, int(round(min(width, height) * 0.004))),
     )
-    inner_pad_x = max(16, int(round((x1 - x0) * 0.10)))
-    inner_pad_y = max(12, int(round((y1 - y0) * 0.18)))
-    title_font = _load_theme_font(
-        BODY_FONT_MEDIUM_FILE,
-        max(13, int(round(min(width, height) * 0.034))),
+    inner_pad_x = max(12, int(round(card_w * 0.09)))
+    inner_pad_y = max(10, int(round(card_h * 0.14)))
+    content_width = max(32, x1 - x0 - inner_pad_x * 2)
+    title_font, title_lines = _fit_pil_wrapped_text(
+        draw,
+        str(title or ""),
+        font_file=BODY_FONT_MEDIUM_FILE,
+        base_size=max(18, int(round(card_h * 0.19))),
+        min_size=max(14, int(round(card_h * 0.14))),
+        max_width=content_width,
+        max_lines=1,
     )
-    value_font = _load_theme_font(
-        BODY_FONT_FILE,
-        max(17, int(round(min(width, height) * 0.047))),
+    value_font, value_lines = _fit_pil_wrapped_text(
+        draw,
+        str(value or ""),
+        font_file=BODY_FONT_FILE,
+        base_size=max(24, int(round(card_h * 0.27))),
+        min_size=max(17, int(round(card_h * 0.18))),
+        max_width=content_width,
+        max_lines=2,
     )
-    if title_font is not None:
+    line_gap = max(2, int(round(card_h * 0.035)))
+    current_y = y0 + inner_pad_y
+    for line in title_lines:
+        if title_font is None:
+            break
         draw.text(
-            (x0 + inner_pad_x, y0 + inner_pad_y),
-            title,
+            (x0 + inner_pad_x, current_y),
+            line,
             font=title_font,
-            fill=_bgr_to_rgb(accent),
+            fill=_bgr_to_rgb(THEME_TEXT_SECONDARY),
         )
-        _, title_h = _pil_text_size(draw, title, title_font)
-    else:
-        title_h = max(10, int(round((y1 - y0) * 0.18)))
-    if value_font is not None:
+        _, line_h = _pil_text_size(draw, line, title_font)
+        current_y += line_h + line_gap
+    current_y += max(4, int(round((y1 - y0) * 0.05)))
+    for line in value_lines:
+        if value_font is None:
+            break
         draw.text(
-            (x0 + inner_pad_x, y0 + inner_pad_y + title_h + max(8, int(round((y1 - y0) * 0.14)))),
-            value,
+            (x0 + inner_pad_x, current_y),
+            line,
             font=value_font,
             fill=_bgr_to_rgb(THEME_TEXT_PRIMARY),
         )
+        _, line_h = _pil_text_size(draw, line, value_font)
+        current_y += line_h + line_gap
 
 
 def _frame_draw_context(frame: np.ndarray) -> Tuple[Any, Any, Any]:
@@ -1908,11 +2052,17 @@ def _draw_end_summary_legacy(
 
     width = frame.shape[1]
     height = frame.shape[0]
-    top_y = int(round(height * 0.05))
-    top_h = int(round(height * 0.14))
-    top_gap = int(round(height * 0.018))
-    top_w = int(round(width * 0.90))
-    left_x = int(round(width * 0.05))
+    top_y = int(round(height * 0.045))
+    top_h = int(round(height * 0.16))
+    top_gap = int(round(height * 0.020))
+    top_w = int(round(width * 0.92))
+    left_x = int(round(width * 0.04))
+    _apply_bottom_scrim(
+        frame,
+        start_y=int(round(height * 0.60)),
+        end_y=height,
+        max_alpha=0.52,
+    )
     symptom_text = _summary_symptom_text(
         risk_by_id,
         events=events,
@@ -1941,14 +2091,14 @@ def _draw_end_summary_legacy(
         x1 = min(width - 18, x0 + top_w)
         y1 = y0 + top_h
         inner_w = max(40, x1 - x0 - 32)
-        _overlay_panel(frame, x0=x0, y0=y0, x1=x1, y1=y1, fill_color=PANEL_BG, edge_color=accent, alpha=0.84)
-        cv2.putText(frame, title, (x0 + 16, y0 + int(top_h * 0.22)), TEXT_FONT, max(0.44, min(width, height) / 1400.0), accent, 1, cv2.LINE_AA)
+        _overlay_panel(frame, x0=x0, y0=y0, x1=x1, y1=y1, fill_color=PANEL_BG, edge_color=accent, alpha=0.90)
+        cv2.putText(frame, title, (x0 + 16, y0 + int(top_h * 0.22)), TEXT_FONT, max(0.50, min(width, height) / 1260.0), accent, 1, cv2.LINE_AA)
         lines, body_scale = _fit_wrapped_text(
             str(body or ""),
             max_width=inner_w,
             max_lines=3,
-            base_scale=max(0.68, min(width, height) / 980.0),
-            min_scale=max(0.52, min(width, height) / 1260.0),
+            base_scale=max(0.78, min(width, height) / 900.0),
+            min_scale=max(0.58, min(width, height) / 1140.0),
             thickness=2,
         )
         for idx, line in enumerate(lines):
@@ -1979,9 +2129,9 @@ def _draw_end_summary_legacy(
         x0 = left_x + idx * (stat_w + gap)
         x1 = x0 + stat_w
         y1 = bottom_y + stat_h
-        _overlay_panel(frame, x0=x0, y0=bottom_y, x1=x1, y1=y1, fill_color=PANEL_BG, edge_color=accent, alpha=0.84)
-        cv2.putText(frame, title, (x0 + 14, bottom_y + int(stat_h * 0.26)), cv2.FONT_HERSHEY_SIMPLEX, max(0.34, min(width, height) / 1700.0), accent, 1, cv2.LINE_AA)
-        cv2.putText(frame, value, (x0 + 14, bottom_y + int(stat_h * 0.64)), cv2.FONT_HERSHEY_SIMPLEX, max(0.48, min(width, height) / 1250.0), TEXT_COLOR, 2, cv2.LINE_AA)
+        _overlay_panel(frame, x0=x0, y0=bottom_y, x1=x1, y1=y1, fill_color=PANEL_BG, edge_color=accent, alpha=0.90)
+        cv2.putText(frame, title, (x0 + 14, bottom_y + int(stat_h * 0.26)), cv2.FONT_HERSHEY_SIMPLEX, max(0.40, min(width, height) / 1500.0), MUTED_TEXT, 1, cv2.LINE_AA)
+        cv2.putText(frame, value, (x0 + 14, bottom_y + int(stat_h * 0.64)), cv2.FONT_HERSHEY_SIMPLEX, max(0.56, min(width, height) / 1120.0), TEXT_COLOR, 2, cv2.LINE_AA)
 
 
 def _draw_end_summary(
@@ -2031,6 +2181,12 @@ def _draw_end_summary(
     dimmer = blurred.copy()
     cv2.rectangle(dimmer, (0, 0), (width, height), THEME_SURFACE, -1)
     cv2.addWeighted(dimmer, 0.44, blurred, 0.56, 0.0, frame)
+    _apply_bottom_scrim(
+        frame,
+        start_y=int(round(height * 0.60)),
+        end_y=height,
+        max_alpha=0.52,
+    )
 
     image = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)).convert("RGBA")
     overlay = Image.new("RGBA", image.size, (0, 0, 0, 0))
@@ -2068,9 +2224,9 @@ def _draw_end_summary(
             height=height,
         )
 
-    bottom_y = int(round(height * 0.73))
-    stat_h = int(round(height * 0.15))
-    gap = int(round(width * 0.03))
+    bottom_y = int(round(height * 0.72))
+    stat_h = int(round(height * 0.17))
+    gap = int(round(width * 0.022))
     stat_w = int(round((width - (left_x * 2) - (gap * 2)) / 3.0))
     stats = [
         ("Speed", _speed_display_text(speed) or "-", (70, 225, 140)),
@@ -2366,8 +2522,8 @@ def _draw_load_watch_card(
 ) -> None:
     width = frame.shape[1]
     height = frame.shape[0]
-    card_w = int(round(width * 0.52))
-    card_h = int(round(height * 0.18))
+    card_w = int(round(width * 0.74))
+    card_h = int(round(height * 0.27))
     top_y = int(round(height * 0.05))
     left_x = int(round(width * 0.05))
     x1 = min(width - 18, left_x + card_w)
@@ -2392,13 +2548,13 @@ def _draw_load_watch_card(
     inner_w = max(40, x1 - left_x - 32)
     accent = (0, 132, 255)
     _overlay_panel(frame, x0=left_x, y0=top_y, x1=x1, y1=y1, fill_color=PANEL_BG, edge_color=accent, alpha=0.84)
-    cv2.putText(frame, "Works Harder Here", (left_x + 16, top_y + int(card_h * 0.22)), TEXT_FONT, max(0.40, min(width, height) / 1500.0), accent, 1, cv2.LINE_AA)
+    cv2.putText(frame, "Works Harder Here", (left_x + 16, top_y + int(card_h * 0.22)), TEXT_FONT, max(0.52, min(width, height) / 1180.0), accent, 1, cv2.LINE_AA)
     watch_lines, watch_scale = _fit_wrapped_text(
         load_watch_text,
         max_width=inner_w,
         max_lines=2,
-        base_scale=max(0.58, min(width, height) / 1120.0),
-        min_scale=max(0.44, min(width, height) / 1420.0),
+        base_scale=max(0.76, min(width, height) / 880.0),
+        min_scale=max(0.58, min(width, height) / 1100.0),
         thickness=2,
     )
     for idx, line in enumerate(watch_lines):
@@ -2416,8 +2572,8 @@ def _draw_load_watch_card(
         _load_watch_support_text(load_watch_text),
         max_width=inner_w,
         max_lines=2,
-        base_scale=max(0.30, min(width, height) / 1900.0),
-        min_scale=max(0.26, min(width, height) / 2200.0),
+        base_scale=max(0.40, min(width, height) / 1500.0),
+        min_scale=max(0.34, min(width, height) / 1760.0),
         thickness=1,
     )
     for idx, line in enumerate(support_lines):
