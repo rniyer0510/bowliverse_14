@@ -997,6 +997,27 @@ def analyze(
             prior_results=prior_results,
             account_role=getattr(current_account, "role", None),
         )
+        capture_quality_status = str(
+            ((deterministic_expert.get("capture_quality_v1") or {}).get("status"))
+            or ""
+        ).upper()
+        if capture_quality_status == "UNUSABLE":
+            estimated_release_speed = {
+                "available": False,
+                "display": None,
+                "confidence": 0.0,
+                "reason": "capture_quality_unusable",
+            }
+            elbow = {
+                "verdict": "UNKNOWN",
+                "confidence": 0.0,
+                "reason": "capture_quality_unusable",
+            }
+            action = {
+                "action": None,
+                "confidence": 0.0,
+                "reason": "capture_quality_unusable",
+            }
 
         # ------------------------------------------------------------
         # Build Response

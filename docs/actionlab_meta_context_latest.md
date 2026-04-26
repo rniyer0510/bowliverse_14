@@ -126,3 +126,60 @@ The aim is to make those pages coherent with:
 - the coach-question architecture
 - the role-aware detail model
 - the humane acceptable/workable/problematic framing
+
+## Current UX State
+
+The walkthrough renderer has now been intentionally pulled back toward the cleaner `master` composition.
+
+Important current decisions:
+
+- keep the current font family and color decisions
+- keep the cleaner, lighter renderer card layout
+- prefer the left-accent-rail card treatment over full bordered heavy cards
+- keep summary/state cards visually premium, but not busy
+- blur and dim the video background at the final summary state so the cards come forward and read clearly
+
+### Renderer Principle
+
+The walkthrough video is the primary explanation surface.
+
+That means:
+
+- the video should do most of the diagnostic work
+- post-video report UI should stay light and supportive
+- the renderer should prioritize clarity, pause moments, and coach-like wording over decorative UI complexity
+
+### Report Principle
+
+The report should now be treated as a near-empty canvas around the walkthrough.
+
+Current direction:
+
+- video first
+- then only the key post-video action cards
+- leaking/problematic actions show:
+  - `Immediate win`
+  - `Long term`
+- connected / no-clear-problem actions show:
+  - `What is working`
+  - `Keep`
+
+The report should not restate what the walkthrough already shows.
+
+### Current Interaction Direction
+
+The report is now moving toward a stronger link between coaching cards and the actual action moment:
+
+- coaching cards should point back to exact walkthrough moments
+- the scrubber should expose time and phase context
+- long-term coaching should be rendered as discrete items, not one stitched sentence
+
+## Next Thread
+
+The next thread should focus on designing the `History` page from the same product principles:
+
+- content first
+- minimal UI
+- same backend truth model
+- same humane framing
+- no unnecessary containerization

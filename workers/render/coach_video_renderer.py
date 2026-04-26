@@ -1119,42 +1119,111 @@ def _draw_top_risk_panel(
 ) -> None:
     width = frame.shape[1]
     height = frame.shape[0]
-    card_w = int(round(width * 0.78))
-    card_h = int(round(height * 0.34))
+    card_w = int(round(width * 0.58))
+    card_h = int(round(height * 0.16))
     x0 = int(round(width * 0.05))
     y0 = int(round(height * 0.05))
     x1 = min(width - 18, x0 + card_w)
     y1 = y0 + card_h
-    if Image is not None and ImageDraw is not None:
-        image, overlay, draw = _frame_draw_context(frame)
-        _draw_themed_story_card(
-            draw,
-            x0=x0,
-            y0=y0,
-            x1=x1,
-            y1=y1,
-            title=title,
-            headline=headline,
-            body=body,
-            accent=accent,
-            width=width,
-            height=height,
-        )
-        _commit_frame_draw_context(frame, image, overlay)
-        return
-    inner_w = max(40, x1 - x0 - 32)
-    _overlay_panel(frame, x0=x0, y0=y0, x1=x1, y1=y1, fill_color=PANEL_BG, edge_color=accent, alpha=0.84)
-    cv2.putText(frame, title, (x0 + 18, y0 + int(card_h * 0.26)), TEXT_FONT, max(0.56, min(width, height) / 1140.0), accent, 1, cv2.LINE_AA)
-    headline_lines, headline_scale = _fit_wrapped_text(headline, max_width=inner_w, max_lines=2, base_scale=max(0.76, min(width, height) / 860.0), min_scale=max(0.60, min(width, height) / 1080.0), thickness=2)
+    inner_w = max(40, x1 - x0 - 36)
+    _overlay_panel(
+        frame,
+        x0=x0,
+        y0=y0,
+        x1=x1,
+        y1=y1,
+        fill_color=PANEL_BG,
+        edge_color=accent,
+        alpha=0.88,
+    )
+    cv2.putText(
+        frame,
+        title,
+        (x0 + 18, y0 + int(card_h * 0.28)),
+        TEXT_FONT,
+        max(0.44, min(width, height) / 1400.0),
+        accent,
+        1,
+        cv2.LINE_AA,
+    )
+    headline_lines, headline_scale = _fit_wrapped_text(
+        headline,
+        max_width=inner_w,
+        max_lines=2,
+        base_scale=max(0.58, min(width, height) / 1100.0),
+        min_scale=max(0.46, min(width, height) / 1380.0),
+        thickness=2,
+    )
     headline_y = y0 + int(card_h * 0.48)
     headline_step = max(20, int(round(card_h * 0.20)))
     for idx, line in enumerate(headline_lines):
-        cv2.putText(frame, line, (x0 + 18, headline_y + idx * headline_step), TEXT_FONT, headline_scale, TEXT_COLOR, 2, cv2.LINE_AA)
-    body_lines, body_scale = _fit_wrapped_text(body, max_width=inner_w, max_lines=2, base_scale=max(0.50, min(width, height) / 1220.0), min_scale=max(0.38, min(width, height) / 1540.0), thickness=1)
-    body_y = y0 + int(card_h * 0.79)
-    body_step = max(16, int(round(card_h * 0.14)))
+        cv2.putText(
+            frame,
+            line,
+            (x0 + 18, headline_y + idx * headline_step),
+            TEXT_FONT,
+            headline_scale,
+            TEXT_COLOR,
+            2,
+            cv2.LINE_AA,
+        )
+    body_lines, body_scale = _fit_wrapped_text(
+        body,
+        max_width=inner_w,
+        max_lines=2,
+        base_scale=max(0.38, min(width, height) / 1550.0),
+        min_scale=max(0.30, min(width, height) / 1880.0),
+        thickness=1,
+    )
+    body_y = y0 + int(card_h * 0.81)
+    body_step = max(15, int(round(card_h * 0.15)))
     for idx, line in enumerate(body_lines):
-        cv2.putText(frame, line, (x0 + 18, body_y + idx * body_step), TEXT_FONT, body_scale, MUTED_TEXT, 1, cv2.LINE_AA)
+        cv2.putText(
+            frame,
+            line,
+            (x0 + 18, body_y + idx * body_step),
+            TEXT_FONT,
+            body_scale,
+            MUTED_TEXT,
+            1,
+            cv2.LINE_AA,
+        )
+
+
+def _draw_phase_anchor_panel(
+    frame: np.ndarray,
+    *,
+    phase_key: str,
+) -> None:
+    config = {
+        "bfc": {
+            "title": "Back Foot Contact",
+            "headline": "Back foot lands here.",
+            "body": "Pause here to see how the body is entering the crease.",
+            "accent": (92, 220, 255),
+        },
+        "ffc": {
+            "title": "Front Foot Contact",
+            "headline": "Front foot lands here.",
+            "body": "Pause here to see how the landing sets up the release.",
+            "accent": (90, 220, 255),
+        },
+        "release": {
+            "title": "Release",
+            "headline": "Ball comes out here.",
+            "body": "Pause here to see what the chain is doing at release.",
+            "accent": (0, 132, 255),
+        },
+    }.get(str(phase_key).strip().lower())
+    if not config:
+        return
+    _draw_top_risk_panel(
+        frame,
+        title=str(config["title"]),
+        headline=str(config["headline"]),
+        body=str(config["body"]),
+        accent=config["accent"],
+    )
 
 
 def _front_leg_support_caption(risk: Optional[Dict[str, Any]]) -> Optional[Dict[str, str]]:
@@ -1466,28 +1535,12 @@ def _draw_speed_chip(
     accent = (110, 210, 255) if low_conf else (70, 225, 140)
     title = "Ball Speed"
     value = display
-    card_w = int(round(width * 0.29))
-    card_h = int(round(height * 0.11))
+    card_w = int(round(width * 0.28))
+    card_h = int(round(height * 0.10))
     x1 = int(round(width * 0.95))
     x0 = x1 - card_w
     y0 = int(round(height * 0.05))
     y1 = y0 + card_h
-    if Image is not None and ImageDraw is not None:
-        image, overlay, draw = _frame_draw_context(frame)
-        _draw_themed_stat_card(
-            draw,
-            x0=x0,
-            y0=y0,
-            x1=x1,
-            y1=y1,
-            title=title,
-            value=value,
-            accent=accent,
-            width=width,
-            height=height,
-        )
-        _commit_frame_draw_context(frame, image, overlay)
-        return
     _overlay_panel(
         frame,
         x0=x0,
@@ -1503,7 +1556,7 @@ def _draw_speed_chip(
         title,
         (x0 + 16, y0 + int(card_h * 0.34)),
         cv2.FONT_HERSHEY_SIMPLEX,
-        max(0.46, min(width, height) / 1320.0),
+        max(0.40, min(width, height) / 1500.0),
         accent,
         1,
         cv2.LINE_AA,
@@ -1513,7 +1566,7 @@ def _draw_speed_chip(
         value,
         (x0 + 16, y0 + int(card_h * 0.72)),
         cv2.FONT_HERSHEY_SIMPLEX,
-        max(0.66, min(width, height) / 960.0),
+        max(0.58, min(width, height) / 1100.0),
         TEXT_COLOR,
         2,
         cv2.LINE_AA,
@@ -1533,8 +1586,8 @@ def _draw_action_chip(
     height = frame.shape[0]
     accent = (130, 214, 255)
     title = "Action Type"
-    card_w = int(round(width * 0.29))
-    card_h = int(round(height * 0.11))
+    card_w = int(round(width * 0.28))
+    card_h = int(round(height * 0.10))
     x1 = int(round(width * 0.95))
     x0 = x1 - card_w
     base_y = int(round(height * 0.05))
@@ -1542,22 +1595,6 @@ def _draw_action_chip(
         base_y += card_h + int(round(height * 0.015))
     y0 = base_y
     y1 = y0 + card_h
-    if Image is not None and ImageDraw is not None:
-        image, overlay, draw = _frame_draw_context(frame)
-        _draw_themed_stat_card(
-            draw,
-            x0=x0,
-            y0=y0,
-            x1=x1,
-            y1=y1,
-            title=title,
-            value=label,
-            accent=accent,
-            width=width,
-            height=height,
-        )
-        _commit_frame_draw_context(frame, image, overlay)
-        return
     _overlay_panel(
         frame,
         x0=x0,
@@ -1573,7 +1610,7 @@ def _draw_action_chip(
         title,
         (x0 + 16, y0 + int(card_h * 0.34)),
         cv2.FONT_HERSHEY_SIMPLEX,
-        max(0.46, min(width, height) / 1320.0),
+        max(0.40, min(width, height) / 1500.0),
         accent,
         1,
         cv2.LINE_AA,
@@ -1583,7 +1620,7 @@ def _draw_action_chip(
         label,
         (x0 + 16, y0 + int(card_h * 0.72)),
         cv2.FONT_HERSHEY_SIMPLEX,
-        max(0.64, min(width, height) / 980.0),
+        max(0.56, min(width, height) / 1120.0),
         TEXT_COLOR,
         2,
         cv2.LINE_AA,
@@ -1611,30 +1648,14 @@ def _draw_legality_chip(
     else:
         value = verdict.title()
         accent = (120, 210, 255)
-    card_w = int(round(width * 0.29))
-    card_h = int(round(height * 0.11))
+    card_w = int(round(width * 0.28))
+    card_h = int(round(height * 0.10))
     x1 = int(round(width * 0.95))
     x0 = x1 - card_w
     y0 = int(round(height * 0.05)) + stack_index * (
         card_h + int(round(height * 0.015))
     )
     y1 = y0 + card_h
-    if Image is not None and ImageDraw is not None:
-        image, overlay, draw = _frame_draw_context(frame)
-        _draw_themed_stat_card(
-            draw,
-            x0=x0,
-            y0=y0,
-            x1=x1,
-            y1=y1,
-            title=title,
-            value=value,
-            accent=accent,
-            width=width,
-            height=height,
-        )
-        _commit_frame_draw_context(frame, image, overlay)
-        return
     _overlay_panel(
         frame,
         x0=x0,
@@ -1650,7 +1671,7 @@ def _draw_legality_chip(
         title,
         (x0 + 16, y0 + int(card_h * 0.34)),
         cv2.FONT_HERSHEY_SIMPLEX,
-        max(0.46, min(width, height) / 1320.0),
+        max(0.40, min(width, height) / 1500.0),
         accent,
         1,
         cv2.LINE_AA,
@@ -1781,14 +1802,14 @@ def _draw_themed_summary_card(
     inner_pad_y = max(13, int(round(card_h * 0.11)))
     title_font = _load_theme_font(
         BODY_FONT_FILE,
-        max(22, int(round(card_h * 0.16))),
+        max(20, int(round(card_h * 0.145))),
     )
     body_font, lines = _fit_pil_wrapped_text(
         draw,
         str(body or ""),
         font_file=BODY_FONT_MEDIUM_FILE,
-        base_size=max(19, int(round(card_h * 0.13))),
-        min_size=max(15, int(round(card_h * 0.095))),
+        base_size=max(17, int(round(card_h * 0.115))),
+        min_size=max(14, int(round(card_h * 0.085))),
         max_width=max(40, x1 - x0 - inner_pad_x * 2),
         max_lines=3,
     )
@@ -1847,12 +1868,12 @@ def _draw_themed_story_card(
     inner_pad_y = max(11, int(round(card_h * 0.09)))
     content_width = max(40, x1 - x0 - inner_pad_x * 2)
     content_height = max(36, y1 - y0 - inner_pad_y * 2)
-    title_base = max(19, int(round(card_h * 0.13)))
-    title_min = max(16, int(round(card_h * 0.10)))
-    headline_base = max(28, int(round(card_h * 0.22)))
-    headline_min = max(21, int(round(card_h * 0.15)))
-    body_base = max(18, int(round(card_h * 0.14)))
-    body_min = max(14, int(round(card_h * 0.10)))
+    title_base = max(17, int(round(card_h * 0.115)))
+    title_min = max(14, int(round(card_h * 0.090)))
+    headline_base = max(24, int(round(card_h * 0.18)))
+    headline_min = max(18, int(round(card_h * 0.130)))
+    body_base = max(15, int(round(card_h * 0.115)))
+    body_min = max(12, int(round(card_h * 0.085)))
     title_font = None
     title_lines: List[str] = []
     headline_font = None
@@ -1982,8 +2003,8 @@ def _draw_themed_stat_card(
         draw,
         str(title or ""),
         font_file=BODY_FONT_MEDIUM_FILE,
-        base_size=max(18, int(round(card_h * 0.19))),
-        min_size=max(14, int(round(card_h * 0.14))),
+        base_size=max(15, int(round(card_h * 0.16))),
+        min_size=max(12, int(round(card_h * 0.12))),
         max_width=content_width,
         max_lines=1,
     )
@@ -1991,8 +2012,8 @@ def _draw_themed_stat_card(
         draw,
         str(value or ""),
         font_file=BODY_FONT_FILE,
-        base_size=max(24, int(round(card_h * 0.27))),
-        min_size=max(17, int(round(card_h * 0.18))),
+        base_size=max(20, int(round(card_h * 0.22))),
+        min_size=max(15, int(round(card_h * 0.16))),
         max_width=content_width,
         max_lines=2,
     )
@@ -2046,9 +2067,12 @@ def _draw_end_summary_legacy(
     report_story: Optional[Dict[str, Any]] = None,
     root_cause: Optional[Dict[str, Any]] = None,
 ) -> None:
+    root_cause_status = str((root_cause or {}).get("status") or "").strip().lower()
+    blurred = cv2.GaussianBlur(frame, (0, 0), sigmaX=10, sigmaY=10)
+    cv2.addWeighted(blurred, 0.74, frame, 0.26, 0.0, frame)
     overlay = frame.copy()
     cv2.rectangle(overlay, (0, 0), (frame.shape[1], frame.shape[0]), (18, 22, 28), -1)
-    cv2.addWeighted(overlay, 0.22, frame, 0.78, 0.0, frame)
+    cv2.addWeighted(overlay, 0.24, frame, 0.76, 0.0, frame)
 
     width = frame.shape[1]
     height = frame.shape[0]
@@ -2103,35 +2127,36 @@ def _draw_end_summary_legacy(
         )
         for idx, line in enumerate(lines):
             cv2.putText(
-                frame,
-                line,
-                (x0 + 16, y0 + int(top_h * (0.48 + idx * 0.18))),
-                TEXT_FONT,
-                body_scale,
-                TEXT_COLOR,
-                2 if idx == 0 else 1,
-                cv2.LINE_AA,
-            )
+            frame,
+            line,
+            (x0 + 16, y0 + int(top_h * (0.48 + idx * 0.18))),
+            TEXT_FONT,
+            body_scale,
+            TEXT_COLOR if idx == 0 else MUTED_TEXT,
+            2 if idx == 0 else 1,
+            cv2.LINE_AA,
+        )
 
-    bottom_y = int(round(height * 0.73))
-    stat_h = int(round(height * 0.13))
-    gap = int(round(width * 0.03))
-    stat_w = int(round((width - (left_x * 2) - (gap * 2)) / 3.0))
-    stats = [
-        ("Speed", _speed_display_text(speed) or "-", (70, 225, 140)),
-        ("Action Type", _format_action_label(action) or "-", (130, 214, 255)),
-    ]
-    verdict = str((elbow or {}).get("verdict") or "").strip().upper()
-    legality_value = "Legal" if verdict == "LEGAL" else (verdict.title() if verdict else "-")
-    legality_accent = (70, 225, 140) if verdict == "LEGAL" else ((72, 92, 235) if verdict == "ILLEGAL" else (120, 210, 255))
-    stats.append(("Legality", legality_value, legality_accent))
-    for idx, (title, value, accent) in enumerate(stats):
-        x0 = left_x + idx * (stat_w + gap)
-        x1 = x0 + stat_w
-        y1 = bottom_y + stat_h
-        _overlay_panel(frame, x0=x0, y0=bottom_y, x1=x1, y1=y1, fill_color=PANEL_BG, edge_color=accent, alpha=0.90)
-        cv2.putText(frame, title, (x0 + 14, bottom_y + int(stat_h * 0.26)), cv2.FONT_HERSHEY_SIMPLEX, max(0.40, min(width, height) / 1500.0), MUTED_TEXT, 1, cv2.LINE_AA)
-        cv2.putText(frame, value, (x0 + 14, bottom_y + int(stat_h * 0.64)), cv2.FONT_HERSHEY_SIMPLEX, max(0.56, min(width, height) / 1120.0), TEXT_COLOR, 2, cv2.LINE_AA)
+    if root_cause_status != "not_interpretable":
+        bottom_y = int(round(height * 0.73))
+        stat_h = int(round(height * 0.13))
+        gap = int(round(width * 0.03))
+        stat_w = int(round((width - (left_x * 2) - (gap * 2)) / 3.0))
+        stats = [
+            ("Speed", _speed_display_text(speed) or "-", (70, 225, 140)),
+            ("Action Type", _format_action_label(action) or "-", (130, 214, 255)),
+        ]
+        verdict = str((elbow or {}).get("verdict") or "").strip().upper()
+        legality_value = "Legal" if verdict == "LEGAL" else (verdict.title() if verdict else "-")
+        legality_accent = (70, 225, 140) if verdict == "LEGAL" else ((72, 92, 235) if verdict == "ILLEGAL" else (120, 210, 255))
+        stats.append(("Legality", legality_value, legality_accent))
+        for idx, (title, value, accent) in enumerate(stats):
+            x0 = left_x + idx * (stat_w + gap)
+            x1 = x0 + stat_w
+            y1 = bottom_y + stat_h
+            _overlay_panel(frame, x0=x0, y0=bottom_y, x1=x1, y1=y1, fill_color=PANEL_BG, edge_color=accent, alpha=0.90)
+            cv2.putText(frame, title, (x0 + 14, bottom_y + int(stat_h * 0.26)), cv2.FONT_HERSHEY_SIMPLEX, max(0.40, min(width, height) / 1500.0), MUTED_TEXT, 1, cv2.LINE_AA)
+            cv2.putText(frame, value, (x0 + 14, bottom_y + int(stat_h * 0.64)), cv2.FONT_HERSHEY_SIMPLEX, max(0.56, min(width, height) / 1120.0), TEXT_COLOR, 2, cv2.LINE_AA)
 
 
 def _draw_end_summary(
@@ -2145,114 +2170,16 @@ def _draw_end_summary(
     report_story: Optional[Dict[str, Any]] = None,
     root_cause: Optional[Dict[str, Any]] = None,
 ) -> None:
-    if Image is None or ImageDraw is None:
-        _draw_end_summary_legacy(
-            frame,
-            risk_by_id=risk_by_id,
-            events=events,
-            action=action,
-            speed=speed,
-            elbow=elbow,
-            report_story=report_story,
-            root_cause=root_cause,
-        )
-        return
-
-    width = frame.shape[1]
-    height = frame.shape[0]
-    symptom_text = _summary_symptom_text(
-        risk_by_id,
-        events=events,
-        report_story=report_story,
-        root_cause=root_cause,
-    )
-    load_watch_text = _summary_load_watch_text(
-        risk_by_id,
-        events=events,
-        report_story=report_story,
-        root_cause=root_cause,
-    )
-    blurred = cv2.GaussianBlur(
+    _draw_end_summary_legacy(
         frame,
-        (0, 0),
-        sigmaX=max(8.0, min(width, height) / 18.0),
-        sigmaY=max(8.0, min(width, height) / 18.0),
-    )
-    dimmer = blurred.copy()
-    cv2.rectangle(dimmer, (0, 0), (width, height), THEME_SURFACE, -1)
-    cv2.addWeighted(dimmer, 0.44, blurred, 0.56, 0.0, frame)
-    _apply_bottom_scrim(
-        frame,
-        start_y=int(round(height * 0.60)),
-        end_y=height,
-        max_alpha=0.52,
-    )
-
-    image = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)).convert("RGBA")
-    overlay = Image.new("RGBA", image.size, (0, 0, 0, 0))
-    draw = ImageDraw.Draw(overlay)
-
-    top_y = int(round(height * 0.05))
-    top_h = int(round(height * 0.14))
-    top_gap = int(round(height * 0.018))
-    top_w = int(round(width * 0.90))
-    left_x = int(round(width * 0.05))
-    symptom_title = _summary_symptom_title(
+        risk_by_id=risk_by_id,
+        events=events,
+        action=action,
+        speed=speed,
+        elbow=elbow,
         report_story=report_story,
         root_cause=root_cause,
     )
-    load_watch_title = _summary_load_watch_title(root_cause=root_cause)
-    for idx, (title, body, accent) in enumerate(
-        (
-            (symptom_title, symptom_text, (92, 220, 255)),
-            (load_watch_title, load_watch_text, THEME_PRIMARY),
-        )
-    ):
-        x0 = left_x
-        y0 = top_y + idx * (top_h + top_gap)
-        x1 = min(width - 18, x0 + top_w)
-        _draw_themed_summary_card(
-            draw,
-            x0=x0,
-            y0=y0,
-            x1=x1,
-            y1=y0 + top_h,
-            title=title,
-            body=str(body or ""),
-            accent=accent,
-            width=width,
-            height=height,
-        )
-
-    bottom_y = int(round(height * 0.72))
-    stat_h = int(round(height * 0.17))
-    gap = int(round(width * 0.022))
-    stat_w = int(round((width - (left_x * 2) - (gap * 2)) / 3.0))
-    stats = [
-        ("Speed", _speed_display_text(speed) or "-", (70, 225, 140)),
-        ("Action Type", _format_action_label(action) or "-", (130, 214, 255)),
-    ]
-    verdict = str((elbow or {}).get("verdict") or "").strip().upper()
-    legality_value = "Legal" if verdict == "LEGAL" else (verdict.title() if verdict else "-")
-    legality_accent = (70, 225, 140) if verdict == "LEGAL" else ((72, 92, 235) if verdict == "ILLEGAL" else (120, 210, 255))
-    stats.append(("Legality", legality_value, legality_accent))
-    for idx, (title, value, accent) in enumerate(stats):
-        x0 = left_x + idx * (stat_w + gap)
-        _draw_themed_stat_card(
-            draw,
-            x0=x0,
-            y0=bottom_y,
-            x1=x0 + stat_w,
-            y1=bottom_y + stat_h,
-            title=title,
-            value=value,
-            accent=accent,
-            width=width,
-            height=height,
-        )
-
-    composited = Image.alpha_composite(image, overlay).convert("RGB")
-    frame[:, :] = cv2.cvtColor(np.array(composited), cv2.COLOR_RGB2BGR)
 
 
 def _draw_foot_line_overlay(
@@ -2522,39 +2449,22 @@ def _draw_load_watch_card(
 ) -> None:
     width = frame.shape[1]
     height = frame.shape[0]
-    card_w = int(round(width * 0.74))
-    card_h = int(round(height * 0.27))
+    card_w = int(round(width * 0.48))
+    card_h = int(round(height * 0.16))
     top_y = int(round(height * 0.05))
     left_x = int(round(width * 0.05))
     x1 = min(width - 18, left_x + card_w)
     y1 = top_y + card_h
-    if Image is not None and ImageDraw is not None:
-        image, overlay, draw = _frame_draw_context(frame)
-        _draw_themed_story_card(
-            draw,
-            x0=left_x,
-            y0=top_y,
-            x1=x1,
-            y1=y1,
-            title="Works Harder Here",
-            headline=load_watch_text,
-            body=_load_watch_support_text(load_watch_text),
-            accent=THEME_PRIMARY,
-            width=width,
-            height=height,
-        )
-        _commit_frame_draw_context(frame, image, overlay)
-        return
     inner_w = max(40, x1 - left_x - 32)
     accent = (0, 132, 255)
-    _overlay_panel(frame, x0=left_x, y0=top_y, x1=x1, y1=y1, fill_color=PANEL_BG, edge_color=accent, alpha=0.84)
-    cv2.putText(frame, "Works Harder Here", (left_x + 16, top_y + int(card_h * 0.22)), TEXT_FONT, max(0.52, min(width, height) / 1180.0), accent, 1, cv2.LINE_AA)
+    _overlay_panel(frame, x0=left_x, y0=top_y, x1=x1, y1=y1, fill_color=PANEL_BG, edge_color=accent, alpha=0.88)
+    cv2.putText(frame, "Load watch", (left_x + 16, top_y + int(card_h * 0.22)), TEXT_FONT, max(0.40, min(width, height) / 1500.0), accent, 1, cv2.LINE_AA)
     watch_lines, watch_scale = _fit_wrapped_text(
         load_watch_text,
         max_width=inner_w,
         max_lines=2,
-        base_scale=max(0.76, min(width, height) / 880.0),
-        min_scale=max(0.58, min(width, height) / 1100.0),
+        base_scale=max(0.58, min(width, height) / 1120.0),
+        min_scale=max(0.44, min(width, height) / 1420.0),
         thickness=2,
     )
     for idx, line in enumerate(watch_lines):
@@ -2572,8 +2482,8 @@ def _draw_load_watch_card(
         _load_watch_support_text(load_watch_text),
         max_width=inner_w,
         max_lines=2,
-        base_scale=max(0.40, min(width, height) / 1500.0),
-        min_scale=max(0.34, min(width, height) / 1760.0),
+        base_scale=max(0.30, min(width, height) / 1900.0),
+        min_scale=max(0.26, min(width, height) / 2200.0),
         thickness=1,
     )
     for idx, line in enumerate(support_lines):
@@ -2936,7 +2846,10 @@ def render_skeleton_video(
                     root_cause,
                     phase_key=pause_key,
                 )
-                if pause_key == "ffc":
+                if pause_key == "bfc":
+                    _draw_phase_anchor_panel(paused_frame, phase_key="bfc")
+                elif pause_key == "ffc":
+                    drew_ffc_overlay = False
                     if allow_warning_hotspots and _supports_ffc_story(render_events):
                         preferred_ffc_risk = _preferred_ffc_cue_risk_id(
                             risk_by_id,
@@ -2974,6 +2887,7 @@ def render_skeleton_video(
                                 risk=risk_by_id.get("knee_brace_failure"),
                                 proof_step=proof_step,
                             )
+                            drew_ffc_overlay = True
                         if should_draw_foot_line:
                             _draw_foot_line_overlay(
                                 paused_frame,
@@ -2984,6 +2898,7 @@ def render_skeleton_video(
                                 risk=risk_by_id.get("foot_line_deviation"),
                                 proof_step=proof_step,
                             )
+                            drew_ffc_overlay = True
                         if preferred_ffc_risk and not should_draw_front_leg and not should_draw_foot_line and proof_step:
                             _draw_top_risk_panel(
                                 paused_frame,
@@ -2992,6 +2907,9 @@ def render_skeleton_video(
                                 body=str((proof_step or {}).get("body") or ""),
                                 accent=(92, 220, 255),
                             )
+                            drew_ffc_overlay = True
+                        if not drew_ffc_overlay:
+                            _draw_phase_anchor_panel(paused_frame, phase_key="ffc")
                         if preferred_ffc_risk:
                             hotspot_payload = {
                                 "risk_id": preferred_ffc_risk,
@@ -3035,6 +2953,8 @@ def render_skeleton_video(
                                 body=str((proof_step or {}).get("body") or ""),
                                 accent=(0, 132, 255),
                             )
+                        elif not release_hotspot_risk:
+                            _draw_phase_anchor_panel(paused_frame, phase_key="release")
                         if release_hotspot_risk:
                             hotspot_payload = {
                                 "risk_id": release_hotspot_risk,
