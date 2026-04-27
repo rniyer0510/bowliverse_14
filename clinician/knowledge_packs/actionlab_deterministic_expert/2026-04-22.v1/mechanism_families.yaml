@@ -1,0 +1,42 @@
+version: actionlab.knowledge_pack.mechanism_families.v1
+
+mechanism_families:
+  build_deficit:
+    id: build_deficit
+    title: "Build Deficit"
+    summary: "The bowler is not arriving at the crease with enough usable momentum, so pace has to be rescued later in the chain."
+    focus_phases:
+      - approach_build
+      - whip_and_release
+
+  gather_deficit:
+    id: gather_deficit
+    title: "Gather Deficit"
+    summary: "The bowler approaches with intent but arrives at back-foot and landing phases without enough organization for clean transfer."
+    focus_phases:
+      - gather_and_organize
+      - transfer_and_block
+
+  block_bracing_deficit:
+    id: block_bracing_deficit
+    title: "Block / Bracing Deficit"
+    summary: "The front-foot landing does not become a stable transfer point, so pace leaks and timing becomes harder to repeat."
+    focus_phases:
+      - transfer_and_block
+      - whip_and_release
+
+  sequencing_deficit:
+    id: sequencing_deficit
+    title: "Sequencing Deficit"
+    summary: "The chain is moving, but the order and timing are off enough that the arm or trunk has to chase the release."
+    focus_phases:
+      - gather_and_organize
+      - whip_and_release
+
+  dissipation_deficit:
+    id: dissipation_deficit
+    title: "Dissipation Deficit"
+    summary: "The bowler can still create pace, but the deceleration burden is staying too concentrated after release."
+    focus_phases:
+      - whip_and_release
+      - dissipation_and_recovery

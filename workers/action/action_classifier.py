@@ -30,11 +30,11 @@ def classify_action(pose_frames, hand, bfc_frame, ffc_frame):
     """
 
     if bfc_frame is None:
-        return {"intent": None, "action": "UNKNOWN", "confidence": 0.0}
+        return {"intent": None, "action": "UNKNOWN", "confidence": 0.0, "hand": (hand or "").upper() or None}
 
     axis = compute_batsman_axis(pose_frames, bfc_frame, ffc_frame)
     if axis is None:
-        return {"intent": None, "action": "UNKNOWN", "confidence": 0.0}
+        return {"intent": None, "action": "UNKNOWN", "confidence": 0.0, "hand": (hand or "").upper() or None}
 
     # --------------------------------
     # PRIMARY: Foot-based intent
@@ -133,4 +133,5 @@ def classify_action(pose_frames, hand, bfc_frame, ffc_frame):
         "intent": intent.lower(),
         "action": action,
         "confidence": round(confidence, 2),
+        "hand": (hand or "").upper() or None,
     }

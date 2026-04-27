@@ -1,0 +1,242 @@
+version: actionlab.knowledge_pack.knowledge_evidence.v1
+
+evidence_items:
+  evidence_soft_block_ffc:
+    id: evidence_soft_block_ffc
+    target_type: mechanism
+    target_id: soft_block_with_trunk_carry
+    evidence_kind: biomechanics_truth
+    evidence_tier: A
+    source_ids:
+      - felton_2020_ffc
+      - felton_2023_individual
+    claim_summary: "Front-foot-contact organization and front-leg support materially affect whether momentum is converted cleanly or leaked through landing and release."
+    extraction_notes:
+      - "Use this evidence to support the transfer-and-block break-point story."
+      - "Do not overstate a single optimal landing style across all bowlers."
+    coach_consensus_status: reviewed
+    related_evidence_ids:
+      - evidence_front_leg_support
+
+  evidence_front_leg_support:
+    id: evidence_front_leg_support
+    target_type: contributor
+    target_id: front_leg_support_score
+    evidence_kind: biomechanics_truth
+    evidence_tier: A
+    source_ids:
+      - felton_2020_ffc
+      - senington_2018
+    claim_summary: "Landing-leg support is a key contributor for transfer quality and downstream load cost."
+    extraction_notes:
+      - "Useful for both performance and load narratives."
+      - "Supports front-leg support as a renderer and report truth anchor."
+    coach_consensus_status: reviewed
+    related_evidence_ids:
+      - evidence_soft_block_ffc
+
+  evidence_trunk_load_cost:
+    id: evidence_trunk_load_cost
+    target_type: contributor
+    target_id: trunk_drift_after_ffc
+    evidence_kind: load_risk
+    evidence_tier: A
+    source_ids:
+      - senington_2018
+      - glazier_wheat_2014
+    claim_summary: "Trunk and spinal cost language should be grounded in known links between spinal kinematics, technique, and lower-back injury risk."
+    extraction_notes:
+      - "Use careful wording: risk and cost should be framed probabilistically, not diagnostically."
+      - "Supports long-term outlook rather than an instant injury claim."
+    coach_consensus_status: reviewed
+    related_evidence_ids: []
+
+  evidence_release_window_load:
+    id: evidence_release_window_load
+    target_type: mechanism
+    target_id: release_window_instability_under_load
+    evidence_kind: performance_relation
+    evidence_tier: A
+    source_ids:
+      - kiely_2021
+      - bhandurge_2024_review
+    claim_summary: "Release-window stability and upper-chain timing should be treated as performance-relevant, especially when effort rises."
+    extraction_notes:
+      - "Use this to justify why release calmness matters for pace repeatability."
+      - "Do not treat release-timing metrics as isolated from earlier chain organization."
+    coach_consensus_status: reviewed
+    related_evidence_ids: []
+
+  evidence_low_build_late_rescue:
+    id: evidence_low_build_late_rescue
+    target_type: mechanism
+    target_id: low_build_forcing_late_rescue
+    evidence_kind: performance_relation
+    evidence_tier: A
+    source_ids:
+      - kiely_2021
+      - glazier_wheat_2014
+      - bhandurge_2024_review
+    claim_summary: "When less usable momentum is carried into delivery, more pace generation has to occur late, which increases reliance on end-chain rescue."
+    extraction_notes:
+      - "Supports explaining late pace creation as a carry problem before it is framed as an arm problem."
+      - "Use as a performance-repeatability story, not as a single ideal run-up template."
+    coach_consensus_status: reviewed
+    related_evidence_ids:
+      - evidence_shoulder_rotation_timing
+
+  evidence_gather_disorganization_transfer:
+    id: evidence_gather_disorganization_transfer
+    target_type: mechanism
+    target_id: gather_disorganization_before_block
+    evidence_kind: biomechanics_truth
+    evidence_tier: A
+    source_ids:
+      - glazier_wheat_2014
+      - felton_2023_individual
+      - bhandurge_2024_review
+    claim_summary: "Gather-to-landing organization is part of whether the chain arrives ready to transfer force cleanly at front-foot contact."
+    extraction_notes:
+      - "Supports root-cause stories that begin before landing even when the leak becomes obvious at landing."
+      - "Useful when explaining why a landing problem can still start in the gather."
+    coach_consensus_status: reviewed
+    related_evidence_ids:
+      - evidence_pelvis_trunk_alignment
+
+  evidence_late_arm_chain_delay:
+    id: evidence_late_arm_chain_delay
+    target_type: mechanism
+    target_id: late_arm_acceleration_due_to_chain_delay
+    evidence_kind: performance_relation
+    evidence_tier: A
+    source_ids:
+      - glazier_wheat_2014
+      - kiely_2021
+      - bhandurge_2024_review
+    claim_summary: "Late arm acceleration is more informative as a downstream rescue signal when earlier sequencing is delayed than as a standalone arm fault."
+    extraction_notes:
+      - "Use to keep the explanation chain-first rather than arm-first."
+      - "Supports distinguishing primary driver from visible compensation."
+    coach_consensus_status: reviewed
+    related_evidence_ids:
+      - evidence_shoulder_rotation_timing
+      - evidence_hip_shoulder_sequence
+
+  evidence_high_terminal_dissipation:
+    id: evidence_high_terminal_dissipation
+    target_type: mechanism
+    target_id: high_terminal_impulse_with_high_dissipation_burden
+    evidence_kind: load_risk
+    evidence_tier: A
+    source_ids:
+      - senington_2018
+      - glazier_wheat_2014
+      - bhandurge_2024_review
+    claim_summary: "High late impulse combined with a harsh finish should be treated as a cost story because concentrated end-chain deceleration raises technique and load concern."
+    extraction_notes:
+      - "Supports load-watch language without implying immediate injury."
+      - "Use when the action still produces pace but appears expensive."
+    coach_consensus_status: reviewed
+    related_evidence_ids:
+      - evidence_trunk_load_cost
+
+  evidence_underused_transfer_late_dump:
+    id: evidence_underused_transfer_late_dump
+    target_type: mechanism
+    target_id: underused_transfer_window_with_late_dump
+    evidence_kind: biomechanics_truth
+    evidence_tier: A
+    source_ids:
+      - felton_2020_ffc
+      - felton_2023_individual
+      - glazier_wheat_2014
+    claim_summary: "A readable landing window is only useful when momentum is converted through it; if transfer stays underused, more of the load cost appears late in the finish."
+    extraction_notes:
+      - "Supports explaining underused transfer as a missed conversion opportunity rather than a mysterious finish issue."
+      - "Useful for cases that look workable but still dump load late."
+    coach_consensus_status: reviewed
+    related_evidence_ids:
+      - evidence_soft_block_ffc
+
+  evidence_stack_over_landing:
+    id: evidence_stack_over_landing
+    target_type: prescription
+    target_id: stack_over_landing_leg
+    evidence_kind: coaching_translation
+    evidence_tier: B
+    source_ids:
+      - loughborough_fast_bowling
+      - loughborough_ecb_fast_bowling
+    claim_summary: "Landing and trunk organization should often be coached as a transfer refinement before a harder brace cue is introduced."
+    extraction_notes:
+      - "This is a coaching translation item, not a direct paper claim."
+      - "Supports 'smallest useful change first' for soft-block patterns."
+    coach_consensus_status: reviewed
+    related_evidence_ids:
+      - evidence_soft_block_ffc
+
+  evidence_hip_shoulder_sequence:
+    id: evidence_hip_shoulder_sequence
+    target_type: contributor
+    target_id: hip_shoulder_mismatch
+    evidence_kind: biomechanics_truth
+    evidence_tier: A
+    source_ids:
+      - glazier_wheat_2014
+      - bhandurge_2024_review
+    claim_summary: "Hip-shoulder timing and coordination are part of the sequencing story that separates calm carry from late rescue."
+    extraction_notes:
+      - "Use as a supporting contributor, not a standalone diagnosis."
+    coach_consensus_status: draft
+    related_evidence_ids: []
+
+  evidence_neck_tilt_bfc:
+    id: evidence_neck_tilt_bfc
+    target_type: contributor
+    target_id: neck_tilt_left_bfc
+    evidence_kind: coaching_translation
+    evidence_tier: INTERNAL
+    source_ids:
+      - loughborough_fast_bowling
+    claim_summary: "BFC head-neck tilt can be stored as a supporting phase-anchor when it helps explain earlier organization bias."
+    extraction_notes:
+      - "Treat as supporting context only until stronger direct evidence is reconciled."
+      - "Good candidate for internal coach-review validation against clip annotations."
+    coach_consensus_status: draft
+    related_evidence_ids: []
+
+  evidence_shoulder_rotation_timing:
+    id: evidence_shoulder_rotation_timing
+    target_type: contributor
+    target_id: shoulder_rotation_timing
+    evidence_kind: performance_relation
+    evidence_tier: A
+    source_ids:
+      - glazier_wheat_2014
+      - kiely_2021
+      - bhandurge_2024_review
+    claim_summary: "Upper-chain timing should be judged in the context of how calmly the action carries into the release window, not only from the instant of release."
+    extraction_notes:
+      - "Supports shoulder-timing language as part of a broader sequencing story."
+      - "Do not treat this as independent from earlier chain organization."
+    coach_consensus_status: reviewed
+    related_evidence_ids:
+      - evidence_hip_shoulder_sequence
+
+  evidence_pelvis_trunk_alignment:
+    id: evidence_pelvis_trunk_alignment
+    target_type: contributor
+    target_id: pelvis_trunk_alignment
+    evidence_kind: biomechanics_truth
+    evidence_tier: A
+    source_ids:
+      - glazier_wheat_2014
+      - felton_2023_individual
+      - bhandurge_2024_review
+    claim_summary: "Pelvis-to-trunk organization into landing is a meaningful part of whether the chain arrives ready to transfer force cleanly."
+    extraction_notes:
+      - "Useful as a gather-to-landing supporting contributor."
+      - "Supports the idea that similar late symptoms can still begin from earlier organization bias."
+    coach_consensus_status: reviewed
+    related_evidence_ids:
+      - evidence_hip_shoulder_sequence

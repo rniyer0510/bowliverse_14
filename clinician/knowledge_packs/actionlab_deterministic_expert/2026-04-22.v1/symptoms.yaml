@@ -1,0 +1,229 @@
+version: actionlab.knowledge_pack.symptoms.v1
+
+symptoms:
+  weak_approach_build:
+    id: weak_approach_build
+    title: "Weak approach build"
+    simple_title: "Not enough build"
+    category: "build"
+    phase: approach_build
+    description: "The run-up is not carrying enough momentum into landing."
+    simple_description: "The run-up is not bringing enough into landing."
+    evidence_inputs:
+      - approach_momentum_score
+      - runup_rhythm_stability
+      - final_stride_intent
+    related_symptoms:
+      - high_terminal_thrust
+      - arm_chase
+    possible_mechanisms:
+      - low_build_forcing_late_rescue
+    render_focus_regions:
+      - runup_line
+      - pelvis
+      - trunk
+
+  unstable_gather:
+    id: unstable_gather
+    title: "Unstable gather"
+    simple_title: "Messy gather"
+    category: "organization"
+    phase: gather_and_organize
+    description: "The bowler arrives at back-foot and early landing phases without a clean line or stacked posture for transfer."
+    simple_description: "The body is not arriving in a clean line before landing."
+    evidence_inputs:
+      - gather_line_stability
+      - pelvis_trunk_alignment
+      - bfc_confidence
+    related_symptoms:
+      - front_leg_softening
+      - arm_chase
+    possible_mechanisms:
+      - gather_disorganization_before_block
+      - late_arm_acceleration_due_to_chain_delay
+    render_focus_regions:
+      - hips
+      - trunk
+      - line_of_travel
+
+  front_leg_softening:
+    id: front_leg_softening
+    title: "Front leg softening"
+    simple_title: "Front leg not holding strong"
+    category: "transfer"
+    phase: transfer_and_block
+    description: "The landing leg does not appear to hold a strong transfer shape through the release window."
+    simple_description: "Front leg doesn't hold strong at landing."
+    evidence_inputs:
+      - front_leg_support_score
+      - trunk_drift_after_ffc
+      - ffc_confidence
+    related_symptoms:
+      - late_trunk_drift
+      - asymmetric_dissipation
+    possible_mechanisms:
+      - soft_block_with_trunk_carry
+      - gather_disorganization_before_block
+    render_focus_regions:
+      - front_leg
+      - trunk
+
+  late_trunk_drift:
+    id: late_trunk_drift
+    title: "Late trunk drift"
+    simple_title: "Body keeps drifting"
+    category: "transfer"
+    phase: transfer_and_block
+    description: "The chest and trunk continue travelling over the landing base instead of stabilizing into release."
+    simple_description: "The body keeps moving past landing instead of settling."
+    evidence_inputs:
+      - trunk_drift_after_ffc
+      - chest_stack_over_landing
+      - release_timing_stability
+    related_symptoms:
+      - front_leg_softening
+      - arm_chase
+    possible_mechanisms:
+      - soft_block_with_trunk_carry
+      - late_arm_acceleration_due_to_chain_delay
+    render_focus_regions:
+      - trunk
+      - front_leg
+      - shoulder_line
+
+  arm_chase:
+    id: arm_chase
+    title: "Arm chase"
+    simple_title: "Arm rushing late"
+    category: "sequencing"
+    phase: whip_and_release
+    description: "The arm appears to accelerate late because earlier chain segments did not set the release on time."
+    simple_description: "The arm has to rush late because the body is late."
+    evidence_inputs:
+      - release_timing_stability
+      - shoulder_rotation_timing
+      - distal_velocity_rescue
+    related_symptoms:
+      - high_terminal_thrust
+      - unstable_gather
+    possible_mechanisms:
+      - late_arm_acceleration_due_to_chain_delay
+      - low_build_forcing_late_rescue
+    render_focus_regions:
+      - bowling_arm
+      - trunk
+      - shoulder_line
+
+  high_terminal_thrust:
+    id: high_terminal_thrust
+    title: "High terminal thrust"
+    simple_title: "Too much late push"
+    category: "pace_generation"
+    phase: whip_and_release
+    description: "A large share of visible pace generation appears to happen late, close to landing and release."
+    simple_description: "Too much of the speed is being made late."
+    evidence_inputs:
+      - terminal_impulse_score
+      - release_velocity_burst
+      - transfer_efficiency_score
+    related_symptoms:
+      - weak_approach_build
+      - asymmetric_dissipation
+    possible_mechanisms:
+      - low_build_forcing_late_rescue
+      - late_arm_acceleration_due_to_chain_delay
+      - high_terminal_impulse_with_high_dissipation_burden
+    render_focus_regions:
+      - bowling_arm
+      - trunk
+      - front_leg
+
+  asymmetric_dissipation:
+    id: asymmetric_dissipation
+    title: "Asymmetric dissipation"
+    simple_title: "Uneven finish"
+    category: "load"
+    phase: dissipation_and_recovery
+    description: "The body appears to absorb deceleration unevenly after release, suggesting concentrated late-chain load."
+    simple_description: "The finish lands too hard on one side of the body."
+    evidence_inputs:
+      - dissipation_burden_score
+      - followthrough_asymmetry
+      - trunk_fold_severity
+    related_symptoms:
+      - high_terminal_thrust
+      - front_leg_softening
+    possible_mechanisms:
+      - high_terminal_impulse_with_high_dissipation_burden
+      - soft_block_with_trunk_carry
+    render_focus_regions:
+      - trunk
+      - front_leg
+      - side_body
+
+  release_window_instability:
+    id: release_window_instability
+    title: "Release-window instability"
+    simple_title: "Unsteady release timing"
+    category: "sequencing"
+    phase: whip_and_release
+    description: "The release window looks variable enough that the arm and trunk are arriving under late pressure."
+    simple_description: "Release timing changes too much from ball to ball."
+    evidence_inputs:
+      - release_timing_stability
+      - shoulder_rotation_timing
+      - distal_velocity_rescue
+    related_symptoms:
+      - arm_chase
+      - late_chain_load_dump
+    possible_mechanisms:
+      - release_window_instability_under_load
+    render_focus_regions:
+      - bowling_arm
+      - shoulder_line
+      - trunk
+
+  late_chain_load_dump:
+    id: late_chain_load_dump
+    title: "Late-chain load dump"
+    simple_title: "Hard late finish"
+    category: "load"
+    phase: dissipation_and_recovery
+    description: "The follow-through appears to dump deceleration abruptly into the trunk and side-body after a late push through release."
+    simple_description: "The finish dumps too much force into the body after release."
+    evidence_inputs:
+      - dissipation_burden_score
+      - followthrough_asymmetry
+      - trunk_fold_severity
+    related_symptoms:
+      - high_terminal_thrust
+      - release_window_instability
+    possible_mechanisms:
+      - release_window_instability_under_load
+      - underused_transfer_window_with_late_dump
+    render_focus_regions:
+      - trunk
+      - side_body
+      - front_leg
+
+  underused_transfer_window:
+    id: underused_transfer_window
+    title: "Underused transfer window"
+    simple_title: "Landing not used well"
+    category: "transfer"
+    phase: transfer_and_block
+    description: "The landing window looks readable, but the action still fails to convert it into a calm transfer before release."
+    simple_description: "The action reaches landing, but does not use it well."
+    evidence_inputs:
+      - transfer_efficiency_score
+      - front_leg_support_score
+      - chest_stack_over_landing
+    related_symptoms:
+      - front_leg_softening
+      - late_chain_load_dump
+    possible_mechanisms:
+      - underused_transfer_window_with_late_dump
+    render_focus_regions:
+      - front_leg
+      - trunk
+      - shoulder_line

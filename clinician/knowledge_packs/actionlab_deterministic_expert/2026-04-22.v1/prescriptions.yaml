@@ -1,0 +1,397 @@
+version: actionlab.knowledge_pack.prescriptions.v1
+
+prescriptions:
+  build_momentum_earlier:
+    id: build_momentum_earlier
+    title: "Build momentum earlier"
+    simple_title: "Build speed earlier"
+    goal: "Bring more usable momentum into the crease so pace does not have to be rescued at the end."
+    simple_goal: "Build useful speed earlier so the action does not have to rush at the end."
+    primary_cue: "Let the last few strides arrive with intent before release rather than trying to create the hit right at the end."
+    simple_primary_cue: "Let the last few strides bring energy in before release instead of trying to make it all happen at the end."
+    why_this_first: "A better build gives the rest of the chain a calmer job before we coach finer release details."
+    simple_why_this_first: "If speed builds earlier, the rest of the action has an easier job."
+    avoid_for_now:
+      - "Do not cue the bowler to simply bowl harder."
+      - "Do not add a bracing cue before the run-up and gather are cleaner."
+    expected_change:
+      - "Approach momentum rises without a matching jump in terminal rush."
+      - "The release looks less rescued and more carried."
+    coach_check: "On the next few balls, check whether the final strides arrive with intent before the arm speeds up."
+    simple_coach_check: "On the next few balls, check whether the last strides arrive with more intent before the arm speeds up."
+    reassess_after: "Review after the next 3 to 5 deliveries and again after the next session."
+    review_window_type: next_3_runs
+    works_best_when:
+      - "Weak approach build and high terminal thrust travel together."
+      - "The bowler looks calm enough to accept a rhythm cue."
+    contraindicated_when:
+      - "The capture does not show the full run-up clearly."
+      - "Approach build already looks strong and the main leak is at block."
+    followup_metric_targets:
+      - "approach_momentum_score up"
+      - "terminal_impulse_score down"
+      - "release_timing_stability up"
+    change_reaction:
+      near_term_positive:
+        - "The bowler can feel a calmer build without needing a full action rebuild."
+        - "Pace carry may look less rescued even within the next short set."
+      near_term_negative:
+        - "Rhythm can briefly feel unfamiliar if the bowler overthinks the last few strides."
+        - "Output may dip if the cue is misread as backing off intent."
+      medium_term_positive:
+        - "The chain has a better chance to transfer momentum earlier instead of rescuing it late."
+        - "Release timing usually becomes easier to repeat across a spell."
+      medium_term_negative:
+        - "If the bowler adds build without cleaner organization, a new transfer leak can appear."
+      long_term_positive:
+        - "Earlier build reduces how much the trunk and arm have to rescue speed."
+      long_term_negative:
+        - "If forced too aggressively, the bowler can drift into a rushed run-up pattern."
+      selection_window_safety: "Usually safe as a first in-season cue because it can stay small and rhythm-based."
+      match_pressure_risk: low
+      adoption_rationale: "This is easier to adopt when the bowler can feel rhythm changes quickly without fearing a full rebuild."
+
+  organize_the_gather_line:
+    id: organize_the_gather_line
+    title: "Organize the gather line"
+    simple_title: "Arrive in a cleaner line"
+    goal: "Arrive at back-foot and landing phases in a cleaner line so momentum can be transferred instead of cleaned up late."
+    simple_goal: "Help the body arrive to landing in a straighter, calmer line."
+    primary_cue: "Keep the pelvis and chest arriving on the same line into the crease before trying to add more effort."
+    simple_primary_cue: "Let the hips and chest arrive on the same line into landing before adding more effort."
+    why_this_first: "A cleaner gather often removes multiple downstream compensations at once."
+    simple_why_this_first: "A cleaner entry can remove more than one leak at once."
+    avoid_for_now:
+      - "Do not overload the bowler with separate hips, shoulders, and feet cues on the same ball."
+      - "Do not chase arm-speed fixes before the gather line is calmer."
+    expected_change:
+      - "Landing looks less rushed."
+      - "Transfer into the front foot looks more organized."
+    coach_check: "Watch whether the body arrives to landing in a calmer line over the next few balls."
+    simple_coach_check: "Watch whether the body arrives to landing in a calmer line."
+    reassess_after: "Review over the next 3 deliveries, then again after 1 to 2 sessions."
+    review_window_type: next_3_runs
+    works_best_when:
+      - "Unstable gather is visible before the main landing leak."
+      - "The bowler is drifting sideways into the crease."
+    contraindicated_when:
+      - "Back-foot and landing views are too weak to judge line."
+      - "The main issue is isolated post-release dissipation without a gather problem."
+    followup_metric_targets:
+      - "gather_line_stability up"
+      - "pelvis_trunk_alignment up"
+      - "transfer_efficiency_score up"
+    change_reaction:
+      near_term_positive:
+        - "The bowler can often feel a cleaner line into the crease without changing the whole action."
+        - "Landing may look calmer within the next few balls."
+      near_term_negative:
+        - "Too many line cues at once can make the run-in feel mechanical."
+        - "Short-term rhythm may flatten if the bowler starts steering the body instead of moving freely."
+      medium_term_positive:
+        - "A calmer gather can remove multiple downstream compensations at once."
+        - "Transfer into front-foot contact usually becomes more organized."
+      medium_term_negative:
+        - "If the coach overloads hips, shoulders, and feet together, adoption usually collapses."
+      long_term_positive:
+        - "Cleaner gather organization makes later block and release coaching safer."
+      long_term_negative:
+        - "If the root cause is actually later in the chain, over-coaching the gather can waste time."
+      selection_window_safety: "Safe when kept to one line or organization cue, but risky if turned into a full technical checklist."
+      match_pressure_risk: medium
+      adoption_rationale: "This works best when the bowler only has to own one arrival-line idea instead of several body-part instructions."
+
+  stack_over_landing_leg:
+    id: stack_over_landing_leg
+    title: "Stack over the landing leg sooner"
+    simple_title: "Get over the front leg sooner"
+    goal: "Let the chest and pelvis arrive more stacked over the landing base before release."
+    simple_goal: "Let the chest and hips get over the front leg sooner before release."
+    primary_cue: "Feel the chest arrive over the front leg sooner instead of letting it keep travelling past the landing base."
+    simple_primary_cue: "Feel the chest get over the front leg sooner instead of drifting past it."
+    why_this_first: "This is a smaller and safer first cue than telling the bowler to brace harder."
+    simple_why_this_first: "This is a smaller, safer first change than telling the bowler to brace harder."
+    avoid_for_now:
+      - "Do not cue brace harder before the body is stacked."
+      - "Do not ask for a longer stride while the landing base is already soft."
+    expected_change:
+      - "Trunk drift after front-foot contact reduces."
+      - "The front leg looks more supportive without forcing stiffness."
+    coach_check: "Check whether the chest stops travelling so far past landing on the next few deliveries."
+    simple_coach_check: "Check whether the chest stops moving so far past landing."
+    reassess_after: "Review on the next 3 balls and again after 1 session."
+    review_window_type: next_3_runs
+    works_best_when:
+      - "Front-leg softening and late trunk drift are travelling together."
+      - "Landing confidence is strong enough to trust a transfer story."
+    contraindicated_when:
+      - "Front-foot contact is poorly detected or visually unclear."
+      - "The bowler is already stacked well and the main issue is approach build."
+    followup_metric_targets:
+      - "trunk_drift_after_ffc down"
+      - "front_leg_support_score up"
+      - "transfer_efficiency_score up"
+    change_reaction:
+      near_term_positive:
+        - "This can improve transfer quickly without asking for a dramatic action change."
+        - "The bowler may feel more stable over the landing leg within a few balls."
+      near_term_negative:
+        - "If the cue is overdone, the bowler can feel stuck or overly upright into release."
+        - "A small short-term drop in natural rhythm is possible while the new stack is being felt."
+      medium_term_positive:
+        - "Cleaner stacking usually reduces trunk carry and supports a calmer release window."
+        - "Front-leg support can improve without forcing a harder brace."
+      medium_term_negative:
+        - "If coached as stiffness instead of stacking, the bowler may start bracing too early."
+      long_term_positive:
+        - "Better stacking protects the landing leg and trunk from repeated soft-block leakage."
+      long_term_negative:
+        - "If the underlying cause is actually gather build, stacking alone may create a superficial fix."
+      selection_window_safety: "One of the safer in-season cues because it is usually smaller than changing stride length or bracing harder."
+      match_pressure_risk: low
+      adoption_rationale: "The bowler usually adopts this more easily because it feels like refining balance, not rebuilding pace generation."
+
+  brace_without_reaching:
+    id: brace_without_reaching
+    title: "Brace without reaching"
+    simple_title: "Hold the front leg without reaching"
+    goal: "Create a firmer transfer point without forcing an overstride or a stiff, reaching landing."
+    simple_goal: "Create a firmer landing without reaching too far out in front."
+    primary_cue: "Let the front leg support the action under the body instead of reaching too far out for the block."
+    simple_primary_cue: "Let the front leg support the action under the body instead of reaching out for the block."
+    why_this_first: "It targets the transfer point while protecting against the common mistake of overreaching for stiffness."
+    simple_why_this_first: "It improves landing support without pushing the bowler into overstriding."
+    avoid_for_now:
+      - "Do not ask the bowler to lock the knee."
+      - "Do not pair this with a bigger stride cue on the same session."
+    expected_change:
+      - "The landing leg supports more cleanly."
+      - "The action carries through without the chest spilling so far forward."
+    coach_check: "Check whether landing support improves without the stride suddenly getting longer."
+    simple_coach_check: "Check whether the front leg supports better without the stride suddenly getting longer."
+    reassess_after: "Review within the same session and again after the next spell."
+    review_window_type: next_session
+    works_best_when:
+      - "Soft-block carry is the main story."
+      - "The bowler can feel the landing base but is not overstriding."
+    contraindicated_when:
+      - "A gather-line problem is still dominating the landing picture."
+      - "The clip suggests the bowler is already reaching for the block."
+    followup_metric_targets:
+      - "front_leg_support_score up"
+      - "trunk_drift_after_ffc down"
+      - "dissipation_burden_score down"
+    change_reaction:
+      near_term_positive:
+        - "Landing support can look cleaner without demanding a full action overhaul."
+        - "The bowler may feel a firmer transfer point fairly quickly."
+      near_term_negative:
+        - "If misunderstood, the cue can turn into locking the knee or reaching further."
+        - "Near-term rhythm can suffer if the bowler starts searching for a hard block."
+      medium_term_positive:
+        - "A cleaner brace-under-the-body pattern often reduces trunk spill and harsh finish load."
+      medium_term_negative:
+        - "If the gather is still poor, the bowler can simply move the same leak into a stiffer landing."
+      long_term_positive:
+        - "A better-supported block can lower repeated front-leg and trunk burden."
+      long_term_negative:
+        - "Over-bracing can create a new load problem if it becomes a forced locking pattern."
+      selection_window_safety: "Moderately safe when the cue is framed as support under the body, not as a harder block."
+      match_pressure_risk: medium
+      adoption_rationale: "Adoption stays better when the bowler feels support rather than force, because force-based brace cues often trigger resistance."
+
+  sync_trunk_and_arm_delivery:
+    id: sync_trunk_and_arm_delivery
+    title: "Sync trunk and arm delivery"
+    simple_title: "Let body and arm arrive together"
+    goal: "Reduce the feeling that the arm has to chase the release window on its own."
+    simple_goal: "Stop the arm from having to rush the release on its own."
+    primary_cue: "Let the trunk set the release earlier so the arm can arrive on time instead of rescuing the ball."
+    simple_primary_cue: "Let the body set release a little earlier so the arm can arrive on time."
+    why_this_first: "It treats the sequencing problem directly without turning the fix into an arm-only instruction."
+    simple_why_this_first: "It fixes timing without turning it into an arm-only change."
+    avoid_for_now:
+      - "Do not cue the arm to whip faster by itself."
+      - "Do not layer this on top of a brand-new run-up cue in the same first rep."
+    expected_change:
+      - "Release timing looks calmer."
+      - "The arm no longer needs such a visible late rescue."
+    coach_check: "Watch whether the arm looks less rushed relative to trunk rotation over the next few balls."
+    simple_coach_check: "Watch whether the arm looks less rushed next to the body."
+    reassess_after: "Review after the next 3 deliveries and again after 1 session."
+    review_window_type: next_3_runs
+    works_best_when:
+      - "Arm chase is persistent and the gather is at least readable."
+      - "The bowler can repeat the same intent level across a short set."
+    contraindicated_when:
+      - "The main issue is unclear event timing from a weak capture."
+      - "Approach build is so low that trunk-arm sync cannot be judged fairly yet."
+    followup_metric_targets:
+      - "release_timing_stability up"
+      - "shoulder_rotation_timing calmer"
+      - "distal_velocity_rescue down"
+    change_reaction:
+      near_term_positive:
+        - "The release can look calmer quickly when the trunk helps set the window earlier."
+        - "The bowler may feel less rushed through the arm on the next few balls."
+      near_term_negative:
+        - "If over-coached, the bowler may become too conscious of upper-body timing and lose flow."
+        - "Near-term pace can dip if the cue turns into holding back the arm."
+      medium_term_positive:
+        - "Cleaner trunk-arm sequencing usually makes the release easier to repeat."
+      medium_term_negative:
+        - "If build and gather are still poor, this can become an upper-body patch over a deeper chain issue."
+      long_term_positive:
+        - "Reducing arm rescue lowers the chance of repeating a rushed upper-chain pattern."
+      long_term_negative:
+        - "If the cue is misunderstood as an arm fix, the bowler can develop a new sequencing compensation."
+      selection_window_safety: "Safer in short sets than in high-pressure matches, because timing cues can feel different before they feel better."
+      match_pressure_risk: medium
+      adoption_rationale: "This is adoptable when the bowler trusts the cue as a connection change, not as an arm-speed sacrifice."
+
+  quiet_the_end_rush:
+    id: quiet_the_end_rush
+    title: "Quiet the end rush"
+    simple_title: "Calm the late rush"
+    goal: "Reduce how much the action relies on a violent final push into release."
+    simple_goal: "Stop the action from depending on a big late push at the end."
+    primary_cue: "Keep the body carrying pace through the chain so the finish does not have to do all the work."
+    simple_primary_cue: "Keep speed moving through the action so the finish does not have to do all the work."
+    why_this_first: "It is the smallest useful intervention when pace is being produced late but expensively."
+    simple_why_this_first: "It is the smallest useful change when too much speed is being made late."
+    avoid_for_now:
+      - "Do not ask the bowler to slow down artificially."
+      - "Do not remove intent; redistribute it earlier."
+    expected_change:
+      - "Terminal impulse softens slightly while pace carry stays connected."
+      - "Follow-through looks less abrupt and more balanced."
+    coach_check: "Check whether the finish looks less violent without losing overall carry into the ball."
+    simple_coach_check: "Check whether the finish looks less violent without losing carry."
+    reassess_after: "Review after one short set and again after the next session."
+    review_window_type: next_session
+    works_best_when:
+      - "Terminal thrust and dissipation burden are both elevated."
+      - "The bowler already shows enough intent and does not need more aggression."
+    contraindicated_when:
+      - "The clip quality is too weak to trust the dissipation story."
+      - "The main issue is only low build with no visible end-rush burden."
+    followup_metric_targets:
+      - "terminal_impulse_score down"
+      - "dissipation_burden_score down"
+      - "followthrough_asymmetry down"
+    change_reaction:
+      near_term_positive:
+        - "The finish can look less violent quickly without asking the bowler to lose intent."
+        - "The bowler may feel less like everything happens in the last instant."
+      near_term_negative:
+        - "If framed badly, the bowler may think you are asking for less aggression and back off too much."
+        - "Near-term output can dip if the cue is interpreted as slowing down the action."
+      medium_term_positive:
+        - "Redistributing pace creation earlier usually improves both efficiency and repeatability."
+      medium_term_negative:
+        - "If earlier chain segments are not improved too, the bowler may lose the one late rescue pattern that was producing pace."
+      long_term_positive:
+        - "Lower late-thrust dependence should reduce concentrated finish burden."
+      long_term_negative:
+        - "If the bowler loses belief in the cue, they may revert to an even harsher late push under pressure."
+      selection_window_safety: "Best introduced outside the highest-pressure moments unless the bowler is very coachable and trusts the intent message."
+      match_pressure_risk: medium
+      adoption_rationale: "Bowlers adopt this more easily when they hear 'redistribute effort' rather than 'slow down' or 'take pace off.'"
+
+  stabilize_release_window_under_load:
+    id: stabilize_release_window_under_load
+    title: "Stabilize the release window under load"
+    simple_title: "Keep release calmer under effort"
+    goal: "Keep the release window calmer when pace intent rises so the arm does not have to chase late."
+    simple_goal: "Keep release calmer when effort goes up so the arm does not have to rush late."
+    primary_cue: "Let the trunk arrive a fraction earlier into the release window so the arm can stay connected instead of rescuing the finish."
+    simple_primary_cue: "Let the body arrive a little earlier into release so the arm stays connected."
+    why_this_first: "It targets timing drift under effort without turning the fix into an arm-only instruction."
+    simple_why_this_first: "It targets timing drift under effort without turning it into an arm-only fix."
+    avoid_for_now:
+      - "Do not ask for more arm speed on top of a rushed release window."
+      - "Do not stack this on the same first rep as a new run-up cue."
+    expected_change:
+      - "Release timing stays calmer when the bowler keeps intent high."
+      - "The finish looks less like a last-second rescue."
+    coach_check: "Check whether higher-intent balls still show the same calm release window over the next short set."
+    simple_coach_check: "Check whether higher-effort balls still look calm at release."
+    reassess_after: "Review after the next 3 to 5 deliveries and again in the next session."
+    review_window_type: next_3_runs
+    works_best_when:
+      - "Release timing looks readable on easy balls but unstable when effort rises."
+      - "Late arm rescue and load dump are travelling together."
+    contraindicated_when:
+      - "The clip quality is too weak to trust the release-window timing story."
+      - "The main issue is clearly at build or landing rather than at release."
+    followup_metric_targets:
+      - "release_timing_stability up"
+      - "distal_velocity_rescue down"
+      - "dissipation_burden_score down"
+    change_reaction:
+      near_term_positive:
+        - "Higher-intent balls can become calmer without a full action rebuild."
+        - "The bowler may feel the release window arriving earlier instead of being chased."
+      near_term_negative:
+        - "This can feel intrusive before matches if the bowler is very attached to their current release feel."
+        - "Short-term confidence may wobble if the cue is tested only under maximum effort."
+      medium_term_positive:
+        - "A calmer release window under load usually protects both repeatability and finish quality."
+      medium_term_negative:
+        - "If the real leak is earlier, this can temporarily mask rather than solve the chain issue."
+      long_term_positive:
+        - "Reducing under-load fragility should make the action more trustworthy across spells and matches."
+      long_term_negative:
+        - "If the bowler only uses the cue under pressure, the change may never stabilize properly."
+      selection_window_safety: "Better introduced in controlled sets before selection or match pressure, then carried forward once the bowler trusts it."
+      match_pressure_risk: high
+      adoption_rationale: "The cue is valuable, but adoption depends heavily on trust because bowlers protect their release feel most when pressure is high."
+
+  absorb_through_balanced_finish:
+    id: absorb_through_balanced_finish
+    title: "Absorb through a balanced finish"
+    simple_title: "Finish in better balance"
+    goal: "Spread the finish more evenly through the body instead of dumping load abruptly after a late push."
+    simple_goal: "Spread the finish more evenly through the body instead of dumping it hard at the end."
+    primary_cue: "Let the finish keep moving through the ball instead of collapsing sharply into the trunk and side body."
+    simple_primary_cue: "Let the finish keep moving through the ball instead of collapsing into the body."
+    why_this_first: "It protects the finish pattern without asking for a larger technical rebuild before the bowler can feel the end shape."
+    simple_why_this_first: "It protects the finish shape without asking for a bigger rebuild first."
+    avoid_for_now:
+      - "Do not cue a dramatic slow-down through release."
+      - "Do not pair this with a harder bracing cue until the finish is more balanced."
+    expected_change:
+      - "Follow-through looks less abrupt and more shared through the chain."
+      - "Trunk fold and one-sided finish cues soften."
+    coach_check: "Check whether the finish looks more balanced and less dumped over the next session."
+    simple_coach_check: "Check whether the finish looks more balanced and less dumped."
+    reassess_after: "Review at the next session and again over the next 2 weeks."
+    review_window_type: next_2_weeks
+    works_best_when:
+      - "Late push and harsh finish absorption are travelling together."
+      - "The bowler already creates enough intent and needs a calmer finish more than more effort."
+    contraindicated_when:
+      - "The main issue is still a clearly disorganized gather or landing entry."
+      - "The finish story is only weakly supported because capture quality is poor."
+    followup_metric_targets:
+      - "dissipation_burden_score down"
+      - "followthrough_asymmetry down"
+      - "trunk_fold_severity down"
+    change_reaction:
+      near_term_positive:
+        - "The bowler can often feel a calmer, less dumped finish without changing the whole action."
+        - "The finish may look less abrupt within the next session."
+      near_term_negative:
+        - "If the bowler thinks this means decelerating the ball, they may protect the finish too early."
+        - "Near-term pace feel can dip if the cue becomes passive instead of balanced."
+      medium_term_positive:
+        - "A more balanced finish usually spreads load more evenly and supports better repeatability."
+      medium_term_negative:
+        - "If used before the real transfer leak is addressed, the finish can improve cosmetically while the core issue remains."
+      long_term_positive:
+        - "A less dumped finish should reduce repeated trunk, side-body, and front-leg burden."
+      long_term_negative:
+        - "If the bowler overprotects the finish, they may lose natural carry through the ball."
+      selection_window_safety: "Usually safe as a protective cue, but it should not be mistaken for asking the bowler to back off."
+      match_pressure_risk: medium
+      adoption_rationale: "Adoption improves when the bowler experiences it as a more balanced finish rather than a weaker finish."

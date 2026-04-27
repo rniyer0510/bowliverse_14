@@ -5,11 +5,19 @@ import shutil
 import subprocess
 import tempfile
 import uuid
+from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 import cv2
 import numpy as np
 from scipy.ndimage import gaussian_filter1d
+
+try:
+    from PIL import Image, ImageDraw, ImageFont
+except Exception:  # pragma: no cover - renderer falls back to OpenCV text when Pillow is unavailable
+    Image = None
+    ImageDraw = None
+    ImageFont = None
 
 from app.common.logger import get_logger
 from .render_storage import get_render_dir
@@ -18,22 +26,31 @@ from .render_load_watch import (
     _load_watch_label,
     _preferred_ffc_cue_risk_id,
     _release_hotspot_risk_id,
+    _summary_load_watch_title,
     _summary_load_watch_text,
+    _summary_symptom_title,
     _summary_symptom_text,
 )
 
 logger = get_logger(__name__)
 
 RENDER_DIR = get_render_dir()
+DESIGN_BASE_WIDTH = 1080  # Documentation anchor for our portrait walkthrough sizing assumptions.
 
 MIN_VISIBILITY = 0.35
 SKELETON_COLOR = (255, 240, 88)
 SKELETON_SHADOW = (10, 10, 10)
 JOINT_OUTER = (255, 255, 255)
-TEXT_COLOR = (246, 248, 252)
-MUTED_TEXT = (214, 220, 228)
-PANEL_BG = (14, 17, 22)
+TEXT_COLOR = (255, 255, 255)
+MUTED_TEXT = (236, 240, 246)
+PANEL_BG = (10, 12, 16)
 PANEL_EDGE = (96, 112, 132)
+THEME_PRIMARY = (26, 86, 232)
+THEME_SURFACE = (27, 23, 23)
+THEME_SURFACE_RAISED = (30, 28, 30)
+THEME_STROKE = (49, 42, 42)
+THEME_TEXT_PRIMARY = (255, 255, 255)
+THEME_TEXT_SECONDARY = (236, 240, 246)
 ACTIVE_FILL = (74, 194, 242)
 ACTIVE_EDGE = (105, 222, 255)
 INACTIVE_FILL = (44, 52, 62)
@@ -137,6 +154,169 @@ POST_RELEASE_SKELETON_TAIL_SECONDS = 0.16
 MIN_TRACK_QUALITY = 0.42
 MIN_POST_RELEASE_TRACK_QUALITY = 0.58
 TEXT_FONT = cv2.FONT_HERSHEY_SIMPLEX
+THEME_FONT_DIR_ENV = "ACTIONLAB_THEME_FONT_DIR"
+THEME_FRONTEND_REPO_ENV = "ACTIONLAB_FRONTEND_REPO"
+DISPLAY_FONT_FILE = "Inter-Bold.ttf"
+BODY_FONT_FILE = "Inter-SemiBold.ttf"
+BODY_FONT_MEDIUM_FILE = "Inter-Medium.ttf"
+_THEME_FONT_CACHE: Dict[Tuple[str, int], Any] = {}
+
+
+def _theme_font_dirs() -> List[Path]:
+    candidates: List[Path] = []
+    explicit_font_dir = str(os.getenv(THEME_FONT_DIR_ENV) or "").strip()
+    if explicit_font_dir:
+        candidates.append(Path(explicit_font_dir))
+    frontend_repo = str(os.getenv(THEME_FRONTEND_REPO_ENV) or "").strip()
+    if frontend_repo:
+        candidates.append(Path(frontend_repo) / "assets" / "fonts")
+    home = Path.home()
+    candidates.extend(
+        [
+            home / "dev" / "bowliverse_android_smoke" / "assets" / "fonts",
+            home / "Documents" / "bowliverse_android_smoke" / "assets" / "fonts",
+            home / "Documents" / "New project" / "assets" / "fonts",
+        ]
+    )
+    deduped: List[Path] = []
+    seen: set[str] = set()
+    for path in candidates:
+        key = str(path)
+        if key in seen:
+            continue
+        seen.add(key)
+        if path.exists():
+            deduped.append(path)
+    return deduped
+
+
+def _load_theme_font(font_file: str, size: int) -> Any:
+    if ImageFont is None:
+        return None
+    safe_size = max(10, int(size))
+    cache_key = (font_file, safe_size)
+    cached = _THEME_FONT_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
+    for font_dir in _theme_font_dirs():
+        font_path = font_dir / font_file
+        if not font_path.exists():
+            continue
+        try:
+            font = ImageFont.truetype(str(font_path), safe_size)
+            _THEME_FONT_CACHE[cache_key] = font
+            return font
+        except Exception:
+            continue
+    try:
+        fallback = ImageFont.load_default()
+    except Exception:
+        fallback = None
+    _THEME_FONT_CACHE[cache_key] = fallback
+    return fallback
+
+
+def _pil_text_size(draw: Any, text: str, font: Any) -> Tuple[int, int]:
+    bbox = draw.textbbox((0, 0), str(text or ""), font=font)
+    return max(0, int(bbox[2] - bbox[0])), max(0, int(bbox[3] - bbox[1]))
+
+
+def _wrap_pil_text(
+    draw: Any,
+    text: str,
+    *,
+    font: Any,
+    max_width: int,
+    max_lines: int,
+) -> List[str]:
+    source = " ".join(str(text or "").split())
+    if not source:
+        return []
+    words = source.split(" ")
+    lines: List[str] = []
+    current = ""
+    overflow = False
+    for word in words:
+        candidate = word if not current else f"{current} {word}"
+        width_px, _ = _pil_text_size(draw, candidate, font)
+        if width_px <= max_width or not current:
+            current = candidate
+            continue
+        lines.append(current)
+        current = word
+        if len(lines) >= max_lines:
+            overflow = True
+            break
+    if current and not overflow:
+        lines.append(current)
+    if overflow:
+        if current and len(lines) < max_lines:
+            lines.append(current)
+        lines = lines[:max_lines]
+        tail = lines[-1]
+        while tail:
+            candidate = f"{tail}..."
+            width_px, _ = _pil_text_size(draw, candidate, font)
+            if width_px <= max_width:
+                lines[-1] = candidate
+                break
+            tail = tail.rsplit(" ", 1)[0].strip()
+        if not tail:
+            lines[-1] = "..."
+    return lines
+
+
+def _fit_pil_wrapped_text(
+    draw: Any,
+    text: str,
+    *,
+    font_file: str,
+    base_size: int,
+    min_size: int,
+    max_width: int,
+    max_lines: int,
+) -> Tuple[Any, List[str]]:
+    for font_size in range(max(base_size, min_size), min_size - 1, -1):
+        font = _load_theme_font(font_file, font_size)
+        if font is None:
+            break
+        lines = _wrap_pil_text(
+            draw,
+            text,
+            font=font,
+            max_width=max_width,
+            max_lines=max_lines,
+        )
+        if not lines:
+            return font, []
+        if len(lines) <= max_lines:
+            return font, lines
+    fallback_font = _load_theme_font(font_file, min_size)
+    return fallback_font, _wrap_pil_text(
+        draw,
+        text,
+        font=fallback_font,
+        max_width=max_width,
+        max_lines=max_lines,
+    ) if fallback_font is not None else []
+
+
+def _pil_text_block_height(
+    draw: Any,
+    lines: List[str],
+    font: Any,
+    *,
+    line_gap: int,
+) -> int:
+    if font is None or not lines:
+        return 0
+    total = 0
+    for idx, line in enumerate(lines):
+        _, line_h = _pil_text_size(draw, line, font)
+        total += line_h
+        if idx < len(lines) - 1:
+            total += line_gap
+    return total
 
 
 def _safe_float(value: Any) -> Optional[float]:
@@ -294,7 +474,23 @@ def _story_risk_for_phase(
     *,
     phase_key: str,
     events: Optional[Dict[str, Any]],
+    root_cause: Optional[Dict[str, Any]] = None,
 ) -> Optional[str]:
+    root_cause_guidance = ((root_cause or {}).get("renderer_guidance") or {})
+    phase_targets = root_cause_guidance.get("phase_targets") or {}
+    if isinstance(phase_targets, dict):
+        phase_target = phase_targets.get(phase_key) or {}
+        phase_target_risk_id = str((phase_target or {}).get("risk_id") or "").strip()
+        if _risk_supported_for_phase(phase_target_risk_id, phase_key=phase_key, events=events):
+            return phase_target_risk_id
+    anchor_risk_ids = root_cause_guidance.get("anchor_risk_ids") or {}
+    if isinstance(anchor_risk_ids, dict):
+        root_cause_risk_id = str(anchor_risk_ids.get(phase_key) or "").strip()
+        if _risk_supported_for_phase(root_cause_risk_id, phase_key=phase_key, events=events):
+            return root_cause_risk_id
+    root_cause_status = str((root_cause or {}).get("status") or "").strip().lower()
+    if root_cause_status in {"clear", "holdback", "no_clear_problem", "not_interpretable"}:
+        return None
     if not isinstance(report_story, dict):
         return None
     hero_risk_id = str(report_story.get("hero_risk_id") or "").strip()
@@ -630,6 +826,31 @@ def _overlay_panel(
     cv2.rectangle(frame, (x0, y0), (x1, y1), edge_color, edge_thickness, cv2.LINE_AA)
 
 
+def _apply_bottom_scrim(
+    frame: np.ndarray,
+    *,
+    start_y: int,
+    end_y: Optional[int] = None,
+    max_alpha: float = 0.48,
+) -> None:
+    height, width = frame.shape[:2]
+    y0 = max(0, min(height - 1, int(start_y)))
+    y1 = height if end_y is None else max(y0 + 1, min(height, int(end_y)))
+    if y1 <= y0:
+        return
+    span = max(1, y1 - y0)
+    overlay = frame.copy()
+    cv2.rectangle(overlay, (0, y0), (width, y1), (0, 0, 0), -1)
+    alpha_mask = np.zeros((height, width), dtype=np.float32)
+    gradient = np.linspace(0.0, float(max_alpha), span, dtype=np.float32)
+    alpha_mask[y0:y1, :] = gradient[:, None]
+    blended = (
+        frame.astype(np.float32) * (1.0 - alpha_mask[..., None])
+        + overlay.astype(np.float32) * alpha_mask[..., None]
+    )
+    frame[:, :] = np.clip(blended, 0, 255).astype(np.uint8)
+
+
 def _phase_cut_points(
     *,
     start: int,
@@ -653,15 +874,6 @@ def _phase_cut_points(
     cp2 = max(cp1 + 1, min(last - 1, cp2))
     cp3 = max(cp2 + 1, min(last, cp3))
     return cp1, cp2, cp3
-
-
-def _event_confidence(events: Optional[Dict[str, Any]], key: str) -> float:
-    event = (events or {}).get(key) or {}
-    value = event.get("confidence")
-    if isinstance(value, (int, float)):
-        return float(value)
-    return 1.0 if _safe_int(event.get("frame")) is not None else 0.0
-
 
 def _event_method(events: Optional[Dict[str, Any]], key: str) -> str:
     event = (events or {}).get(key) or {}
@@ -823,6 +1035,7 @@ def _draw_phase_rail(
     rail_h = int(round(height * 0.05))
     gap = int(round(width * 0.012))
     segment_w = max(30, int((rail_x1 - rail_x0 - gap * (len(PHASES) - 1)) / len(PHASES)))
+    pil_context = _frame_draw_context(frame) if Image is not None and ImageDraw is not None else None
 
     for idx, phase in enumerate(PHASES):
         seg_x0 = rail_x0 + idx * (segment_w + gap)
@@ -841,20 +1054,40 @@ def _draw_phase_rail(
             alpha=0.88 if active else 0.72,
         )
         label = phase["title"].replace(" Contact", "")
-        text_scale = max(0.38, min(width, height) / 1800.0)
-        text_size, _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, text_scale, 1)
-        text_x = seg_x0 + max(10, (segment_w - text_size[0]) // 2)
-        text_y = rail_y0 + int(rail_h * 0.63)
-        cv2.putText(
-            frame,
-            label,
-            (text_x, text_y),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            text_scale,
-            TEXT_COLOR if active else MUTED_TEXT,
-            1,
-            cv2.LINE_AA,
-        )
+        if pil_context is not None:
+            image, overlay, draw = pil_context
+            label_font = _load_theme_font(
+                DISPLAY_FONT_FILE,
+                max(12, int(round(min(width, height) * 0.023))),
+            )
+            if label_font is not None:
+                text_w, text_h = _pil_text_size(draw, label, label_font)
+                text_x = seg_x0 + max(8, (segment_w - text_w) // 2)
+                text_y = rail_y0 + max(4, (rail_h - text_h) // 2)
+                draw.text(
+                    (text_x, text_y),
+                    label,
+                    font=label_font,
+                    fill=_bgr_to_rgb(TEXT_COLOR if active else MUTED_TEXT),
+                )
+        else:
+            text_scale = max(0.42, min(width, height) / 1650.0)
+            text_size, _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, text_scale, 1)
+            text_x = seg_x0 + max(10, (segment_w - text_size[0]) // 2)
+            text_y = rail_y0 + int(rail_h * 0.63)
+            cv2.putText(
+                frame,
+                label,
+                (text_x, text_y),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                text_scale,
+                TEXT_COLOR if active else MUTED_TEXT,
+                1,
+                cv2.LINE_AA,
+            )
+
+    if pil_context is not None:
+        _commit_frame_draw_context(frame, pil_context[0], pil_context[1])
 
     tracker_x = rail_x0 + int(round((rail_x1 - rail_x0) * max(0.0, min(1.0, progress))))
     tracker_y0 = rail_y0 - int(round(height * 0.012))
@@ -901,7 +1134,7 @@ def _draw_top_risk_panel(
         y1=y1,
         fill_color=PANEL_BG,
         edge_color=accent,
-        alpha=0.84,
+        alpha=0.88,
     )
     cv2.putText(
         frame,
@@ -957,23 +1190,59 @@ def _draw_top_risk_panel(
         )
 
 
+def _draw_phase_anchor_panel(
+    frame: np.ndarray,
+    *,
+    phase_key: str,
+) -> None:
+    config = {
+        "bfc": {
+            "title": "Back Foot Contact",
+            "headline": "Back foot lands here.",
+            "body": "Pause here to see how the body is entering the crease.",
+            "accent": (92, 220, 255),
+        },
+        "ffc": {
+            "title": "Front Foot Contact",
+            "headline": "Front foot lands here.",
+            "body": "Pause here to see how the landing sets up the release.",
+            "accent": (90, 220, 255),
+        },
+        "release": {
+            "title": "Release",
+            "headline": "Ball comes out here.",
+            "body": "Pause here to see what the chain is doing at release.",
+            "accent": (0, 132, 255),
+        },
+    }.get(str(phase_key).strip().lower())
+    if not config:
+        return
+    _draw_top_risk_panel(
+        frame,
+        title=str(config["title"]),
+        headline=str(config["headline"]),
+        body=str(config["body"]),
+        accent=config["accent"],
+    )
+
+
 def _front_leg_support_caption(risk: Optional[Dict[str, Any]]) -> Optional[Dict[str, str]]:
     if not isinstance(risk, dict):
         return None
     signal = float(risk.get("signal_strength") or 0.0)
     if signal >= 0.65:
         return {
-            "title": "Front leg is softer here.",
-            "body": "The landing leg is not holding its shape as well as it should.",
+            "title": "Front leg doesn't hold strong here.",
+            "body": "The front leg is not giving a strong base at landing.",
         }
     if signal >= 0.35:
         return {
-            "title": "Front leg needs a bit more support here.",
-            "body": "The landing leg softens a little as the action comes through.",
+            "title": "Front leg needs a stronger base here.",
+            "body": "The front leg softens a bit at landing.",
         }
     return {
-        "title": "Front leg stays fairly firm here.",
-        "body": "The landing leg gives the action a steady base at contact.",
+        "title": "Front leg holds strong here.",
+        "body": "The front leg gives a steady base at landing.",
     }
 
 
@@ -984,9 +1253,10 @@ def _draw_front_leg_support_callout(
     frame_idx: int,
     hand: Optional[str],
     risk: Optional[Dict[str, Any]],
+    proof_step: Optional[Dict[str, Any]] = None,
 ) -> None:
     caption = _front_leg_support_caption(risk)
-    if not caption:
+    if not caption and not proof_step:
         return
 
     hip_idx, knee_idx, ankle_idx = _front_leg_joints(hand)
@@ -1024,9 +1294,9 @@ def _draw_front_leg_support_callout(
     )
     _draw_top_risk_panel(
         frame,
-        title=RISK_TITLE_BY_ID["knee_brace_failure"],
-        headline=caption["title"],
-        body=caption["body"],
+        title=str((proof_step or {}).get("title") or RISK_TITLE_BY_ID["knee_brace_failure"]),
+        headline=str((proof_step or {}).get("headline") or (caption or {}).get("title") or ""),
+        body=str((proof_step or {}).get("body") or (caption or {}).get("body") or ""),
         accent=accent,
     )
 
@@ -1038,16 +1308,16 @@ def _trunk_lean_caption(risk: Optional[Dict[str, Any]]) -> Optional[Dict[str, st
     if signal >= 0.65:
         return {
             "title": "Body is falling away here.",
-            "body": "The upper body is moving too far off line near release.",
+            "body": "The body moves too far away as the ball comes out.",
         }
     if signal >= 0.35:
         return {
-            "title": "Body is leaning a bit here.",
-            "body": "The action is starting to move off line near release.",
+            "title": "Body leans away here.",
+            "body": "The body starts to drift away as the ball comes out.",
         }
     return {
-        "title": "Body stays fairly tall here.",
-        "body": "The action is staying more upright through release.",
+        "title": "Body stays tall here.",
+        "body": "The body stays more over the front leg as the ball comes out.",
     }
 
 
@@ -1057,9 +1327,10 @@ def _draw_trunk_lean_callout(
     tracks: Dict[int, Dict[str, Any]],
     frame_idx: int,
     risk: Optional[Dict[str, Any]],
+    proof_step: Optional[Dict[str, Any]] = None,
 ) -> None:
     caption = _trunk_lean_caption(risk)
-    if not caption:
+    if not caption and not proof_step:
         return
     left_shoulder = _track_point(tracks, LEFT_SHOULDER, frame_idx)
     right_shoulder = _track_point(tracks, RIGHT_SHOULDER, frame_idx)
@@ -1086,9 +1357,9 @@ def _draw_trunk_lean_callout(
 
     _draw_top_risk_panel(
         frame,
-        title=RISK_TITLE_BY_ID["lateral_trunk_lean"],
-        headline=caption["title"],
-        body=caption["body"],
+        title=str((proof_step or {}).get("title") or RISK_TITLE_BY_ID["lateral_trunk_lean"]),
+        headline=str((proof_step or {}).get("headline") or (caption or {}).get("title") or ""),
+        body=str((proof_step or {}).get("body") or (caption or {}).get("body") or ""),
         accent=accent,
     )
 
@@ -1102,27 +1373,27 @@ def _hip_shoulder_caption(risk: Optional[Dict[str, Any]]) -> Optional[Dict[str, 
     if sequence_pattern == "shoulders_lead":
         if signal >= 0.45:
             return {
-                "title": "Shoulders are starting too soon.",
-                "body": "The shoulders are getting ahead of the hips near release.",
+                "title": "Shoulders turn too early.",
+                "body": "The shoulders get ahead of the hips too soon.",
             }
         return {
-            "title": "Shoulders are starting a bit early.",
-            "body": "The top half is getting ahead slightly near release.",
+            "title": "Shoulders start a bit early.",
+            "body": "The top half gets ahead a little too soon.",
         }
     if sequence_pattern == "hips_lead":
         if signal >= 0.45:
             return {
-                "title": "Hips are getting ahead here.",
-                "body": "The hips are separating from the shoulders near release.",
+                "title": "Hips turn too early.",
+                "body": "The hips get ahead of the shoulders too soon.",
             }
         return {
-            "title": "Hips are leading a little here.",
-            "body": "The hips and shoulders are starting to split near release.",
+            "title": "Hips lead a bit early.",
+            "body": "The hips start getting ahead of the shoulders.",
         }
     if signal >= 0.45:
         return {
-            "title": "Hips and shoulders are out of sync here.",
-            "body": "The middle of the action is not staying together near release.",
+            "title": "Hips and shoulders are not together here.",
+            "body": "The middle of the body is not moving together.",
         }
     return None
 
@@ -1133,9 +1404,10 @@ def _draw_hip_shoulder_callout(
     tracks: Dict[int, Dict[str, Any]],
     frame_idx: int,
     risk: Optional[Dict[str, Any]],
+    proof_step: Optional[Dict[str, Any]] = None,
 ) -> None:
     caption = _hip_shoulder_caption(risk)
-    if not caption:
+    if not caption and not proof_step:
         return
     left_shoulder = _track_point(tracks, LEFT_SHOULDER, frame_idx)
     right_shoulder = _track_point(tracks, RIGHT_SHOULDER, frame_idx)
@@ -1181,9 +1453,9 @@ def _draw_hip_shoulder_callout(
 
     _draw_top_risk_panel(
         frame,
-        title=RISK_TITLE_BY_ID["hip_shoulder_mismatch"],
-        headline=caption["title"],
-        body=caption["body"],
+        title=str((proof_step or {}).get("title") or RISK_TITLE_BY_ID["hip_shoulder_mismatch"]),
+        headline=str((proof_step or {}).get("headline") or (caption or {}).get("title") or ""),
+        body=str((proof_step or {}).get("body") or (caption or {}).get("body") or ""),
         accent=accent,
     )
 
@@ -1196,11 +1468,14 @@ def _draw_release_callout(
     risk_by_id: Dict[str, Dict[str, Any]],
     report_story: Optional[Dict[str, Any]] = None,
     events: Optional[Dict[str, Any]] = None,
+    root_cause: Optional[Dict[str, Any]] = None,
+    proof_step: Optional[Dict[str, Any]] = None,
 ) -> None:
     preferred_risk_id = _story_risk_for_phase(
         report_story,
         phase_key="release",
         events=events,
+        root_cause=root_cause,
     )
     if preferred_risk_id == "hip_shoulder_mismatch":
         _draw_hip_shoulder_callout(
@@ -1208,6 +1483,7 @@ def _draw_release_callout(
             tracks=tracks,
             frame_idx=frame_idx,
             risk=risk_by_id.get("hip_shoulder_mismatch"),
+            proof_step=proof_step,
         )
         return
     if preferred_risk_id == "lateral_trunk_lean":
@@ -1216,6 +1492,7 @@ def _draw_release_callout(
             tracks=tracks,
             frame_idx=frame_idx,
             risk=risk_by_id.get("lateral_trunk_lean"),
+            proof_step=proof_step,
         )
         return
     if isinstance(report_story, dict) and str(report_story.get("theme") or "") in {
@@ -1232,6 +1509,7 @@ def _draw_release_callout(
             tracks=tracks,
             frame_idx=frame_idx,
             risk=hip_shoulder,
+            proof_step=proof_step,
         )
         return
     _draw_trunk_lean_callout(
@@ -1239,6 +1517,7 @@ def _draw_release_callout(
         tracks=tracks,
         frame_idx=frame_idx,
         risk=trunk_lean,
+        proof_step=proof_step,
     )
 
 
@@ -1402,7 +1681,7 @@ def _draw_legality_chip(
         value,
         (x0 + 16, y0 + int(card_h * 0.72)),
         cv2.FONT_HERSHEY_SIMPLEX,
-        max(0.56, min(width, height) / 1120.0),
+        max(0.64, min(width, height) / 980.0),
         TEXT_COLOR,
         2,
         cv2.LINE_AA,
@@ -1452,6 +1731,442 @@ def _summary_issue_lines(
     return deduped
 
 
+def _bgr_to_rgb(color: Tuple[int, int, int], alpha: Optional[int] = None) -> Tuple[int, ...]:
+    rgb = (int(color[2]), int(color[1]), int(color[0]))
+    if alpha is None:
+        return rgb
+    return rgb + (int(alpha),)
+
+
+def _draw_themed_card_shell(
+    draw: Any,
+    *,
+    x0: int,
+    y0: int,
+    x1: int,
+    y1: int,
+    accent: Tuple[int, int, int],
+    width: int,
+    height: int,
+) -> int:
+    radius = max(16, int(round(min(width, height) * 0.028)))
+    shadow_shift = max(3, int(round(min(width, height) * 0.008)))
+    draw.rounded_rectangle(
+        (x0 + shadow_shift, y0 + shadow_shift, x1 + shadow_shift, y1 + shadow_shift),
+        radius=radius,
+        fill=(0, 0, 0, 86),
+    )
+    draw.rounded_rectangle(
+        (x0, y0, x1, y1),
+        radius=radius,
+        fill=_bgr_to_rgb((14, 16, 15), 244),
+        outline=_bgr_to_rgb((42, 44, 43), 128),
+        width=1,
+    )
+    rail_w = max(5, int(round((x1 - x0) * 0.020)))
+    rail_inset = max(3, int(round(min(width, height) * 0.006)))
+    draw.rounded_rectangle(
+        (x0 + rail_inset, y0 + rail_inset, x0 + rail_inset + rail_w, y1 - rail_inset),
+        radius=max(rail_w * 2, 10),
+        fill=_bgr_to_rgb(accent, 255),
+    )
+    return rail_inset + rail_w
+
+
+def _draw_themed_summary_card(
+    draw: Any,
+    *,
+    x0: int,
+    y0: int,
+    x1: int,
+    y1: int,
+    title: str,
+    body: str,
+    accent: Tuple[int, int, int],
+    width: int,
+    height: int,
+) -> None:
+    card_w = max(1, x1 - x0)
+    card_h = max(1, y1 - y0)
+    rail_offset = _draw_themed_card_shell(
+        draw,
+        x0=x0,
+        y0=y0,
+        x1=x1,
+        y1=y1,
+        accent=accent,
+        width=width,
+        height=height,
+    )
+    inner_pad_x = max(16, int(round(card_w * 0.070))) + rail_offset
+    inner_pad_y = max(13, int(round(card_h * 0.11)))
+    title_font = _load_theme_font(
+        BODY_FONT_FILE,
+        max(20, int(round(card_h * 0.145))),
+    )
+    body_font, lines = _fit_pil_wrapped_text(
+        draw,
+        str(body or ""),
+        font_file=BODY_FONT_MEDIUM_FILE,
+        base_size=max(17, int(round(card_h * 0.115))),
+        min_size=max(14, int(round(card_h * 0.085))),
+        max_width=max(40, x1 - x0 - inner_pad_x * 2),
+        max_lines=3,
+    )
+    if title_font is not None:
+        draw.text(
+            (x0 + inner_pad_x, y0 + inner_pad_y),
+            str(title or "").upper(),
+            font=title_font,
+            fill=_bgr_to_rgb(accent),
+        )
+        _, title_h = _pil_text_size(draw, str(title or "").upper(), title_font)
+    else:
+        title_h = max(12, int(round(card_h * 0.18)))
+    line_gap = max(4, int(round(min(width, height) * 0.008)))
+    current_y = y0 + inner_pad_y + title_h + max(16, int(round(card_h * 0.20)))
+    for line in lines:
+        if body_font is None:
+            break
+        draw.text(
+            (x0 + inner_pad_x, current_y),
+            line,
+            font=body_font,
+            fill=_bgr_to_rgb(THEME_TEXT_PRIMARY),
+        )
+        _, line_h = _pil_text_size(draw, line, body_font)
+        current_y += line_h + line_gap
+
+
+def _draw_themed_story_card(
+    draw: Any,
+    *,
+    x0: int,
+    y0: int,
+    x1: int,
+    y1: int,
+    title: str,
+    headline: str,
+    body: str,
+    accent: Tuple[int, int, int],
+    width: int,
+    height: int,
+) -> None:
+    card_w = max(1, x1 - x0)
+    card_h = max(1, y1 - y0)
+    rail_offset = _draw_themed_card_shell(
+        draw,
+        x0=x0,
+        y0=y0,
+        x1=x1,
+        y1=y1,
+        accent=accent,
+        width=width,
+        height=height,
+    )
+    inner_pad_x = max(14, int(round(card_w * 0.064))) + rail_offset
+    inner_pad_y = max(11, int(round(card_h * 0.09)))
+    content_width = max(40, x1 - x0 - inner_pad_x * 2)
+    content_height = max(36, y1 - y0 - inner_pad_y * 2)
+    title_base = max(17, int(round(card_h * 0.115)))
+    title_min = max(14, int(round(card_h * 0.090)))
+    headline_base = max(24, int(round(card_h * 0.18)))
+    headline_min = max(18, int(round(card_h * 0.130)))
+    body_base = max(15, int(round(card_h * 0.115)))
+    body_min = max(12, int(round(card_h * 0.085)))
+    title_font = None
+    title_lines: List[str] = []
+    headline_font = None
+    headline_lines: List[str] = []
+    body_font = None
+    body_lines: List[str] = []
+    line_gap = max(4, int(round(card_h * 0.040)))
+    section_gap = max(12, int(round(card_h * 0.090)))
+    current_title_base = title_base
+    current_headline_base = headline_base
+    current_body_base = body_base
+    for _ in range(8):
+        title_font, title_lines = _fit_pil_wrapped_text(
+            draw,
+            str(title or ""),
+            font_file=BODY_FONT_FILE,
+            base_size=current_title_base,
+            min_size=title_min,
+            max_width=content_width,
+            max_lines=2,
+        )
+        headline_font, headline_lines = _fit_pil_wrapped_text(
+            draw,
+            str(headline or ""),
+            font_file=BODY_FONT_FILE,
+            base_size=current_headline_base,
+            min_size=headline_min,
+            max_width=content_width,
+            max_lines=2,
+        )
+        body_font, body_lines = _fit_pil_wrapped_text(
+            draw,
+            str(body or ""),
+            font_file=BODY_FONT_MEDIUM_FILE,
+            base_size=current_body_base,
+            min_size=body_min,
+            max_width=content_width,
+            max_lines=1,
+        )
+        total_h = 0
+        title_h = _pil_text_block_height(draw, title_lines, title_font, line_gap=line_gap)
+        headline_h = _pil_text_block_height(draw, headline_lines, headline_font, line_gap=line_gap)
+        body_h = _pil_text_block_height(draw, body_lines, body_font, line_gap=line_gap)
+        if title_h:
+            total_h += title_h
+        if headline_h:
+            if total_h:
+                total_h += section_gap
+            total_h += headline_h
+        if body_h:
+            if total_h:
+                total_h += max(3, section_gap - 1)
+            total_h += body_h
+        if total_h <= content_height:
+            break
+        current_title_base = max(title_min, current_title_base - 1)
+        current_headline_base = max(headline_min, current_headline_base - 2)
+        current_body_base = max(body_min, current_body_base - 1)
+
+    current_y = y0 + inner_pad_y
+    for line in title_lines:
+        if title_font is None:
+            break
+        draw.text(
+            (x0 + inner_pad_x, current_y),
+            str(line or "").upper(),
+            font=title_font,
+            fill=_bgr_to_rgb(accent),
+        )
+        _, line_h = _pil_text_size(draw, str(line or "").upper(), title_font)
+        current_y += line_h + line_gap
+    if title_lines:
+        current_y += section_gap
+    for line in headline_lines:
+        if headline_font is None:
+            break
+        draw.text(
+            (x0 + inner_pad_x, current_y),
+            line,
+            font=headline_font,
+            fill=_bgr_to_rgb(THEME_TEXT_PRIMARY),
+        )
+        _, line_h = _pil_text_size(draw, line, headline_font)
+        current_y += line_h + line_gap
+    if headline_lines and body_lines:
+        current_y += max(3, section_gap - 1)
+    for line in body_lines:
+        if body_font is None:
+            break
+        draw.text(
+            (x0 + inner_pad_x, current_y),
+            line,
+            font=body_font,
+            fill=_bgr_to_rgb(THEME_TEXT_PRIMARY),
+        )
+        _, line_h = _pil_text_size(draw, line, body_font)
+        current_y += line_h + line_gap
+
+
+def _draw_themed_stat_card(
+    draw: Any,
+    *,
+    x0: int,
+    y0: int,
+    x1: int,
+    y1: int,
+    title: str,
+    value: str,
+    accent: Tuple[int, int, int],
+    width: int,
+    height: int,
+) -> None:
+    card_w = max(1, x1 - x0)
+    card_h = max(1, y1 - y0)
+    radius = max(14, int(round(min(width, height) * 0.024)))
+    draw.rounded_rectangle(
+        (x0, y0, x1, y1),
+        radius=radius,
+        fill=_bgr_to_rgb(THEME_SURFACE, 235),
+        outline=_bgr_to_rgb(accent, 255),
+        width=max(1, int(round(min(width, height) * 0.004))),
+    )
+    inner_pad_x = max(12, int(round(card_w * 0.09)))
+    inner_pad_y = max(10, int(round(card_h * 0.14)))
+    content_width = max(32, x1 - x0 - inner_pad_x * 2)
+    title_font, title_lines = _fit_pil_wrapped_text(
+        draw,
+        str(title or ""),
+        font_file=BODY_FONT_MEDIUM_FILE,
+        base_size=max(15, int(round(card_h * 0.16))),
+        min_size=max(12, int(round(card_h * 0.12))),
+        max_width=content_width,
+        max_lines=1,
+    )
+    value_font, value_lines = _fit_pil_wrapped_text(
+        draw,
+        str(value or ""),
+        font_file=BODY_FONT_FILE,
+        base_size=max(20, int(round(card_h * 0.22))),
+        min_size=max(15, int(round(card_h * 0.16))),
+        max_width=content_width,
+        max_lines=2,
+    )
+    line_gap = max(2, int(round(card_h * 0.035)))
+    current_y = y0 + inner_pad_y
+    for line in title_lines:
+        if title_font is None:
+            break
+        draw.text(
+            (x0 + inner_pad_x, current_y),
+            line,
+            font=title_font,
+            fill=_bgr_to_rgb(THEME_TEXT_SECONDARY),
+        )
+        _, line_h = _pil_text_size(draw, line, title_font)
+        current_y += line_h + line_gap
+    current_y += max(4, int(round((y1 - y0) * 0.05)))
+    for line in value_lines:
+        if value_font is None:
+            break
+        draw.text(
+            (x0 + inner_pad_x, current_y),
+            line,
+            font=value_font,
+            fill=_bgr_to_rgb(THEME_TEXT_PRIMARY),
+        )
+        _, line_h = _pil_text_size(draw, line, value_font)
+        current_y += line_h + line_gap
+
+
+def _frame_draw_context(frame: np.ndarray) -> Tuple[Any, Any, Any]:
+    image = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)).convert("RGBA")
+    overlay = Image.new("RGBA", image.size, (0, 0, 0, 0))
+    draw = ImageDraw.Draw(overlay)
+    return image, overlay, draw
+
+
+def _commit_frame_draw_context(frame: np.ndarray, image: Any, overlay: Any) -> None:
+    composited = Image.alpha_composite(image, overlay).convert("RGB")
+    frame[:, :] = cv2.cvtColor(np.array(composited), cv2.COLOR_RGB2BGR)
+
+
+def _draw_end_summary_legacy(
+    frame: np.ndarray,
+    *,
+    risk_by_id: Dict[str, Dict[str, Any]],
+    events: Optional[Dict[str, Any]],
+    action: Optional[Dict[str, Any]],
+    speed: Optional[Dict[str, Any]],
+    elbow: Optional[Dict[str, Any]] = None,
+    report_story: Optional[Dict[str, Any]] = None,
+    root_cause: Optional[Dict[str, Any]] = None,
+) -> None:
+    root_cause_status = str((root_cause or {}).get("status") or "").strip().lower()
+    blurred = cv2.GaussianBlur(frame, (0, 0), sigmaX=10, sigmaY=10)
+    cv2.addWeighted(blurred, 0.74, frame, 0.26, 0.0, frame)
+    overlay = frame.copy()
+    cv2.rectangle(overlay, (0, 0), (frame.shape[1], frame.shape[0]), (18, 22, 28), -1)
+    cv2.addWeighted(overlay, 0.24, frame, 0.76, 0.0, frame)
+
+    width = frame.shape[1]
+    height = frame.shape[0]
+    top_y = int(round(height * 0.045))
+    top_h = int(round(height * 0.16))
+    top_gap = int(round(height * 0.020))
+    top_w = int(round(width * 0.92))
+    left_x = int(round(width * 0.04))
+    _apply_bottom_scrim(
+        frame,
+        start_y=int(round(height * 0.60)),
+        end_y=height,
+        max_alpha=0.52,
+    )
+    symptom_text = _summary_symptom_text(
+        risk_by_id,
+        events=events,
+        report_story=report_story,
+        root_cause=root_cause,
+    )
+    load_watch_text = _summary_load_watch_text(
+        risk_by_id,
+        events=events,
+        report_story=report_story,
+        root_cause=root_cause,
+    )
+    symptom_title = _summary_symptom_title(
+        report_story=report_story,
+        root_cause=root_cause,
+    )
+    load_watch_title = _summary_load_watch_title(root_cause=root_cause)
+    for idx, (title, body, accent) in enumerate(
+        (
+            (symptom_title, symptom_text, (92, 220, 255)),
+            (load_watch_title, load_watch_text, (0, 132, 255)),
+        )
+    ):
+        x0 = left_x
+        y0 = top_y + idx * (top_h + top_gap)
+        x1 = min(width - 18, x0 + top_w)
+        y1 = y0 + top_h
+        inner_w = max(40, x1 - x0 - 32)
+        _overlay_panel(frame, x0=x0, y0=y0, x1=x1, y1=y1, fill_color=PANEL_BG, edge_color=accent, alpha=0.90)
+        cv2.putText(frame, title, (x0 + 16, y0 + int(top_h * 0.22)), TEXT_FONT, max(0.50, min(width, height) / 1260.0), accent, 1, cv2.LINE_AA)
+        lines, body_scale = _fit_wrapped_text(
+            str(body or ""),
+            max_width=inner_w,
+            max_lines=3,
+            base_scale=max(0.78, min(width, height) / 900.0),
+            min_scale=max(0.58, min(width, height) / 1140.0),
+            thickness=2,
+        )
+        for idx, line in enumerate(lines):
+            cv2.putText(
+            frame,
+            line,
+            (x0 + 16, y0 + int(top_h * (0.48 + idx * 0.18))),
+            TEXT_FONT,
+            body_scale,
+            TEXT_COLOR if idx == 0 else MUTED_TEXT,
+            2 if idx == 0 else 1,
+            cv2.LINE_AA,
+        )
+
+    if root_cause_status != "not_interpretable":
+        bottom_y = int(round(height * 0.73))
+        stat_h = int(round(height * 0.13))
+        gap = int(round(width * 0.03))
+        stat_w = int(round((width - (left_x * 2) - (gap * 2)) / 3.0))
+        stats = [
+            ("Speed", _speed_display_text(speed) or "-", (70, 225, 140)),
+            ("Action Type", _format_action_label(action) or "-", (130, 214, 255)),
+        ]
+        verdict = str((elbow or {}).get("verdict") or "").strip().upper()
+        legality_value = (
+            "Legal"
+            if verdict == "LEGAL"
+            else ("Illegal" if verdict == "ILLEGAL" else "-")
+        )
+        legality_accent = (
+            (70, 225, 140)
+            if verdict == "LEGAL"
+            else ((72, 92, 235) if verdict == "ILLEGAL" else (120, 210, 255))
+        )
+        stats.append(("Legality", legality_value, legality_accent))
+        for idx, (title, value, accent) in enumerate(stats):
+            x0 = left_x + idx * (stat_w + gap)
+            x1 = x0 + stat_w
+            y1 = bottom_y + stat_h
+            _overlay_panel(frame, x0=x0, y0=bottom_y, x1=x1, y1=y1, fill_color=PANEL_BG, edge_color=accent, alpha=0.90)
+            cv2.putText(frame, title, (x0 + 14, bottom_y + int(stat_h * 0.26)), cv2.FONT_HERSHEY_SIMPLEX, max(0.40, min(width, height) / 1500.0), MUTED_TEXT, 1, cv2.LINE_AA)
+            cv2.putText(frame, value, (x0 + 14, bottom_y + int(stat_h * 0.64)), cv2.FONT_HERSHEY_SIMPLEX, max(0.56, min(width, height) / 1120.0), TEXT_COLOR, 2, cv2.LINE_AA)
+
+
 def _draw_end_summary(
     frame: np.ndarray,
     *,
@@ -1461,68 +2176,18 @@ def _draw_end_summary(
     speed: Optional[Dict[str, Any]],
     elbow: Optional[Dict[str, Any]] = None,
     report_story: Optional[Dict[str, Any]] = None,
+    root_cause: Optional[Dict[str, Any]] = None,
 ) -> None:
-    overlay = frame.copy()
-    cv2.rectangle(overlay, (0, 0), (frame.shape[1], frame.shape[0]), (18, 22, 28), -1)
-    cv2.addWeighted(overlay, 0.22, frame, 0.78, 0.0, frame)
-
-    width = frame.shape[1]
-    height = frame.shape[0]
-    top_y = int(round(height * 0.05))
-    top_h = int(round(height * 0.16))
-    top_w = int(round(width * 0.42))
-    left_x = int(round(width * 0.05))
-    right_x = int(round(width * 0.53))
-    symptom_text = _summary_symptom_text(risk_by_id, events=events, report_story=report_story)
-    load_watch_text = _summary_load_watch_text(risk_by_id, events=events, report_story=report_story)
-    for x0, title, body, accent in (
-        (left_x, "Symptom", symptom_text, (92, 220, 255)),
-        (right_x, "Load Watch", load_watch_text, (0, 132, 255)),
-    ):
-        x1 = min(width - 18, x0 + top_w)
-        y1 = top_y + top_h
-        inner_w = max(40, x1 - x0 - 32)
-        _overlay_panel(frame, x0=x0, y0=top_y, x1=x1, y1=y1, fill_color=PANEL_BG, edge_color=accent, alpha=0.84)
-        cv2.putText(frame, title, (x0 + 16, top_y + int(top_h * 0.22)), TEXT_FONT, max(0.40, min(width, height) / 1500.0), accent, 1, cv2.LINE_AA)
-        lines, body_scale = _fit_wrapped_text(
-            str(body or ""),
-            max_width=inner_w,
-            max_lines=2,
-            base_scale=max(0.54, min(width, height) / 1150.0),
-            min_scale=max(0.42, min(width, height) / 1450.0),
-            thickness=2,
-        )
-        for idx, line in enumerate(lines):
-            cv2.putText(
-                frame,
-                line,
-                (x0 + 16, top_y + int(top_h * (0.48 + idx * 0.20))),
-                TEXT_FONT,
-                body_scale,
-                TEXT_COLOR,
-                2 if idx == 0 else 1,
-                cv2.LINE_AA,
-            )
-
-    bottom_y = int(round(height * 0.73))
-    stat_h = int(round(height * 0.13))
-    gap = int(round(width * 0.03))
-    stat_w = int(round((width - (left_x * 2) - (gap * 2)) / 3.0))
-    stats = [
-        ("Speed", _speed_display_text(speed) or "-", (70, 225, 140)),
-        ("Action Type", _format_action_label(action) or "-", (130, 214, 255)),
-    ]
-    verdict = str((elbow or {}).get("verdict") or "").strip().upper()
-    legality_value = "Legal" if verdict == "LEGAL" else (verdict.title() if verdict else "-")
-    legality_accent = (70, 225, 140) if verdict == "LEGAL" else ((72, 92, 235) if verdict == "ILLEGAL" else (120, 210, 255))
-    stats.append(("Legality", legality_value, legality_accent))
-    for idx, (title, value, accent) in enumerate(stats):
-        x0 = left_x + idx * (stat_w + gap)
-        x1 = x0 + stat_w
-        y1 = bottom_y + stat_h
-        _overlay_panel(frame, x0=x0, y0=bottom_y, x1=x1, y1=y1, fill_color=PANEL_BG, edge_color=accent, alpha=0.84)
-        cv2.putText(frame, title, (x0 + 14, bottom_y + int(stat_h * 0.26)), cv2.FONT_HERSHEY_SIMPLEX, max(0.34, min(width, height) / 1700.0), accent, 1, cv2.LINE_AA)
-        cv2.putText(frame, value, (x0 + 14, bottom_y + int(stat_h * 0.64)), cv2.FONT_HERSHEY_SIMPLEX, max(0.48, min(width, height) / 1250.0), TEXT_COLOR, 2, cv2.LINE_AA)
+    _draw_end_summary_legacy(
+        frame,
+        risk_by_id=risk_by_id,
+        events=events,
+        action=action,
+        speed=speed,
+        elbow=elbow,
+        report_story=report_story,
+        root_cause=root_cause,
+    )
 
 
 def _draw_foot_line_overlay(
@@ -1533,6 +2198,7 @@ def _draw_foot_line_overlay(
     events: Optional[Dict[str, Any]],
     hand: Optional[str],
     risk: Optional[Dict[str, Any]],
+    proof_step: Optional[Dict[str, Any]] = None,
 ) -> None:
     if not isinstance(risk, dict):
         return
@@ -1557,6 +2223,14 @@ def _draw_foot_line_overlay(
     cv2.line(frame, back_toe, line_end, muted, thickness, cv2.LINE_AA)
     cv2.line(frame, front_heel, front_toe, accent, thickness + 1, cv2.LINE_AA)
     cv2.circle(frame, front_toe, max(8, min(width, height) // 40), accent, thickness + 1, cv2.LINE_AA)
+    if proof_step:
+        _draw_top_risk_panel(
+            frame,
+            title=str((proof_step or {}).get("title") or "Where It Starts"),
+            headline=str((proof_step or {}).get("headline") or "Front foot lands a bit across the line."),
+            body=str((proof_step or {}).get("body") or "The landing foot is not lining force up cleanly toward target."),
+            accent=accent,
+        )
 
 
 def _draw_hotspot_marker(
@@ -1711,6 +2385,12 @@ def _preferred_hotspot_region_key(risk_id: Optional[str]) -> Optional[str]:
 
 def _stacked_hotspot_region_keys(risk_id: Optional[str]) -> List[str]:
     risk_id = str(risk_id or "").strip()
+    if risk_id == "knee_brace_failure":
+        return ["knee", "shin", "groin"]
+    if risk_id == "foot_line_deviation":
+        return ["shin", "knee", "groin"]
+    if risk_id == "front_foot_braking_shock":
+        return ["knee", "shin", "groin"]
     if risk_id in FFC_DEPENDENT_RISKS:
         return ["groin", "knee", "shin"]
     if risk_id in {
@@ -1730,6 +2410,46 @@ def _load_watch_support_text(load_watch_text: str) -> str:
     return "This is where extra body load may build if the pattern repeats."
 
 
+def _should_render_warning_hotspots(
+    *,
+    report_story: Optional[Dict[str, Any]],
+    root_cause: Optional[Dict[str, Any]],
+) -> bool:
+    renderer_guidance = ((root_cause or {}).get("renderer_guidance") or {})
+    if "warning_hotspots_allowed" in renderer_guidance:
+        return bool(renderer_guidance.get("warning_hotspots_allowed"))
+    root_cause_status = str((root_cause or {}).get("status") or "").strip().lower()
+    if root_cause_status == "no_clear_problem":
+        return False
+    story_theme = str((report_story or {}).get("theme") or "").strip().lower()
+    if story_theme in {"working_pattern", "good_base"}:
+        return False
+    return True
+
+
+def _root_cause_phase_target(
+    root_cause: Optional[Dict[str, Any]],
+    *,
+    phase_key: str,
+) -> Optional[Dict[str, Any]]:
+    renderer_guidance = ((root_cause or {}).get("renderer_guidance") or {})
+    phase_targets = renderer_guidance.get("phase_targets") or {}
+    if not isinstance(phase_targets, dict):
+        return None
+    target = phase_targets.get(phase_key)
+    return target if isinstance(target, dict) else None
+
+
+def _root_cause_proof_step(
+    root_cause: Optional[Dict[str, Any]],
+    *,
+    phase_key: str,
+) -> Optional[Dict[str, Any]]:
+    phase_target = _root_cause_phase_target(root_cause, phase_key=phase_key) or {}
+    proof_step = phase_target.get("proof_step")
+    return proof_step if isinstance(proof_step, dict) else None
+
+
 def _draw_load_watch_card(
     frame: np.ndarray,
     *,
@@ -1745,7 +2465,7 @@ def _draw_load_watch_card(
     y1 = top_y + card_h
     inner_w = max(40, x1 - left_x - 32)
     accent = (0, 132, 255)
-    _overlay_panel(frame, x0=left_x, y0=top_y, x1=x1, y1=y1, fill_color=PANEL_BG, edge_color=accent, alpha=0.84)
+    _overlay_panel(frame, x0=left_x, y0=top_y, x1=x1, y1=y1, fill_color=PANEL_BG, edge_color=accent, alpha=0.88)
     cv2.putText(frame, "Load watch", (left_x + 16, top_y + int(card_h * 0.22)), TEXT_FONT, max(0.40, min(width, height) / 1500.0), accent, 1, cv2.LINE_AA)
     watch_lines, watch_scale = _fit_wrapped_text(
         load_watch_text,
@@ -1798,6 +2518,7 @@ def _draw_load_watch_phase(
     load_watch_text: str,
     pulse_phase: float,
     stage: str = "rings",
+    region_priority: Optional[List[str]] = None,
 ) -> None:
     if not risk_id:
         return
@@ -1841,7 +2562,11 @@ def _draw_load_watch_phase(
 
     scale = min(frame.shape[0], frame.shape[1])
     _draw_load_watch_card(frame, load_watch_text=load_watch_text)
-    stacked_keys = _stacked_hotspot_region_keys(risk_id)
+    stacked_keys = [
+        str(item).strip()
+        for item in list(region_priority or _stacked_hotspot_region_keys(risk_id))
+        if str(item).strip()
+    ]
     stacked_regions: List[Dict[str, Any]] = []
     for region_key in stacked_keys:
         match = next(
@@ -2021,6 +2746,7 @@ def render_skeleton_video(
     risks: Optional[List[Dict[str, Any]]] = None,
     estimated_release_speed: Optional[Dict[str, Any]] = None,
     report_story: Optional[Dict[str, Any]] = None,
+    root_cause: Optional[Dict[str, Any]] = None,
     output_path: Optional[str] = None,
     start_frame: int = 0,
     end_frame: Optional[int] = None,
@@ -2115,13 +2841,29 @@ def render_skeleton_video(
             pause_key = pause_anchors.get(frame_idx)
             if pause_frames > 0 and pause_key:
                 paused_frame = frame.copy()
-                hotspot_payload: Optional[Dict[str, str]] = None
-                if pause_key == "ffc":
-                    if _supports_ffc_story(render_events):
+                hotspot_payload: Optional[Dict[str, Any]] = None
+                allow_warning_hotspots = _should_render_warning_hotspots(
+                    report_story=report_story,
+                    root_cause=root_cause,
+                )
+                phase_target = _root_cause_phase_target(
+                    root_cause,
+                    phase_key=pause_key,
+                )
+                proof_step = _root_cause_proof_step(
+                    root_cause,
+                    phase_key=pause_key,
+                )
+                if pause_key == "bfc":
+                    _draw_phase_anchor_panel(paused_frame, phase_key="bfc")
+                elif pause_key == "ffc":
+                    drew_ffc_overlay = False
+                    if allow_warning_hotspots and _supports_ffc_story(render_events):
                         preferred_ffc_risk = _preferred_ffc_cue_risk_id(
                             risk_by_id,
                             report_story=report_story,
                             events=render_events,
+                            root_cause=root_cause,
                         )
                         should_draw_front_leg = preferred_ffc_risk == "knee_brace_failure"
                         should_draw_foot_line = preferred_ffc_risk == "foot_line_deviation"
@@ -2130,6 +2872,7 @@ def render_skeleton_video(
                                 report_story,
                                 phase_key="ffc",
                                 events=render_events,
+                                root_cause=root_cause,
                             )
                         if not preferred_ffc_risk:
                             story_theme = str((report_story or {}).get("theme") or "")
@@ -2150,7 +2893,9 @@ def render_skeleton_video(
                                 frame_idx=frame_idx,
                                 hand=hand,
                                 risk=risk_by_id.get("knee_brace_failure"),
+                                proof_step=proof_step,
                             )
+                            drew_ffc_overlay = True
                         if should_draw_foot_line:
                             _draw_foot_line_overlay(
                                 paused_frame,
@@ -2159,33 +2904,82 @@ def render_skeleton_video(
                                 events=render_events,
                                 hand=hand,
                                 risk=risk_by_id.get("foot_line_deviation"),
+                                proof_step=proof_step,
                             )
+                            drew_ffc_overlay = True
+                        if preferred_ffc_risk and not should_draw_front_leg and not should_draw_foot_line and proof_step:
+                            _draw_top_risk_panel(
+                                paused_frame,
+                                title=str((proof_step or {}).get("title") or "Where It Starts"),
+                                headline=str((proof_step or {}).get("headline") or ""),
+                                body=str((proof_step or {}).get("body") or ""),
+                                accent=(92, 220, 255),
+                            )
+                            drew_ffc_overlay = True
+                        if not drew_ffc_overlay:
+                            _draw_phase_anchor_panel(paused_frame, phase_key="ffc")
                         if preferred_ffc_risk:
                             hotspot_payload = {
                                 "risk_id": preferred_ffc_risk,
-                                "symptom_text": _summary_symptom_text(risk_by_id, events=render_events, report_story=report_story),
-                                "load_watch_text": _load_watch_label(preferred_ffc_risk) or _summary_load_watch_text(risk_by_id, events=render_events, report_story=report_story),
+                                "region_priority": list((phase_target or {}).get("region_priority") or []),
+                                "symptom_text": _summary_symptom_text(
+                                    risk_by_id,
+                                    events=render_events,
+                                    report_story=report_story,
+                                    root_cause=root_cause,
+                                ),
+                                "load_watch_text": str((phase_target or {}).get("load_watch_label") or "").strip() or _load_watch_label(preferred_ffc_risk) or _summary_load_watch_text(
+                                    risk_by_id,
+                                    events=render_events,
+                                    report_story=report_story,
+                                    root_cause=root_cause,
+                                ),
                             }
                 elif pause_key == "release":
-                    release_hotspot_risk = _release_hotspot_risk_id(
-                        risk_by_id,
-                        events=render_events,
-                        report_story=report_story,
-                    )
-                    _draw_release_callout(
-                        paused_frame,
-                        tracks=tracks,
-                        frame_idx=frame_idx,
-                        risk_by_id=risk_by_id,
-                        report_story=report_story,
-                        events=render_events,
-                    )
-                    if release_hotspot_risk:
-                        hotspot_payload = {
-                            "risk_id": release_hotspot_risk,
-                            "symptom_text": _summary_symptom_text(risk_by_id, events=render_events, report_story=report_story),
-                            "load_watch_text": _load_watch_label(release_hotspot_risk) or _summary_load_watch_text(risk_by_id, events=render_events, report_story=report_story),
-                        }
+                    if allow_warning_hotspots:
+                        release_hotspot_risk = _release_hotspot_risk_id(
+                            risk_by_id,
+                            events=render_events,
+                            report_story=report_story,
+                            root_cause=root_cause,
+                        )
+                        _draw_release_callout(
+                            paused_frame,
+                            tracks=tracks,
+                            frame_idx=frame_idx,
+                            risk_by_id=risk_by_id,
+                            report_story=report_story,
+                            events=render_events,
+                            root_cause=root_cause,
+                            proof_step=proof_step,
+                        )
+                        if not release_hotspot_risk and proof_step:
+                            _draw_top_risk_panel(
+                                paused_frame,
+                                title=str((proof_step or {}).get("title") or "What Happens Next"),
+                                headline=str((proof_step or {}).get("headline") or ""),
+                                body=str((proof_step or {}).get("body") or ""),
+                                accent=(0, 132, 255),
+                            )
+                        elif not release_hotspot_risk:
+                            _draw_phase_anchor_panel(paused_frame, phase_key="release")
+                        if release_hotspot_risk:
+                            hotspot_payload = {
+                                "risk_id": release_hotspot_risk,
+                                "region_priority": list((phase_target or {}).get("region_priority") or []),
+                                "symptom_text": _summary_symptom_text(
+                                    risk_by_id,
+                                    events=render_events,
+                                    report_story=report_story,
+                                    root_cause=root_cause,
+                                ),
+                                "load_watch_text": str((phase_target or {}).get("load_watch_label") or "").strip() or _load_watch_label(release_hotspot_risk) or _summary_load_watch_text(
+                                    risk_by_id,
+                                    events=render_events,
+                                    report_story=report_story,
+                                    root_cause=root_cause,
+                                ),
+                            }
                 cue_hold = pause_frames if hotspot_payload is None else max(1, int(round(pause_frames * 0.45)))
                 hotspot_hold = 0 if hotspot_payload is None else max(1, pause_frames - cue_hold)
                 for _ in range(cue_hold):
@@ -2218,6 +3012,7 @@ def render_skeleton_video(
                             risk_id=str((hotspot_payload or {}).get("risk_id") or ""),
                             risk_by_id=risk_by_id,
                             load_watch_text=str((hotspot_payload or {}).get("load_watch_text") or ""),
+                            region_priority=list((hotspot_payload or {}).get("region_priority") or []),
                             pulse_phase=pulse_phase,
                             stage=stage,
                         )
@@ -2239,6 +3034,7 @@ def render_skeleton_video(
                 speed=estimated_release_speed,
                 elbow=elbow,
                 report_story=report_story,
+                root_cause=root_cause,
             )
             for _ in range(summary_hold_frames):
                 writer.write(summary_frame)

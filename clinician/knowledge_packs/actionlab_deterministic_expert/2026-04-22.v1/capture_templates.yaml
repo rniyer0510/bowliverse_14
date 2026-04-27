@@ -1,0 +1,507 @@
+version: actionlab.knowledge_pack.capture_templates.v1
+
+coach_review_questionnaire:
+  chain_status:
+    id: chain_status
+    section: "diagnosis"
+    prompt: "How is the kinetic chain overall?"
+    response_type: single_select
+    required: true
+    maps_to: coach_diagnosis_v1.chain_status
+    options:
+      - connected
+      - workable_but_leaking
+      - breaking_at_transfer
+      - breaking_at_release_timing
+      - effective_but_expensive
+      - not_interpretable_with_confidence
+
+  primary_break_point:
+    id: primary_break_point
+    section: "diagnosis"
+    prompt: "Where is the chain breaking first or most clearly?"
+    response_type: single_select
+    required: true
+    maps_to: coach_diagnosis_v1.primary_break_point
+    options:
+      - approach_build
+      - gather_and_organize
+      - transfer_and_block
+      - whip_and_release
+      - dissipation_and_recovery
+      - BFC
+      - FFC
+      - UAH
+      - RELEASE
+
+  visible_symptom_ids:
+    id: visible_symptom_ids
+    section: "diagnosis"
+    prompt: "What visible symptom is the bowler producing?"
+    response_type: multi_select
+    required: true
+    maps_to: coach_diagnosis_v1.visible_symptom_ids
+    options:
+      - weak_approach_build
+      - unstable_gather
+      - front_leg_softening
+      - late_trunk_drift
+      - arm_chase
+      - high_terminal_thrust
+      - asymmetric_dissipation
+      - release_window_instability
+      - late_chain_load_dump
+      - underused_transfer_window
+
+  primary_mechanism_id:
+    id: primary_mechanism_id
+    section: "diagnosis"
+    prompt: "What is the primary root-cause mechanism?"
+    response_type: single_select
+    required: true
+    maps_to: coach_diagnosis_v1.primary_mechanism_id
+    options:
+      - low_build_forcing_late_rescue
+      - gather_disorganization_before_block
+      - soft_block_with_trunk_carry
+      - late_arm_acceleration_due_to_chain_delay
+      - high_terminal_impulse_with_high_dissipation_burden
+      - release_window_instability_under_load
+      - underused_transfer_window_with_late_dump
+
+  upper_body_contributor_ids:
+    id: upper_body_contributor_ids
+    section: "contributors"
+    prompt: "Which upper-body contributors support this story?"
+    response_type: multi_select
+    required: false
+    maps_to: coach_diagnosis_v1.upper_body_contributor_ids
+    options:
+      - lateral_trunk_lean
+      - hip_shoulder_mismatch
+      - trunk_rotation_snap
+      - shoulder_rotation_timing
+      - trunk_drift_after_ffc
+      - neck_tilt_left_bfc
+
+  lower_body_contributor_ids:
+    id: lower_body_contributor_ids
+    section: "contributors"
+    prompt: "Which lower-body contributors support this story?"
+    response_type: multi_select
+    required: false
+    maps_to: coach_diagnosis_v1.lower_body_contributor_ids
+    options:
+      - foot_line_deviation
+      - front_foot_braking_shock
+      - knee_brace_failure
+      - pelvis_trunk_alignment
+      - chest_stack_over_landing
+      - front_leg_support_score
+
+  phase_anchored_finding_ids:
+    id: phase_anchored_finding_ids
+    section: "contributors"
+    prompt: "Which phase-anchored findings matter enough to mention explicitly?"
+    response_type: multi_select
+    required: false
+    maps_to: coach_diagnosis_v1.phase_anchored_finding_ids
+    options:
+      - neck_tilt_left_bfc
+      - front_foot_braking_shock
+      - foot_line_deviation
+      - knee_brace_failure
+      - chest_stack_over_landing
+      - trunk_drift_after_ffc
+
+  first_priority_prescription_id:
+    id: first_priority_prescription_id
+    section: "prescription"
+    prompt: "What is the first coaching priority?"
+    response_type: single_select
+    required: true
+    maps_to: coach_diagnosis_v1.first_priority.prescription_id
+    options:
+      - build_momentum_earlier
+      - organize_the_gather_line
+      - stack_over_landing_leg
+      - brace_without_reaching
+      - sync_trunk_and_arm_delivery
+      - quiet_the_end_rush
+      - stabilize_release_window_under_load
+      - absorb_through_balanced_finish
+
+  change_size:
+    id: change_size
+    section: "prescription"
+    prompt: "How large should the suggested change be?"
+    response_type: single_select
+    required: true
+    maps_to: coach_diagnosis_v1.change_strategy.change_size
+    options:
+      - hold
+      - micro
+      - moderate
+      - major
+
+  do_not_change_yet:
+    id: do_not_change_yet
+    section: "prescription"
+    prompt: "What should we deliberately avoid changing yet?"
+    response_type: text
+    required: false
+    maps_to: coach_diagnosis_v1.do_not_change_yet
+    options: []
+
+  near_term_positive:
+    id: near_term_positive
+    section: "reaction"
+    prompt: "What is the likely near-term positive reaction to this cue?"
+    response_type: text
+    required: false
+    maps_to: coach_diagnosis_v1.change_reaction.near_term_positive
+    options: []
+
+  near_term_negative:
+    id: near_term_negative
+    section: "reaction"
+    prompt: "What is the likely near-term negative reaction or tradeoff?"
+    response_type: text
+    required: false
+    maps_to: coach_diagnosis_v1.change_reaction.near_term_negative
+    options: []
+
+  medium_term_positive:
+    id: medium_term_positive
+    section: "reaction"
+    prompt: "What medium-term upside do you expect if the bowler adopts the change?"
+    response_type: text
+    required: false
+    maps_to: coach_diagnosis_v1.change_reaction.medium_term_positive
+    options: []
+
+  medium_term_negative:
+    id: medium_term_negative
+    section: "reaction"
+    prompt: "What medium-term downside or compensation risk should be watched?"
+    response_type: text
+    required: false
+    maps_to: coach_diagnosis_v1.change_reaction.medium_term_negative
+    options: []
+
+  long_term_positive:
+    id: long_term_positive
+    section: "reaction"
+    prompt: "What long-term upside should this change create if it holds?"
+    response_type: text
+    required: false
+    maps_to: coach_diagnosis_v1.change_reaction.long_term_positive
+    options: []
+
+  long_term_negative:
+    id: long_term_negative
+    section: "reaction"
+    prompt: "What long-term downside is possible if the cue is misapplied?"
+    response_type: text
+    required: false
+    maps_to: coach_diagnosis_v1.change_reaction.long_term_negative
+    options: []
+
+clip_annotation_fields:
+  clip_id:
+    id: clip_id
+    section: "identity"
+    prompt: "Unique clip or run id"
+    response_type: string
+    required: true
+    maps_to: dataset.clip_annotations.clip_id
+    options: []
+
+  bowler_id:
+    id: bowler_id
+    section: "identity"
+    prompt: "Bowler id"
+    response_type: string
+    required: true
+    maps_to: dataset.clip_annotations.bowler_id
+    options: []
+
+  in_season_context:
+    id: in_season_context
+    section: "context"
+    prompt: "What is the current performance context?"
+    response_type: single_select
+    required: true
+    maps_to: dataset.clip_annotations.in_season_context
+    options:
+      - training
+      - trial
+      - match
+      - rehab
+      - off_season
+
+  primary_mechanism_id:
+    id: primary_mechanism_id
+    section: "diagnosis"
+    prompt: "Primary mechanism id"
+    response_type: single_select
+    required: true
+    maps_to: dataset.clip_annotations.primary_mechanism_id
+    options:
+      - low_build_forcing_late_rescue
+      - gather_disorganization_before_block
+      - soft_block_with_trunk_carry
+      - late_arm_acceleration_due_to_chain_delay
+      - high_terminal_impulse_with_high_dissipation_burden
+      - release_window_instability_under_load
+      - underused_transfer_window_with_late_dump
+
+  visible_symptom_ids:
+    id: visible_symptom_ids
+    section: "diagnosis"
+    prompt: "Visible symptom ids"
+    response_type: multi_select
+    required: true
+    maps_to: dataset.clip_annotations.visible_symptom_ids
+    options:
+      - weak_approach_build
+      - unstable_gather
+      - front_leg_softening
+      - late_trunk_drift
+      - arm_chase
+      - high_terminal_thrust
+      - asymmetric_dissipation
+      - release_window_instability
+      - late_chain_load_dump
+      - underused_transfer_window
+
+  contributor_ids:
+    id: contributor_ids
+    section: "diagnosis"
+    prompt: "Contributor ids"
+    response_type: multi_select
+    required: false
+    maps_to: dataset.clip_annotations.contributor_ids
+    options:
+      - lateral_trunk_lean
+      - hip_shoulder_mismatch
+      - trunk_rotation_snap
+      - foot_line_deviation
+      - front_foot_braking_shock
+      - knee_brace_failure
+      - shoulder_rotation_timing
+      - pelvis_trunk_alignment
+      - chest_stack_over_landing
+      - front_leg_support_score
+      - trunk_drift_after_ffc
+      - neck_tilt_left_bfc
+
+  first_priority_prescription_id:
+    id: first_priority_prescription_id
+    section: "prescription"
+    prompt: "First priority prescription id"
+    response_type: single_select
+    required: true
+    maps_to: dataset.clip_annotations.first_priority_prescription_id
+    options:
+      - build_momentum_earlier
+      - organize_the_gather_line
+      - stack_over_landing_leg
+      - brace_without_reaching
+      - sync_trunk_and_arm_delivery
+      - quiet_the_end_rush
+      - stabilize_release_window_under_load
+      - absorb_through_balanced_finish
+
+  change_size_recommended:
+    id: change_size_recommended
+    section: "prescription"
+    prompt: "Recommended change size"
+    response_type: single_select
+    required: true
+    maps_to: dataset.clip_annotations.change_size_recommended
+    options:
+      - hold
+      - micro
+      - moderate
+      - major
+
+  reviewer_role:
+    id: reviewer_role
+    section: "review"
+    prompt: "Reviewer role"
+    response_type: single_select
+    required: true
+    maps_to: dataset.clip_annotations.reviewer_role
+    options:
+      - coach
+      - clinician
+      - reviewer
+
+  review_notes:
+    id: review_notes
+    section: "review"
+    prompt: "Free-text review notes"
+    response_type: text
+    required: false
+    maps_to: dataset.clip_annotations.review_notes
+    options: []
+
+intervention_outcome_fields:
+  intervention_id:
+    id: intervention_id
+    section: "identity"
+    prompt: "Unique intervention id"
+    response_type: string
+    required: true
+    maps_to: dataset.intervention_outcomes.intervention_id
+    options: []
+
+  prescription_id:
+    id: prescription_id
+    section: "identity"
+    prompt: "Prescription id used"
+    response_type: single_select
+    required: true
+    maps_to: dataset.intervention_outcomes.prescription_id
+    options:
+      - build_momentum_earlier
+      - organize_the_gather_line
+      - stack_over_landing_leg
+      - brace_without_reaching
+      - sync_trunk_and_arm_delivery
+      - quiet_the_end_rush
+      - stabilize_release_window_under_load
+      - absorb_through_balanced_finish
+
+  context:
+    id: context
+    section: "context"
+    prompt: "What context was the cue tested in?"
+    response_type: single_select
+    required: true
+    maps_to: dataset.intervention_outcomes.context
+    options:
+      - training
+      - trial
+      - match
+      - rehab
+      - off_season
+
+  adoption_observed:
+    id: adoption_observed
+    section: "context"
+    prompt: "Was the cue adopted by the bowler?"
+    response_type: single_select
+    required: true
+    maps_to: dataset.intervention_outcomes.adoption_observed
+    options:
+      - "yes"
+      - partial
+      - "no"
+
+  cue_wording_used:
+    id: cue_wording_used
+    section: "context"
+    prompt: "Exact cue wording used"
+    response_type: text
+    required: false
+    maps_to: dataset.intervention_outcomes.cue_wording_used
+    options: []
+
+  pace_change:
+    id: pace_change
+    section: "outcome"
+    prompt: "Observed pace change"
+    response_type: text
+    required: false
+    maps_to: dataset.intervention_outcomes.pace_change
+    options: []
+
+  control_change:
+    id: control_change
+    section: "outcome"
+    prompt: "Observed control change"
+    response_type: text
+    required: false
+    maps_to: dataset.intervention_outcomes.control_change
+    options: []
+
+  repeatability_change:
+    id: repeatability_change
+    section: "outcome"
+    prompt: "Observed repeatability change"
+    response_type: text
+    required: false
+    maps_to: dataset.intervention_outcomes.repeatability_change
+    options: []
+
+  self_report_confidence:
+    id: self_report_confidence
+    section: "outcome"
+    prompt: "Bowler self-report confidence"
+    response_type: text
+    required: false
+    maps_to: dataset.intervention_outcomes.self_report_confidence
+    options: []
+
+  pain_or_load_signal:
+    id: pain_or_load_signal
+    section: "outcome"
+    prompt: "Any pain or load signal?"
+    response_type: text
+    required: false
+    maps_to: dataset.intervention_outcomes.pain_or_load_signal
+    options: []
+
+  new_compensation_ids:
+    id: new_compensation_ids
+    section: "outcome"
+    prompt: "Any new compensation ids observed?"
+    response_type: multi_select
+    required: false
+    maps_to: dataset.intervention_outcomes.new_compensation_ids
+    options:
+      - lateral_trunk_lean
+      - hip_shoulder_mismatch
+      - trunk_rotation_snap
+      - foot_line_deviation
+      - front_foot_braking_shock
+      - knee_brace_failure
+      - shoulder_rotation_timing
+      - pelvis_trunk_alignment
+      - chest_stack_over_landing
+      - front_leg_support_score
+      - trunk_drift_after_ffc
+      - neck_tilt_left_bfc
+
+  review_notes:
+    id: review_notes
+    section: "outcome"
+    prompt: "Free-text outcome notes"
+    response_type: text
+    required: false
+    maps_to: dataset.intervention_outcomes.review_notes
+    options: []
+
+outcome_windows:
+  next_3_balls:
+    id: next_3_balls
+    title: "Next 3 balls"
+    summary: "Immediate reaction window for whether the cue is even usable."
+    typical_use: "Micro-change checks during a short set."
+  same_session:
+    id: same_session
+    title: "Same session"
+    summary: "Short-term retention window inside the same practice session."
+    typical_use: "Check whether the cue survives beyond the first few attempts."
+  next_session:
+    id: next_session
+    title: "Next session"
+    summary: "Medium-term retention window across separate practice sessions."
+    typical_use: "Check whether the change comes back without re-teaching the whole story."
+  next_match_window:
+    id: next_match_window
+    title: "Next match window"
+    summary: "Pressure-transfer window for whether the change survives selection or match stress."
+    typical_use: "Check whether the bowler keeps or abandons the change under performance pressure."

@@ -41,12 +41,36 @@ class WalkthroughRenderRouteTest(unittest.TestCase):
             with open(target, "wb") as handle:
                 handle.write(payload)
 
-            with mock.patch.object(self.module, "RENDERS_DIR", tmpdir):
+            with mock.patch.object(self.module, "RENDERS_DIR", tmpdir), mock.patch.object(
+                self.module,
+                "download_render_artifact",
+                return_value=None,
+            ) as download_render:
                 response = self.module.get_walkthrough_render("local.mp4")
 
             self.assertIsInstance(response, FileResponse)
             self.assertEqual(response.path, target)
             self.assertEqual(response.media_type, "video/mp4")
+            download_render.assert_called_once_with("local.mp4")
+
+    def test_get_walkthrough_render_prefers_remote_bytes_over_local_file(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            target = os.path.join(tmpdir, "remote.mp4")
+            with open(target, "wb") as handle:
+                handle.write(b"stale-local-video")
+
+            payload = b"fresh-remote-video"
+            with mock.patch.object(self.module, "RENDERS_DIR", tmpdir), mock.patch.object(
+                self.module,
+                "download_render_artifact",
+                return_value=payload,
+            ) as download_render:
+                response = self.module.get_walkthrough_render("remote.mp4")
+
+            self.assertIsInstance(response, Response)
+            self.assertEqual(response.body, payload)
+            self.assertEqual(response.media_type, "video/mp4")
+            download_render.assert_called_once_with("remote.mp4")
 
     def test_get_walkthrough_render_falls_back_to_remote_bytes(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -68,6 +92,63 @@ class WalkthroughRenderRouteTest(unittest.TestCase):
             self.module.get_walkthrough_render("../bad.mp4")
 
         self.assertEqual(ctx.exception.status_code, 404)
+
+    def test_load_recent_expert_history_queries_only_required_fields(self):
+        expected_rows = [
+            ("run-1", "2026-04-24T09:00:00Z", {"frontend_surface_v1": {}}),
+            ("run-2", "2026-04-23T09:00:00Z", None),
+        ]
+
+        class _FakeQuery:
+            def __init__(self, rows):
+                self._rows = rows
+
+            def join(self, *args, **kwargs):
+                return self
+
+            def filter(self, *args, **kwargs):
+                return self
+
+            def order_by(self, *args, **kwargs):
+                return self
+
+            def limit(self, *args, **kwargs):
+                return self
+
+            def all(self):
+                return list(self._rows)
+
+        class _FakeDb:
+            def __init__(self, rows):
+                self.rows = rows
+                self.query_args = None
+
+            def query(self, *args):
+                self.query_args = args
+                return _FakeQuery(self.rows)
+
+        fake_db = _FakeDb(expected_rows)
+
+        history = self.module._load_recent_expert_history(
+            db=fake_db,
+            player_id="player-1",
+            limit=5,
+        )
+
+        self.assertEqual(len(fake_db.query_args), 3)
+        self.assertIs(fake_db.query_args[0], self.module.AnalysisRun.run_id)
+        self.assertIs(fake_db.query_args[1], self.module.AnalysisRun.created_at)
+        self.assertIs(fake_db.query_args[2], self.module.AnalysisResultRaw.result_json)
+        self.assertEqual(
+            history,
+            [
+                {
+                    "run_id": "run-1",
+                    "created_at": "2026-04-24T09:00:00Z",
+                    "result_json": {"frontend_surface_v1": {}},
+                }
+            ],
+        )
 
     def test_build_walkthrough_render_keeps_url_shape_and_records_upload_metadata(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -114,6 +195,7 @@ class WalkthroughRenderRouteTest(unittest.TestCase):
                     risks=[],
                     estimated_release_speed={},
                     report_story=None,
+                    root_cause=None,
                 )
 
             self.assertTrue(result["available"])
@@ -121,6 +203,10 @@ class WalkthroughRenderRouteTest(unittest.TestCase):
             self.assertEqual(
                 result["url"],
                 "https://api.actionlabcricket.in/renders/run-1_walkthrough.mp4",
+            )
+            self.assertEqual(
+                result["renderer_version"],
+                self.module.WALKTHROUGH_RENDERER_VERSION,
             )
             self.assertEqual(result["storage_backend"], "gcs")
             self.assertTrue(result["storage_uploaded"])

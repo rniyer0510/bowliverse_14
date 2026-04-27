@@ -20,7 +20,7 @@ def set_account_context(
     db: Session = Depends(get_db),
 ):
     role = payload.role.lower()
-    if role not in ("player", "coach", "parent"):
+    if role not in ("player", "coach", "parent", "reviewer", "clinician"):
         raise HTTPException(status_code=422, detail="Invalid role")
 
     # Lock role switching at runtime to prevent self-privilege drift.

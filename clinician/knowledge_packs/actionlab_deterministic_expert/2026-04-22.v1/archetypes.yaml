@@ -1,0 +1,173 @@
+version: actionlab.knowledge_pack.archetypes.v1
+
+archetypes:
+  efficient_transfer_bowler:
+    id: efficient_transfer_bowler
+    title: "Efficient Transfer Bowler"
+    simple_title: "Connected action"
+    short_label: "Efficient transfer"
+    summary: "Pace is being built and transferred with minimal visible leakage and a relatively distributed load pattern."
+    simple_summary: "The action builds and passes speed through cleanly, with no obvious leak."
+    dominant_mechanisms:
+      - gather_disorganization_before_block
+    secondary_mechanisms: []
+    expected_strengths:
+      - "Momentum tends to carry through the chain cleanly."
+      - "Release looks less like a late rescue."
+    expected_costs:
+      - "No major cost pattern is dominant in this archetype."
+    history_story_template: "Recent clips are showing an efficient transfer pattern with relatively low visible leakage."
+    simple_history_story_template: "Recent clips show an action that stays connected with only small leaks."
+    coaching_priority_template: "Protect the good transfer pattern while only making small refinements."
+    simple_coaching_priority_template: "Protect this good connected shape and only make small changes."
+
+  low_build_high_efficiency_bowler:
+    id: low_build_high_efficiency_bowler
+    title: "Low Build, High Efficiency"
+    simple_title: "Calm run-up, good carry"
+    short_label: "Low build / high efficiency"
+    summary: "The run-up is not especially forceful, but what momentum is built tends to be converted cleanly into release."
+    simple_summary: "The run-up is not big, but the action still turns it into useful speed cleanly."
+    dominant_mechanisms:
+      - low_build_forcing_late_rescue
+    secondary_mechanisms: []
+    expected_strengths:
+      - "The bowler can still translate modest build into usable release."
+      - "The chain often stays calmer than a pure late-thrust pattern."
+    expected_costs:
+      - "There may be limited headroom if build drops even further."
+    history_story_template: "The bowler is getting good return from a modest build without needing a large late rescue."
+    simple_history_story_template: "Recent clips show a calmer build that still turns into a good release."
+    coaching_priority_template: "Keep the efficient transfer while nudging earlier momentum build, not just more effort at release."
+    simple_coaching_priority_template: "Keep the clean carry, then slowly build a little more speed earlier."
+
+  high_build_low_conversion_bowler:
+    id: high_build_low_conversion_bowler
+    title: "High Build, Low Conversion"
+    simple_title: "Good intent, leaking power"
+    short_label: "High build / low conversion"
+    summary: "Approach intent is present, but too much of it is leaking before it becomes a clean release advantage."
+    simple_summary: "The bowler arrives with intent, but too much of that power leaks before release."
+    dominant_mechanisms:
+      - gather_disorganization_before_block
+      - soft_block_with_trunk_carry
+    secondary_mechanisms:
+      - late_arm_acceleration_due_to_chain_delay
+    expected_strengths:
+      - "The bowler arrives with intent and usable energy."
+    expected_costs:
+      - "Too much of that energy is lost before release."
+      - "The body may have to clean up the leak late."
+    history_story_template: "Recent clips show good approach intent, but conversion into release still looks inefficient."
+    simple_history_story_template: "Recent clips show good intent coming in, but too much of it leaking before release."
+    coaching_priority_template: "Fix the transfer leak before asking for even more run-up or effort."
+    simple_coaching_priority_template: "Fix the leak before asking for more run-up or effort."
+
+  late_thrust_pace_bowler:
+    id: late_thrust_pace_bowler
+    title: "Late-Thrust Pace Bowler"
+    simple_title: "Speed made too late"
+    short_label: "Late thrust"
+    summary: "A large share of visible pace generation is happening late and aggressively near release."
+    simple_summary: "Too much of the speed is being made very late near release."
+    dominant_mechanisms:
+      - high_terminal_impulse_with_high_dissipation_burden
+      - low_build_forcing_late_rescue
+    secondary_mechanisms:
+      - late_arm_acceleration_due_to_chain_delay
+    expected_strengths:
+      - "The bowler may still generate effective pace."
+    expected_costs:
+      - "The finish can become expensive and harder to repeat."
+      - "Dissipation burden may stay high."
+    history_story_template: "Recent clips are showing a late-thrust pace pattern, with pace being created close to release."
+    simple_history_story_template: "Recent clips show speed being made too late, close to release."
+    coaching_priority_template: "Redistribute pace creation earlier through the chain before pushing for more output."
+    simple_coaching_priority_template: "Move speed creation earlier before pushing for more output."
+
+  arm_chase_bowler:
+    id: arm_chase_bowler
+    title: "Arm-Chase Bowler"
+    simple_title: "Arm having to rush"
+    short_label: "Arm chase"
+    summary: "The distal chain appears to rescue the release window because earlier sequencing is arriving late."
+    simple_summary: "The arm is having to rush because the body is arriving late."
+    dominant_mechanisms:
+      - late_arm_acceleration_due_to_chain_delay
+    secondary_mechanisms:
+      - gather_disorganization_before_block
+      - low_build_forcing_late_rescue
+    expected_strengths:
+      - "The bowler can still find pace from the distal chain."
+    expected_costs:
+      - "Release timing can become rushed and less repeatable."
+      - "Upper-chain load can rise when the arm has to rescue speed."
+    history_story_template: "Recent clips show the arm doing too much rescue work near release."
+    simple_history_story_template: "Recent clips show the arm doing too much last-second work near release."
+    coaching_priority_template: "Sync trunk and arm delivery before asking the arm to do more."
+    simple_coaching_priority_template: "Help the body and arm arrive together before asking for more arm speed."
+
+  soft_block_leakage_bowler:
+    id: soft_block_leakage_bowler
+    title: "Soft-Block Leakage Bowler"
+    simple_title: "Landing leak"
+    short_label: "Soft block leakage"
+    summary: "The pace and load story is revolving around what happens at landing, where the block is not becoming a stable transfer point."
+    simple_summary: "Landing is not becoming a strong base, so speed leaks there."
+    dominant_mechanisms:
+      - soft_block_with_trunk_carry
+    secondary_mechanisms:
+      - gather_disorganization_before_block
+      - high_terminal_impulse_with_high_dissipation_burden
+    expected_strengths:
+      - "The bowler may still create useful pace if the rest of the chain is strong."
+    expected_costs:
+      - "Pace leaks at landing."
+      - "Front-leg and trunk load can stay elevated."
+    history_story_template: "Recent clips keep showing a soft-block leakage pattern at landing."
+    simple_history_story_template: "Recent clips keep showing a landing leak where the front leg does not hold strong enough."
+    coaching_priority_template: "Organize the body over the landing leg before coaching a harder brace."
+    simple_coaching_priority_template: "Get the body over the front leg before coaching a harder brace."
+
+  release_fragility_bowler:
+    id: release_fragility_bowler
+    title: "Release-Fragility Bowler"
+    simple_title: "Release gets shaky under effort"
+    short_label: "Release fragility"
+    summary: "The action can look serviceable on calmer balls, but the release window gets fragile once effort and late-chain demand rise."
+    simple_summary: "The action can look okay on calmer balls, but release gets shaky when effort rises."
+    dominant_mechanisms:
+      - release_window_instability_under_load
+    secondary_mechanisms:
+      - late_arm_acceleration_due_to_chain_delay
+    expected_strengths:
+      - "The bowler may still find a good release window on easier or calmer balls."
+    expected_costs:
+      - "Timing can become rushed as intent rises."
+      - "Late-chain load can climb quickly when the release has to be rescued."
+    history_story_template: "Recent clips suggest a release-window pattern that gets more fragile when intent rises."
+    simple_history_story_template: "Recent clips suggest release gets less stable when the bowler adds effort."
+    coaching_priority_template: "Stabilize the release window under effort before asking the arm or finish to do more."
+    simple_coaching_priority_template: "Make release calmer under effort before asking the arm or finish to do more."
+
+  late_load_dump_bowler:
+    id: late_load_dump_bowler
+    title: "Late-Load-Dump Bowler"
+    simple_title: "Finish paying too much"
+    short_label: "Late load dump"
+    summary: "The action can still carry pace, but too much of the finish is being paid for through a concentrated late-chain dump."
+    simple_summary: "The action can still carry speed, but the finish is taking too much of the load."
+    dominant_mechanisms:
+      - underused_transfer_window_with_late_dump
+      - high_terminal_impulse_with_high_dissipation_burden
+    secondary_mechanisms:
+      - soft_block_with_trunk_carry
+    expected_strengths:
+      - "The bowler may still produce visible output and intent."
+    expected_costs:
+      - "The finish looks harsher and less distributed than we want."
+      - "Late-chain load can stay concentrated through the trunk, side body, and front leg."
+    history_story_template: "Recent clips suggest the finish is still paying for pace in an expensive late-chain way."
+    simple_history_story_template: "Recent clips suggest the finish is paying too much for pace late in the action."
+    coaching_priority_template: "Redistribute the finish burden before pushing for more output."
+    simple_coaching_priority_template: "Spread the finish better before asking for more output."

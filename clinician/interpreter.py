@@ -81,9 +81,9 @@ PILLAR_PENALTY_SCALE = {
 }
 
 PILLAR_MAX_BONUS = {
-    "POSTURE": 0.0,
-    "POWER": 0.0,
-    "PROTECTION": 0.0,
+    "POSTURE": 8.0,
+    "POWER": 8.0,
+    "PROTECTION": 8.0,
 }
 
 FEATURE_MAX_DEDUCTIONS = {

@@ -1,0 +1,389 @@
+version: actionlab.knowledge_pack.contributors.v1
+
+contributors:
+  lateral_trunk_lean:
+    id: lateral_trunk_lean
+    finding_type: risk
+    source_type: risk
+    source_key: lateral_trunk_lean
+    title: "Trunk lean"
+    body_group: upper_body
+    phase: RELEASE
+    summary: "The trunk is leaning away instead of staying more stacked through release."
+    definition: "Visible lateral trunk deviation at or through release that supports a fall-away or spill pattern."
+    why_it_matters:
+      - "Trunk lean usually shows that force is not being accepted and redirected cleanly through the chain."
+      - "It often appears when the landing side is not becoming a calm transfer base."
+    evidence_inputs:
+      - lateral_trunk_lean
+      - trunk_drift_after_ffc
+      - chest_stack_over_landing
+    renderer_focus_regions:
+      - trunk
+      - shoulder_line
+      - release_window
+    related_symptom_ids:
+      - late_trunk_drift
+    possible_mechanism_ids:
+      - soft_block_with_trunk_carry
+      - late_arm_acceleration_due_to_chain_delay
+    common_compensation_ids:
+      - trunk_rotation_snap
+    common_coexisting_ids:
+      - trunk_drift_after_ffc
+
+  hip_shoulder_mismatch:
+    id: hip_shoulder_mismatch
+    finding_type: risk
+    source_type: risk
+    source_key: hip_shoulder_mismatch
+    title: "Hip-shoulder mismatch"
+    body_group: upper_body
+    phase: FFC_TO_RELEASE
+    summary: "Upper and lower segments are not rotating together cleanly into release."
+    definition: "A mismatch in hip and shoulder timing or orientation through transfer and release."
+    why_it_matters:
+      - "A mismatch here often signals that the chain is not sequencing force smoothly into the ball."
+      - "It can create late rescue patterns higher in the chain."
+    evidence_inputs:
+      - hip_shoulder_mismatch
+      - shoulder_rotation_timing
+      - pelvis_trunk_alignment
+    renderer_focus_regions:
+      - hips
+      - shoulder_line
+      - trunk
+    related_symptom_ids:
+      - arm_chase
+      - late_trunk_drift
+    possible_mechanism_ids:
+      - late_arm_acceleration_due_to_chain_delay
+      - soft_block_with_trunk_carry
+      - release_window_instability_under_load
+    common_compensation_ids:
+      - trunk_rotation_snap
+    common_coexisting_ids:
+      - pelvis_trunk_alignment
+
+  trunk_rotation_snap:
+    id: trunk_rotation_snap
+    finding_type: risk
+    source_type: risk
+    source_key: trunk_rotation_snap
+    title: "Shoulder rotation timing"
+    body_group: upper_body
+    phase: FFC_TO_RELEASE
+    summary: "Shoulder-trunk rotation is arriving abruptly and too late in the chain."
+    definition: "A late, abrupt upper-chain rotation contribution close to release."
+    why_it_matters:
+      - "Late rotation usually means pace or timing is being rescued too close to release."
+      - "It can narrow the release window under pressure."
+    evidence_inputs:
+      - trunk_rotation_snap
+      - shoulder_rotation_timing
+      - release_timing_stability
+    renderer_focus_regions:
+      - shoulder_line
+      - bowling_arm
+      - trunk
+    related_symptom_ids:
+      - arm_chase
+      - release_window_instability
+    possible_mechanism_ids:
+      - late_arm_acceleration_due_to_chain_delay
+      - release_window_instability_under_load
+    common_compensation_ids:
+      - lateral_trunk_lean
+    common_coexisting_ids:
+      - shoulder_rotation_timing
+
+  foot_line_deviation:
+    id: foot_line_deviation
+    finding_type: risk
+    source_type: risk
+    source_key: foot_line_deviation
+    title: "Foot line deviation"
+    body_group: lower_body
+    phase: FFC
+    summary: "The landing line is not guiding force cleanly toward target."
+    definition: "Front-foot landing line deviates enough to weaken clean transfer direction."
+    why_it_matters:
+      - "A compromised landing line can reduce how well the bowler converts intent into transfer."
+      - "It often shows up with softer landing support and trunk spill."
+    evidence_inputs:
+      - foot_line_deviation
+      - front_leg_support_score
+      - transfer_efficiency_score
+    renderer_focus_regions:
+      - front_leg
+      - line_of_travel
+      - hips
+    related_symptom_ids:
+      - front_leg_softening
+      - underused_transfer_window
+    possible_mechanism_ids:
+      - soft_block_with_trunk_carry
+      - gather_disorganization_before_block
+      - underused_transfer_window_with_late_dump
+    common_compensation_ids:
+      - front_foot_braking_shock
+    common_coexisting_ids:
+      - front_leg_support_score
+
+  front_foot_braking_shock:
+    id: front_foot_braking_shock
+    finding_type: risk
+    source_type: risk
+    source_key: front_foot_braking_shock
+    title: "Front-foot braking load"
+    body_group: lower_body
+    phase: FFC
+    summary: "Front-foot contact is producing a sharper braking load signature than a calm transfer landing."
+    definition: "Front-foot contact appears to be generating a sharper braking load pattern. This can coexist with both effective and ineffective transfer, so it should not be treated as a break-point by itself."
+    why_it_matters:
+      - "Sharper braking loads can increase dissipation demand through the front leg and trunk."
+      - "This finding matters most when it coexists with weak brace, poor transfer, or harsh finish patterns; by itself it is not proof that the chain is breaking."
+    evidence_inputs:
+      - front_foot_braking_shock
+      - front_leg_support_score
+      - trunk_drift_after_ffc
+    renderer_focus_regions:
+      - front_leg
+      - trunk
+      - line_of_travel
+    related_symptom_ids:
+      - asymmetric_dissipation
+    possible_mechanism_ids:
+      - high_terminal_impulse_with_high_dissipation_burden
+      - underused_transfer_window_with_late_dump
+    common_compensation_ids:
+      - knee_brace_failure
+    common_coexisting_ids:
+      - front_leg_support_score
+      - trunk_drift_after_ffc
+
+  knee_brace_failure:
+    id: knee_brace_failure
+    finding_type: risk
+    source_type: risk
+    source_key: knee_brace_failure
+    title: "Knee brace loss"
+    body_group: lower_body
+    phase: FFC_TO_RELEASE
+    summary: "The front knee is not supporting the action strongly enough through release."
+    definition: "The landing knee does not hold a clean support shape long enough to support transfer."
+    why_it_matters:
+      - "Knee support is one of the main truth anchors for whether the block is stable."
+      - "Loss here often spills into trunk carry and a harsher finish."
+    evidence_inputs:
+      - knee_brace_failure
+      - front_leg_support_score
+      - trunk_drift_after_ffc
+    renderer_focus_regions:
+      - front_leg
+      - knee
+      - trunk
+    related_symptom_ids:
+      - front_leg_softening
+    possible_mechanism_ids:
+      - soft_block_with_trunk_carry
+      - gather_disorganization_before_block
+    common_compensation_ids:
+      - lateral_trunk_lean
+    common_coexisting_ids:
+      - front_leg_support_score
+
+  shoulder_rotation_timing:
+    id: shoulder_rotation_timing
+    finding_type: metric
+    source_type: metric
+    source_key: shoulder_rotation_timing
+    title: "Shoulder rotation timing"
+    body_group: upper_body
+    phase: FFC_TO_RELEASE
+    summary: "Shoulder rotation timing is arriving later than we want for a calm release window."
+    definition: "A derived upper-chain timing signal showing whether shoulder contribution is arriving too late."
+    why_it_matters:
+      - "Late shoulder timing is a common marker for an unstable release window."
+      - "It helps separate a calm chain from a late rescue chain."
+    evidence_inputs:
+      - shoulder_rotation_timing
+      - release_timing_stability
+      - distal_velocity_rescue
+    renderer_focus_regions:
+      - shoulder_line
+      - bowling_arm
+      - trunk
+    related_symptom_ids:
+      - arm_chase
+      - release_window_instability
+    possible_mechanism_ids:
+      - late_arm_acceleration_due_to_chain_delay
+      - release_window_instability_under_load
+    common_compensation_ids:
+      - trunk_rotation_snap
+    common_coexisting_ids:
+      - hip_shoulder_mismatch
+
+  pelvis_trunk_alignment:
+    id: pelvis_trunk_alignment
+    finding_type: metric
+    source_type: metric
+    source_key: pelvis_trunk_alignment
+    title: "Pelvic movement organization"
+    body_group: lower_body
+    phase: BFC_TO_FFC
+    summary: "Pelvis-to-trunk organization is not staying clean enough into landing."
+    definition: "A derived organization signal describing how well pelvis and trunk stay aligned through the gather-to-landing window."
+    why_it_matters:
+      - "This helps explain whether the chain is arriving at landing already compromised."
+      - "It often supports gather and transfer explanations better than a single visible symptom."
+    evidence_inputs:
+      - pelvis_trunk_alignment
+      - gather_line_stability
+      - transfer_efficiency_score
+    renderer_focus_regions:
+      - hips
+      - trunk
+      - line_of_travel
+    related_symptom_ids:
+      - unstable_gather
+      - underused_transfer_window
+    possible_mechanism_ids:
+      - gather_disorganization_before_block
+      - late_arm_acceleration_due_to_chain_delay
+    common_compensation_ids: []
+    common_coexisting_ids:
+      - hip_shoulder_mismatch
+      - chest_stack_over_landing
+
+  chest_stack_over_landing:
+    id: chest_stack_over_landing
+    finding_type: metric
+    source_type: metric
+    source_key: chest_stack_over_landing
+    title: "Chest stack over landing"
+    body_group: lower_body
+    phase: FFC_TO_RELEASE
+    summary: "The chest is not getting stacked over the landing leg early enough."
+    definition: "A derived transfer signal describing whether the chest stacks over the landing base soon enough."
+    why_it_matters:
+      - "This is one of the clearest links between landing support and trunk carry."
+      - "It helps distinguish balance refinement from a much larger rebuild."
+    evidence_inputs:
+      - chest_stack_over_landing
+      - trunk_drift_after_ffc
+      - front_leg_support_score
+    renderer_focus_regions:
+      - trunk
+      - front_leg
+      - chest_line
+    related_symptom_ids:
+      - late_trunk_drift
+      - front_leg_softening
+    possible_mechanism_ids:
+      - soft_block_with_trunk_carry
+      - underused_transfer_window_with_late_dump
+    common_compensation_ids:
+      - lateral_trunk_lean
+    common_coexisting_ids:
+      - front_leg_support_score
+      - trunk_drift_after_ffc
+
+  front_leg_support_score:
+    id: front_leg_support_score
+    finding_type: metric
+    source_type: metric
+    source_key: front_leg_support_score
+    title: "Front-leg support"
+    body_group: lower_body
+    phase: FFC_TO_RELEASE
+    summary: "The landing leg is not turning landing into a stable transfer base."
+    definition: "A derived lower-chain support signal measuring whether the landing leg becomes a usable transfer point."
+    why_it_matters:
+      - "This is one of the strongest signals for whether the chain is breaking at the block."
+      - "It supports both performance and load interpretation."
+    evidence_inputs:
+      - front_leg_support_score
+      - transfer_efficiency_score
+      - trunk_drift_after_ffc
+    renderer_focus_regions:
+      - front_leg
+      - knee
+      - trunk
+    related_symptom_ids:
+      - front_leg_softening
+      - underused_transfer_window
+    possible_mechanism_ids:
+      - soft_block_with_trunk_carry
+      - gather_disorganization_before_block
+      - underused_transfer_window_with_late_dump
+    common_compensation_ids:
+      - lateral_trunk_lean
+    common_coexisting_ids:
+      - chest_stack_over_landing
+      - knee_brace_failure
+
+  trunk_drift_after_ffc:
+    id: trunk_drift_after_ffc
+    finding_type: metric
+    source_type: metric
+    source_key: trunk_drift_after_ffc
+    title: "Late trunk drift"
+    body_group: upper_body
+    phase: FFC_TO_RELEASE
+    summary: "The trunk keeps travelling after landing instead of settling into release."
+    definition: "A derived trunk-travel signal showing ongoing forward or lateral carry after front-foot contact."
+    why_it_matters:
+      - "This is one of the clearest signals that the chain is leaking through the landing phase."
+      - "It often explains both pace leakage and front-leg/trunk load."
+    evidence_inputs:
+      - trunk_drift_after_ffc
+      - chest_stack_over_landing
+      - dissipation_burden_score
+    renderer_focus_regions:
+      - trunk
+      - front_leg
+      - shoulder_line
+    related_symptom_ids:
+      - late_trunk_drift
+      - asymmetric_dissipation
+    possible_mechanism_ids:
+      - soft_block_with_trunk_carry
+      - high_terminal_impulse_with_high_dissipation_burden
+      - underused_transfer_window_with_late_dump
+    common_compensation_ids:
+      - trunk_rotation_snap
+    common_coexisting_ids:
+      - lateral_trunk_lean
+      - chest_stack_over_landing
+
+  neck_tilt_left_bfc:
+    id: neck_tilt_left_bfc
+    finding_type: phase_anchor
+    source_type: risk
+    source_key: neck_tilt_left_bfc
+    title: "Slight left neck tilt"
+    body_group: upper_body
+    phase: BFC
+    summary: "Head-neck position is already leaning left at back-foot contact."
+    definition: "A phase-anchored head-neck finding at BFC that may support an early organization story."
+    why_it_matters:
+      - "This can show that organization is already biased before front-foot landing arrives."
+      - "It should be treated as supporting context unless the rest of the chain points the same way."
+    evidence_inputs:
+      - bfc_confidence
+      - gather_line_stability
+      - pelvis_trunk_alignment
+    renderer_focus_regions:
+      - head
+      - neck
+      - trunk
+    related_symptom_ids:
+      - unstable_gather
+    possible_mechanism_ids:
+      - gather_disorganization_before_block
+      - late_arm_acceleration_due_to_chain_delay
+    common_compensation_ids: []
+    common_coexisting_ids:
+      - pelvis_trunk_alignment

@@ -1,0 +1,90 @@
+version: actionlab.knowledge_pack.globals.v1
+
+phase_order:
+  - approach_build
+  - gather_and_organize
+  - transfer_and_block
+  - whip_and_release
+  - dissipation_and_recovery
+
+confidence_bands:
+  high: { min: 0.8 }
+  medium: { min: 0.55 }
+  low: { min: 0.0 }
+
+severity_bands:
+  low: { min: 0.0, max: 0.35 }
+  moderate: { min: 0.35, max: 0.6 }
+  high: { min: 0.6, max: 0.85 }
+  very_high: { min: 0.85, max: 1.01 }
+
+match_thresholds:
+  confident_match_min: 0.75
+  partial_match_min: 0.55
+  weak_match_min: 0.35
+  ambiguous_match_delta_max: 0.08
+
+history_window_defaults:
+  quick_check_runs: 3
+  reassessment_runs: 8
+  trend_window_runs: 12
+
+evidence_bands:
+  strong: { min: 0.75 }
+  supporting: { min: 0.55 }
+  weak: { min: 0.35 }
+
+acceptance_bands:
+  risk_signal:
+    acceptable_max: 0.25
+    workable_max: 0.50
+  contributor_severity:
+    acceptable_max: 0.25
+    workable_max: 0.50
+
+presentation_downgrade_rules:
+  full_causal_story_requires: confident_match
+  full_causal_story_min_evidence_completeness: 0.55
+  partial_evidence_requires: partial_match
+  event_only_below: partial_match
+  prescription_suppressed_below: partial_match
+
+cluster_priority_defaults:
+  no_match_recurring: A
+  ambiguous_recurring: B
+  prescription_non_response: C
+  single_run_low_confidence: D
+  renderer_weak_evidence_cluster: E
+  coach_feedback_wrong_mechanism: B
+  coach_feedback_wrong_prescription: C
+  coach_feedback_wording: D
+  coach_feedback_renderer: E
+  coach_feedback_capture_quality: C
+
+followup_defaults:
+  insufficient_data_status: INSUFFICIENT_DATA
+  default_window_type: next_3_runs
+  min_valid_runs:
+    next_3_runs: 2
+    next_session: 1
+    next_2_weeks: 2
+
+history_uncertainty:
+  unresolved_min_runs: 3
+  unresolved_window_runs: 8
+  unresolved_rate_min: 0.35
+
+internal_metrics:
+  - runup_build_score
+  - delivery_stride_transfer_score
+  - front_leg_transfer_score
+  - late_thrust_score
+  - arm_chase_score
+  - dissipation_burden_score
+  - pace_leakage_score
+
+derived_indices:
+  - pace_translation_efficiency
+  - distributed_load_index
+  - late_chain_dependence_index
+  - terminal_violence_index

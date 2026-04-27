@@ -124,7 +124,28 @@ class EventDetectionContractTest(unittest.TestCase):
         self.assertIn("candidates", events["release"])
         self.assertTrue(events["release"]["candidates"])
         self.assertIn("window", events["release"])
+        self.assertIn("state", events["release"])
+        self.assertIn("score", events["release"])
+        self.assertIn("notes", events["release"])
         self.assertLessEqual(events["uah"]["frame"], events["release"]["frame"])
+
+    def test_release_uah_uses_consensus_to_avoid_invalid_peak_offset_anchor(self):
+        pose_frames = [_frame(i) for i in range(40)]
+
+        events = detect_release_uah(
+            pose_frames=pose_frames,
+            hand="R",
+            fps=30.0,
+        )
+
+        self.assertNotEqual(events["release"]["method"], "peak_plus_offset")
+        self.assertEqual(events["release"]["state"], "WEAK")
+        self.assertTrue(
+            any(
+                candidate.get("method") == "proximal_consensus"
+                for candidate in events["release"]["candidates"]
+            )
+        )
 
     def test_ffc_bfc_obeys_release_window(self):
         pose_frames = [_frame(i) for i in range(40)]
@@ -148,8 +169,14 @@ class EventDetectionContractTest(unittest.TestCase):
         self.assertTrue(result["ffc"]["candidates"])
         self.assertLessEqual(result["bfc"]["frame"], result["ffc"]["frame"])
         self.assertLessEqual(result["ffc"]["frame"], release_events["release"]["frame"])
-        self.assertEqual(result["ffc"]["method"], "release_backward_chain_grounding")
-        self.assertIn(result["bfc"]["method"], {"simple_grounded_bfc", "context_pre_ffc", "no_ground_confirmed"})
+        self.assertIn(
+            result["ffc"]["method"],
+            {"release_backward_chain_grounding", "single_foot_fallback", "ultimate_fallback"},
+        )
+        self.assertIn(
+            result["bfc"]["method"],
+            {"simple_grounded_bfc", "context_pre_ffc", "no_ground_confirmed", "single_foot_fallback", "ultimate_fallback"},
+        )
 
     def test_ffc_bfc_returns_empty_for_too_few_frames(self):
         result = detect_ffc_bfc(

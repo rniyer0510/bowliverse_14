@@ -15,18 +15,31 @@ SECURITY:
 
 from collections import Counter
 import os
+import uuid
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel, Field
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy.orm import Session
 
+from app.clinician.knowledge_pack import load_knowledge_pack
 from app.persistence.session import get_db
 from app.persistence.models import (
     Player,
     AccountPlayerLink,
     AnalysisRun,
     AnalysisResultRaw,
+    AnalysisExplanationTrace,
+    KnowledgePackMonitoringSnapshot,
+    KnowledgePackRegressionCaseResult,
+    KnowledgePackRegressionRun,
+    KnowledgePackReleaseCandidate,
+    KnowledgePackReleaseEvent,
+    KnowledgePackRollbackAlert,
+    LearningCase,
+    LearningCaseCluster,
+    CoachFlag,
+    PrescriptionFollowup,
 )
 from app.common.auth import get_current_account
 
@@ -292,6 +305,550 @@ def _extract_visual_walkthrough(result_json: Optional[Dict[str, Any]]) -> Option
     normalized["relative_url"] = relative_url
     normalized["url"] = f"{base_url}{relative_url}" if base_url else relative_url
     return normalized
+
+
+def _extract_kinetic_chain_summary(result_json: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    if not isinstance(result_json, dict):
+        return None
+    kinetic_chain = result_json.get("kinetic_chain_v1")
+    explanation = result_json.get("mechanism_explanation_v1")
+    prescription_plan = result_json.get("prescription_plan_v1")
+    render_reasoning = result_json.get("render_reasoning_v1")
+    root_cause_summary = _extract_root_cause_summary(result_json)
+    if not isinstance(kinetic_chain, dict):
+        return None
+
+    prescription_title = None
+    if isinstance(prescription_plan, dict):
+        prescriptions = prescription_plan.get("prescriptions") or []
+        if prescriptions and isinstance(prescriptions[0], dict):
+            prescription_title = prescriptions[0].get("title")
+
+    def phase_summary(key: str) -> Optional[Dict[str, Any]]:
+        raw = kinetic_chain.get(key) or {}
+        score = raw.get("score")
+        return {
+            "score": round(float(score), 3),
+            "label": raw.get("label"),
+        } if isinstance(score, (int, float)) else None
+
+    return {
+        "diagnosis_status": kinetic_chain.get("diagnosis_status"),
+        "confidence": kinetic_chain.get("confidence"),
+        "archetype": (kinetic_chain.get("archetype") or {}).get("short_label")
+        if isinstance(kinetic_chain.get("archetype"), dict)
+        else None,
+        "primary_mechanism": (explanation or {}).get("primary_mechanism") if isinstance(explanation, dict) else None,
+        "first_intervention": (explanation or {}).get("first_intervention") if isinstance(explanation, dict) else None,
+        "primary_prescription_title": prescription_title,
+        "root_cause": root_cause_summary,
+        "renderer_mode": (
+            render_reasoning.get("renderer_mode")
+            if isinstance(render_reasoning, dict)
+            else None
+        ),
+        "approach_build": phase_summary("approach_build"),
+        "transfer": phase_summary("transfer"),
+        "block": phase_summary("block"),
+        "dissipation": phase_summary("dissipation"),
+        "pace_translation": {
+            "approach_momentum": ((kinetic_chain.get("pace_translation") or {}).get("approach_momentum")),
+            "transfer_efficiency": ((kinetic_chain.get("pace_translation") or {}).get("transfer_efficiency")),
+            "terminal_impulse": ((kinetic_chain.get("pace_translation") or {}).get("terminal_impulse")),
+            "leakage_before_block": ((kinetic_chain.get("pace_translation") or {}).get("leakage_before_block")),
+            "leakage_at_block": ((kinetic_chain.get("pace_translation") or {}).get("leakage_at_block")),
+            "late_arm_chase": ((kinetic_chain.get("pace_translation") or {}).get("late_arm_chase")),
+            "dissipation_burden": ((kinetic_chain.get("pace_translation") or {}).get("dissipation_burden")),
+        },
+    }
+
+
+def _extract_root_cause_summary(result_json: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    if not isinstance(result_json, dict):
+        return None
+    coach_diagnosis = result_json.get("coach_diagnosis_v1") or {}
+    root_cause = coach_diagnosis.get("root_cause")
+    if not isinstance(root_cause, dict):
+        presentation_payload = result_json.get("presentation_payload_v1") or {}
+        for key in ("match", "ambiguous", "no_match"):
+            payload = presentation_payload.get(key) or {}
+            if isinstance(payload, dict) and isinstance(payload.get("root_cause"), dict):
+                root_cause = payload.get("root_cause")
+                break
+    if not isinstance(root_cause, dict):
+        frontend_surface = result_json.get("frontend_surface_v1") or {}
+        hero = frontend_surface.get("hero") or {}
+        if isinstance(hero, dict):
+            root_cause = hero.get("root_cause")
+    if not isinstance(root_cause, dict):
+        return None
+
+    primary_driver = root_cause.get("primary_driver") or {}
+    compensation = root_cause.get("compensation") or {}
+    renderer_guidance = root_cause.get("renderer_guidance") or {}
+    where_it_starts = root_cause.get("where_it_starts") or {}
+    return {
+        "status": root_cause.get("status"),
+        "mechanism_id": root_cause.get("mechanism_id"),
+        "title": root_cause.get("title"),
+        "summary": root_cause.get("summary"),
+        "why_it_is_happening": root_cause.get("why_it_is_happening"),
+        "chain_story": root_cause.get("chain_story"),
+        "phase_id": where_it_starts.get("phase_id") if isinstance(where_it_starts, dict) else None,
+        "primary_driver_id": primary_driver.get("id") if isinstance(primary_driver, dict) else None,
+        "primary_driver_title": primary_driver.get("title") if isinstance(primary_driver, dict) else None,
+        "compensation_id": compensation.get("id") if isinstance(compensation, dict) else None,
+        "compensation_title": compensation.get("title") if isinstance(compensation, dict) else None,
+        "render_story_id": renderer_guidance.get("story_id") if isinstance(renderer_guidance, dict) else None,
+        "cue_points": list(renderer_guidance.get("cue_points") or [])[:3]
+        if isinstance(renderer_guidance, dict)
+        else [],
+        "symptom_text": renderer_guidance.get("symptom_text") if isinstance(renderer_guidance, dict) else None,
+        "load_watch_text": renderer_guidance.get("load_watch_text") if isinstance(renderer_guidance, dict) else None,
+    }
+
+
+
+def _is_history_eligible_result(result_json: Optional[Dict[str, Any]]) -> bool:
+    if not isinstance(result_json, dict):
+        return True
+
+    capture_quality = result_json.get("capture_quality_v1") or {}
+    if isinstance(capture_quality, dict):
+        status = str(capture_quality.get("status") or "").strip().upper()
+        if status == "UNUSABLE":
+            return False
+
+    coach_diagnosis = result_json.get("coach_diagnosis_v1") or {}
+    if isinstance(coach_diagnosis, dict):
+        root_cause = coach_diagnosis.get("root_cause") or {}
+        if isinstance(root_cause, dict):
+            status = str(root_cause.get("status") or "").strip().lower()
+            if status == "not_interpretable":
+                return False
+
+    kinetic_chain = result_json.get("kinetic_chain_v1") or {}
+    if isinstance(kinetic_chain, dict):
+        chain_id = str(kinetic_chain.get("status") or kinetic_chain.get("id") or "").strip().lower()
+        if chain_id == "not_interpretable_with_confidence":
+            return False
+
+    return True
+
+def _extract_history_plan_summary(result_json: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    if not isinstance(result_json, dict):
+        return None
+    history_plan = result_json.get("history_plan_v1")
+    if not isinstance(history_plan, dict):
+        return None
+    root_cause_summary = _extract_root_cause_summary(result_json)
+    bindings = history_plan.get("history_bindings") or []
+    binding_trends = history_plan.get("binding_trends") or []
+    followup_checks = history_plan.get("followup_checks") or []
+    render_stories = history_plan.get("render_stories") or []
+    render_story_ids = [
+        story.get("id")
+        for story in render_stories
+        if isinstance(story, dict) and story.get("id")
+    ]
+    root_cause_story_id = (
+        root_cause_summary.get("render_story_id")
+        if isinstance(root_cause_summary, dict)
+        else None
+    )
+    if root_cause_story_id and root_cause_story_id not in render_story_ids:
+        render_story_ids = [root_cause_story_id, *render_story_ids]
+    return {
+        "history_story": history_plan.get("history_story"),
+        "coaching_priority": history_plan.get("coaching_priority"),
+        "root_cause": root_cause_summary,
+        "history_binding_ids": [
+            binding.get("id")
+            for binding in bindings
+            if isinstance(binding, dict) and binding.get("id")
+        ],
+        "binding_trend_statuses": {
+            str(binding.get("id")): binding.get("status")
+            for binding in binding_trends
+            if isinstance(binding, dict) and binding.get("id")
+        },
+        "followup_check_ids": [
+            check.get("id")
+            for check in followup_checks
+            if isinstance(check, dict) and check.get("id")
+        ],
+        "render_story_ids": render_story_ids,
+    }
+
+
+def _explanation_trace_summary(trace_row: Optional[AnalysisExplanationTrace]) -> Optional[Dict[str, Any]]:
+    if trace_row is None:
+        return None
+    return {
+        "diagnosis_status": trace_row.diagnosis_status,
+        "primary_mechanism_id": trace_row.primary_mechanism_id,
+        "matched_symptom_ids": list(trace_row.matched_symptom_ids or []),
+        "selected_render_story_ids": list(trace_row.selected_render_story_ids or []),
+        "selected_history_binding_ids": list(trace_row.selected_history_binding_ids or []),
+    }
+
+
+def _explanation_trace_payload(trace_row: Optional[AnalysisExplanationTrace]) -> Optional[Dict[str, Any]]:
+    if trace_row is None:
+        return None
+    return {
+        "knowledge_pack_id": trace_row.knowledge_pack_id,
+        "knowledge_pack_version": trace_row.knowledge_pack_version,
+        "diagnosis_status": trace_row.diagnosis_status,
+        "primary_mechanism_id": trace_row.primary_mechanism_id,
+        "matched_symptom_ids": list(trace_row.matched_symptom_ids or []),
+        "candidate_mechanisms": list(trace_row.candidate_mechanisms or []),
+        "supporting_evidence": dict(trace_row.supporting_evidence or {}),
+        "contradictions_triggered": list(trace_row.contradictions_triggered or []),
+        "selected_trajectory_ids": list(trace_row.selected_trajectory_ids or []),
+        "selected_prescription_ids": list(trace_row.selected_prescription_ids or []),
+        "selected_render_story_ids": list(trace_row.selected_render_story_ids or []),
+        "selected_history_binding_ids": list(trace_row.selected_history_binding_ids or []),
+        "trace": dict(trace_row.explanation_trace_json or {}),
+    }
+
+
+def _history_uncertainty_thresholds() -> Dict[str, Any]:
+    try:
+        globals_cfg = load_knowledge_pack()["globals"]
+    except Exception:
+        return {
+            "unresolved_min_runs": 3,
+            "unresolved_window_runs": 8,
+            "unresolved_rate_min": 0.35,
+        }
+    cfg = globals_cfg.get("history_uncertainty") or {}
+    return {
+        "unresolved_min_runs": int(cfg.get("unresolved_min_runs") or 3),
+        "unresolved_window_runs": int(cfg.get("unresolved_window_runs") or 8),
+        "unresolved_rate_min": float(cfg.get("unresolved_rate_min") or 0.35),
+    }
+
+
+def _build_history_uncertainty_summary(
+    runs: List[AnalysisRun],
+    runtime_learning_cases_by_run: Dict[Any, List[str]],
+) -> Dict[str, Any]:
+    thresholds = _history_uncertainty_thresholds()
+    window_runs = max(1, int(thresholds["unresolved_window_runs"]))
+    recent = list(runs[:window_runs])
+    if not recent:
+        return {
+            "pattern_still_being_understood": False,
+            "unresolved_runs": 0,
+            "window_runs": 0,
+            "unresolved_rate": 0.0,
+        }
+
+    unresolved_count = 0
+    for run in recent:
+        diagnosis_status = str(run.deterministic_diagnosis_status or "").strip().lower()
+        runtime_case_statuses = runtime_learning_cases_by_run.get(run.run_id) or []
+        if diagnosis_status in {"no_match", "ambiguous_match", "weak_match"}:
+            unresolved_count += 1
+            continue
+        if any(status in {"OPEN", "CLUSTERED", "QUEUED", "UNDER_REVIEW"} for status in runtime_case_statuses):
+            unresolved_count += 1
+
+    rate = unresolved_count / len(recent)
+    return {
+        "pattern_still_being_understood": (
+            unresolved_count >= int(thresholds["unresolved_min_runs"])
+            and rate >= float(thresholds["unresolved_rate_min"])
+        ),
+        "unresolved_runs": unresolved_count,
+        "window_runs": len(recent),
+        "unresolved_rate": round(rate, 3),
+    }
+
+
+def _build_learning_cluster_item(
+    cluster_row: LearningCaseCluster,
+    *,
+    case_rows: List[LearningCase],
+    coach_flag_rows: List[CoachFlag],
+) -> Dict[str, Any]:
+    run_ids = [str(row.run_id) for row in case_rows]
+    player_ids = sorted({str(row.player_id) for row in case_rows})
+    account_ids = sorted(
+        {
+            str(row.account_id)
+            for row in case_rows
+            if getattr(row, "account_id", None) is not None
+        }
+    )
+    followup_outcomes = Counter(
+        str(row.followup_outcome)
+        for row in case_rows
+        if getattr(row, "followup_outcome", None)
+    )
+    return {
+        "learning_case_cluster_id": str(cluster_row.learning_case_cluster_id),
+        "knowledge_pack_id": cluster_row.knowledge_pack_id,
+        "knowledge_pack_version": cluster_row.knowledge_pack_version,
+        "source_type": cluster_row.source_type,
+        "case_type": cluster_row.case_type,
+        "priority": cluster_row.priority,
+        "status": cluster_row.status,
+        "suggested_gap_type": cluster_row.suggested_gap_type,
+        "trigger_reason": cluster_row.trigger_reason,
+        "symptom_bundle_hash": cluster_row.symptom_bundle_hash,
+        "renderer_mode": cluster_row.renderer_mode,
+        "chosen_mechanism_id": cluster_row.chosen_mechanism_id,
+        "prescription_id": cluster_row.prescription_id,
+        "candidate_mechanism_ids": list(cluster_row.candidate_mechanism_ids or []),
+        "case_count": int(cluster_row.case_count or 0),
+        "coach_flag_count": int(cluster_row.coach_flag_count or 0),
+        "first_run_id": str(cluster_row.first_run_id) if cluster_row.first_run_id else None,
+        "latest_run_id": str(cluster_row.latest_run_id) if cluster_row.latest_run_id else None,
+        "representative_learning_case_id": (
+            str(cluster_row.representative_learning_case_id)
+            if cluster_row.representative_learning_case_id
+            else None
+        ),
+        "created_at": cluster_row.created_at,
+        "updated_at": cluster_row.updated_at,
+        "run_ids": run_ids,
+        "player_ids": player_ids,
+        "account_ids": account_ids,
+        "case_statuses": dict(Counter(str(row.status) for row in case_rows)),
+        "followup_outcomes": dict(followup_outcomes),
+        "coach_flag_types": dict(Counter(str(row.flag_type) for row in coach_flag_rows)),
+        "latest_review": dict((cluster_row.cluster_payload or {}).get("latest_review") or {}),
+        "cluster_payload": dict(cluster_row.cluster_payload or {}),
+    }
+
+
+def _render_reasoning_mode(result_json: Optional[Dict[str, Any]]) -> Optional[str]:
+    if not isinstance(result_json, dict):
+        return None
+    render_reasoning = result_json.get("render_reasoning_v1")
+    if isinstance(render_reasoning, dict):
+        mode = render_reasoning.get("renderer_mode")
+        return str(mode) if isinstance(mode, str) and mode else None
+    return None
+
+
+def _coverage_metrics_payload(
+    *,
+    runs: List[AnalysisRun],
+    raw_by_run_id: Dict[Any, AnalysisResultRaw],
+    followups: List[PrescriptionFollowup],
+    coach_flags: List[CoachFlag],
+    include_breakdown: bool = True,
+) -> Dict[str, Any]:
+    total_runs = len(runs)
+    diagnosis_counts = Counter(
+        str(run.deterministic_diagnosis_status or "").strip().lower()
+        for run in runs
+        if getattr(run, "deterministic_diagnosis_status", None)
+    )
+    renderer_counts = Counter(
+        mode
+        for mode in (
+            _render_reasoning_mode(
+                raw_by_run_id.get(run.run_id).result_json if raw_by_run_id.get(run.run_id) else None
+            )
+            for run in runs
+        )
+        if mode
+    )
+    followup_status_counts = Counter(
+        str(row.response_status or "")
+        for row in followups
+    )
+    total_followups = len(followups)
+
+    def rate(count: int, denominator: int) -> float:
+        if denominator <= 0:
+            return 0.0
+        return round(float(count) / float(denominator), 3)
+
+    overall = {
+        "total_runs": total_runs,
+        "total_followups": total_followups,
+        "total_coach_flags": len(coach_flags),
+        "high_confidence_resolution_rate": rate(diagnosis_counts.get("confident_match", 0), total_runs),
+        "partial_resolution_rate": rate(diagnosis_counts.get("partial_match", 0), total_runs),
+        "no_match_rate": rate(diagnosis_counts.get("no_match", 0), total_runs),
+        "ambiguity_rate": rate(diagnosis_counts.get("ambiguous_match", 0), total_runs),
+        "weak_match_rate": rate(diagnosis_counts.get("weak_match", 0), total_runs),
+        "prescription_non_response_rate": rate(
+            followup_status_counts.get("NO_CLEAR_CHANGE", 0) + followup_status_counts.get("WORSENING", 0),
+            total_followups,
+        ),
+        "renderer_event_only_rate": rate(renderer_counts.get("event_only", 0), total_runs),
+        "coach_flag_rate": rate(len(coach_flags), total_runs),
+    }
+
+    by_pack_version: Dict[str, Dict[str, Any]] = {}
+    if not include_breakdown:
+        return {
+            "overall": overall,
+            "by_pack_version": by_pack_version,
+        }
+    runs_by_pack: Dict[str, List[AnalysisRun]] = {}
+    for run in runs:
+        pack_version = str(run.knowledge_pack_version or "unknown")
+        runs_by_pack.setdefault(pack_version, []).append(run)
+    followups_by_pack: Dict[str, List[PrescriptionFollowup]] = {}
+    for row in followups:
+        pack_version = str(row.knowledge_pack_version or "unknown")
+        followups_by_pack.setdefault(pack_version, []).append(row)
+    coach_flags_by_pack: Dict[str, List[CoachFlag]] = {}
+    for row in coach_flags:
+        pack_version = str(row.knowledge_pack_version or "unknown")
+        coach_flags_by_pack.setdefault(pack_version, []).append(row)
+
+    for pack_version, pack_runs in runs_by_pack.items():
+        pack_followups = followups_by_pack.get(pack_version, [])
+        pack_flags = coach_flags_by_pack.get(pack_version, [])
+        pack_raw_by_run_id = {
+            run.run_id: raw_by_run_id.get(run.run_id)
+            for run in pack_runs
+        }
+        by_pack_version[pack_version] = _coverage_metrics_payload(
+            runs=pack_runs,
+            raw_by_run_id=pack_raw_by_run_id,
+            followups=pack_followups,
+            coach_flags=pack_flags,
+            include_breakdown=False,
+        )["overall"]
+
+    return {
+        "overall": overall,
+        "by_pack_version": by_pack_version,
+    }
+
+
+def _build_release_candidate_item(row: KnowledgePackReleaseCandidate) -> Dict[str, Any]:
+    return {
+        "knowledge_pack_release_candidate_id": str(row.knowledge_pack_release_candidate_id),
+        "knowledge_pack_id": row.knowledge_pack_id,
+        "base_pack_version": row.base_pack_version,
+        "candidate_pack_version": row.candidate_pack_version,
+        "supersedes_pack_version": row.supersedes_pack_version,
+        "status": row.status,
+        "current_environment": row.current_environment,
+        "summary": row.summary,
+        "change_summary": dict(row.change_summary_json or {}),
+        "motivating_cluster_ids": list(row.motivating_cluster_ids or []),
+        "motivating_case_ids": list(row.motivating_case_ids or []),
+        "tests_added": list(row.tests_added or []),
+        "reinterpret_run_ids": list(row.reinterpret_run_ids or []),
+        "schema_validated": bool(row.schema_validated),
+        "referential_integrity_validated": bool(row.referential_integrity_validated),
+        "regression_suite_passed": bool(row.regression_suite_passed),
+        "staging_evaluation_passed": bool(row.staging_evaluation_passed),
+        "approval_granted": bool(row.approval_granted),
+        "created_by_account_id": str(row.created_by_account_id) if row.created_by_account_id else None,
+        "updated_by_account_id": str(row.updated_by_account_id) if row.updated_by_account_id else None,
+        "promoted_at": row.promoted_at,
+        "created_at": row.created_at,
+        "updated_at": row.updated_at,
+    }
+
+
+def _build_release_event_item(row: KnowledgePackReleaseEvent) -> Dict[str, Any]:
+    return {
+        "knowledge_pack_release_event_id": str(row.knowledge_pack_release_event_id),
+        "knowledge_pack_release_candidate_id": str(row.knowledge_pack_release_candidate_id),
+        "account_id": str(row.account_id) if row.account_id else None,
+        "action": row.action,
+        "from_status": row.from_status,
+        "to_status": row.to_status,
+        "from_environment": row.from_environment,
+        "to_environment": row.to_environment,
+        "notes": row.notes or "",
+        "metadata": dict(row.metadata_json or {}),
+        "created_at": row.created_at,
+    }
+
+
+def _build_regression_run_item(row: KnowledgePackRegressionRun) -> Dict[str, Any]:
+    return {
+        "knowledge_pack_regression_run_id": str(row.knowledge_pack_regression_run_id),
+        "knowledge_pack_release_candidate_id": str(row.knowledge_pack_release_candidate_id),
+        "baseline_pack_version": row.baseline_pack_version,
+        "candidate_pack_version": row.candidate_pack_version,
+        "status": row.status,
+        "total_cases": int(row.total_cases or 0),
+        "expected_change_cases": int(row.expected_change_cases or 0),
+        "stable_cases": int(row.stable_cases or 0),
+        "passed_cases": int(row.passed_cases or 0),
+        "failed_cases": int(row.failed_cases or 0),
+        "validated_regression_count": int(row.validated_regression_count or 0),
+        "validated_regression_rate": float(row.validated_regression_rate or 0.0),
+        "expected_change_success_count": int(row.expected_change_success_count or 0),
+        "expected_change_success_rate": float(row.expected_change_success_rate or 0.0),
+        "summary": dict(row.summary_json or {}),
+        "created_by_account_id": str(row.created_by_account_id) if row.created_by_account_id else None,
+        "created_at": row.created_at,
+    }
+
+
+def _build_regression_case_result_item(row: KnowledgePackRegressionCaseResult) -> Dict[str, Any]:
+    return {
+        "knowledge_pack_regression_case_result_id": str(row.knowledge_pack_regression_case_result_id),
+        "knowledge_pack_regression_run_id": str(row.knowledge_pack_regression_run_id),
+        "run_id": str(row.run_id),
+        "learning_case_cluster_id": str(row.learning_case_cluster_id) if row.learning_case_cluster_id else None,
+        "learning_case_id": str(row.learning_case_id) if row.learning_case_id else None,
+        "expected_behavior": row.expected_behavior,
+        "outcome": row.outcome,
+        "baseline_pack_version": row.baseline_pack_version,
+        "candidate_pack_version": row.candidate_pack_version,
+        "baseline_diagnosis_status": row.baseline_diagnosis_status,
+        "candidate_diagnosis_status": row.candidate_diagnosis_status,
+        "baseline_primary_mechanism_id": row.baseline_primary_mechanism_id,
+        "candidate_primary_mechanism_id": row.candidate_primary_mechanism_id,
+        "baseline_renderer_mode": row.baseline_renderer_mode,
+        "candidate_renderer_mode": row.candidate_renderer_mode,
+        "reason": row.reason,
+        "result": dict(row.result_json or {}),
+        "created_at": row.created_at,
+    }
+
+
+def _build_monitoring_snapshot_item(row: KnowledgePackMonitoringSnapshot) -> Dict[str, Any]:
+    return {
+        "knowledge_pack_monitoring_snapshot_id": str(row.knowledge_pack_monitoring_snapshot_id),
+        "knowledge_pack_release_candidate_id": str(row.knowledge_pack_release_candidate_id),
+        "baseline_pack_version": row.baseline_pack_version,
+        "candidate_pack_version": row.candidate_pack_version,
+        "baseline_window_start": row.baseline_window_start,
+        "baseline_window_end": row.baseline_window_end,
+        "candidate_window_start": row.candidate_window_start,
+        "candidate_window_end": row.candidate_window_end,
+        "sufficient_data": bool(row.sufficient_data),
+        "alert_triggered": bool(row.alert_triggered),
+        "rollback_recommended": bool(row.rollback_recommended),
+        "baseline_metrics": dict(row.baseline_metrics_json or {}),
+        "candidate_metrics": dict(row.candidate_metrics_json or {}),
+        "regression_metrics": dict(row.regression_metrics_json or {}),
+        "alert_rules": dict(row.alert_rules_json or {}),
+        "created_by_account_id": str(row.created_by_account_id) if row.created_by_account_id else None,
+        "created_at": row.created_at,
+    }
+
+
+def _build_rollback_alert_item(row: KnowledgePackRollbackAlert) -> Dict[str, Any]:
+    return {
+        "knowledge_pack_rollback_alert_id": str(row.knowledge_pack_rollback_alert_id),
+        "knowledge_pack_release_candidate_id": str(row.knowledge_pack_release_candidate_id),
+        "knowledge_pack_monitoring_snapshot_id": str(row.knowledge_pack_monitoring_snapshot_id),
+        "status": row.status,
+        "summary": row.summary,
+        "triggered_rules": dict(row.triggered_rules_json or {}),
+        "resolved_at": row.resolved_at,
+        "created_at": row.created_at,
+        "updated_at": row.updated_at,
+    }
 
 
 def _analysis_is_baseline_eligible(result_json: Optional[Dict[str, Any]]) -> bool:
@@ -1111,9 +1668,44 @@ def list_analysis_runs(
     if run_ids:
         raw_rows = db.query(AnalysisResultRaw).filter(AnalysisResultRaw.run_id.in_(run_ids)).all()
         raw_by_run_id = {row.run_id: row for row in raw_rows}
+        runs = [
+            run
+            for run in runs
+            if _is_history_eligible_result(
+                raw_by_run_id.get(run.run_id).result_json
+                if raw_by_run_id.get(run.run_id) is not None
+                else None
+            )
+        ]
+        run_ids = [r.run_id for r in runs]
+        raw_by_run_id = {run_id: row for run_id, row in raw_by_run_id.items() if run_id in run_ids}
+    trace_by_run_id: Dict[Any, AnalysisExplanationTrace] = {}
+    if run_ids:
+        trace_rows = (
+            db.query(AnalysisExplanationTrace)
+            .filter(AnalysisExplanationTrace.run_id.in_(run_ids))
+            .all()
+        )
+        trace_by_run_id = {row.run_id: row for row in trace_rows}
+    runtime_learning_cases_by_run: Dict[Any, List[str]] = {}
+    if run_ids:
+        runtime_learning_cases = (
+            db.query(LearningCase)
+            .filter(
+                LearningCase.run_id.in_(run_ids),
+                LearningCase.source_type == "runtime_gap",
+            )
+            .all()
+        )
+        for row in runtime_learning_cases:
+            runtime_learning_cases_by_run.setdefault(row.run_id, []).append(str(row.status))
 
     items = []
     heatmap_entries = []
+    history_uncertainty = _build_history_uncertainty_summary(
+        runs=runs,
+        runtime_learning_cases_by_run=runtime_learning_cases_by_run,
+    )
     for r in runs:
         raw = raw_by_run_id.get(r.run_id)
         score_summary = _extract_score_summary(raw.result_json if raw else None)
@@ -1124,11 +1716,21 @@ def list_analysis_runs(
             "season": r.season,
             "age_group": r.age_group,
             "schema_version": r.schema_version,
+            "knowledge_pack_id": r.knowledge_pack_id,
+            "knowledge_pack_version": r.knowledge_pack_version,
+            "deterministic_diagnosis_status": r.deterministic_diagnosis_status,
+            "deterministic_primary_mechanism_id": r.deterministic_primary_mechanism_id,
+            "deterministic_archetype_id": r.deterministic_archetype_id,
             "fps": r.fps,
             "total_frames": r.total_frames,
             "score_summary": score_summary,
             "rating_summary_v2": rating_summary_v2,
             "visual_walkthrough": _extract_visual_walkthrough(raw.result_json if raw else None),
+            "root_cause_summary_v1": _extract_root_cause_summary(raw.result_json if raw else None),
+            "kinetic_chain_summary_v1": _extract_kinetic_chain_summary(raw.result_json if raw else None),
+            "history_plan_summary_v1": _extract_history_plan_summary(raw.result_json if raw else None),
+            "explanation_trace_summary_v1": _explanation_trace_summary(trace_by_run_id.get(r.run_id)),
+            "history_uncertainty_flag": history_uncertainty["pattern_still_being_understood"],
         }
         items.append(item)
         heatmap_entries.append(
@@ -1164,6 +1766,7 @@ def list_analysis_runs(
                 for r in runs
             ]
         ),
+        "history_uncertainty": history_uncertainty,
     }
 
 
@@ -1192,6 +1795,30 @@ def get_analysis_run(
         raise HTTPException(status_code=403, detail="Access denied")
 
     raw = db.query(AnalysisResultRaw).filter_by(run_id=run_id).first()
+    trace = db.query(AnalysisExplanationTrace).filter_by(run_id=run_id).first()
+    recent_runs = (
+        db.query(AnalysisRun)
+        .filter_by(player_id=run.player_id)
+        .order_by(AnalysisRun.created_at.desc())
+        .limit(_history_uncertainty_thresholds()["unresolved_window_runs"])
+        .all()
+    )
+    recent_run_ids = [row.run_id for row in recent_runs]
+    runtime_learning_cases_by_run: Dict[Any, List[str]] = {}
+    if recent_run_ids:
+        for case_row in (
+            db.query(LearningCase)
+            .filter(
+                LearningCase.run_id.in_(recent_run_ids),
+                LearningCase.source_type == "runtime_gap",
+            )
+            .all()
+        ):
+            runtime_learning_cases_by_run.setdefault(case_row.run_id, []).append(str(case_row.status))
+    history_uncertainty = _build_history_uncertainty_summary(
+        runs=recent_runs,
+        runtime_learning_cases_by_run=runtime_learning_cases_by_run,
+    )
 
     return {
         "run_id": str(run.run_id),
@@ -1200,7 +1827,290 @@ def get_analysis_run(
         "age_group": run.age_group,
         "created_at": run.created_at,
         "schema_version": run.schema_version,
+        "knowledge_pack_id": run.knowledge_pack_id,
+        "knowledge_pack_version": run.knowledge_pack_version,
+        "deterministic_diagnosis_status": run.deterministic_diagnosis_status,
+        "deterministic_primary_mechanism_id": run.deterministic_primary_mechanism_id,
+        "deterministic_archetype_id": run.deterministic_archetype_id,
         "coach_notes": run.coach_notes,
+        "history_uncertainty": history_uncertainty,
+        "explanation_trace_v1": _explanation_trace_payload(trace),
         "visual_walkthrough": _extract_visual_walkthrough(raw.result_json if raw else None),
         "result": raw.result_json if raw else None,
     }
+
+
+@router.get("/players/{player_id}/learning-case-clusters")
+def list_learning_case_clusters(
+    player_id: str,
+    status: Optional[str] = None,
+    current_account=Depends(get_current_account),
+    db: Session = Depends(get_db),
+):
+    link = (
+        db.query(AccountPlayerLink)
+        .filter_by(
+            account_id=current_account.account_id,
+            player_id=player_id,
+        )
+        .first()
+    )
+    if not link:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    cases_query = db.query(LearningCase).filter(LearningCase.player_id == player_id)
+    if status:
+        cases_query = cases_query.filter(LearningCase.status == status.upper())
+    case_rows = cases_query.order_by(LearningCase.created_at.desc()).all()
+    cluster_ids = [
+        row.learning_case_cluster_id
+        for row in case_rows
+        if getattr(row, "learning_case_cluster_id", None) is not None
+    ]
+    if not cluster_ids:
+        return {"items": []}
+
+    cluster_rows = (
+        db.query(LearningCaseCluster)
+        .filter(LearningCaseCluster.learning_case_cluster_id.in_(cluster_ids))
+        .order_by(LearningCaseCluster.updated_at.desc())
+        .all()
+    )
+    coach_flag_rows = (
+        db.query(CoachFlag)
+        .filter(CoachFlag.learning_case_cluster_id.in_(cluster_ids))
+        .all()
+    )
+    cases_by_cluster: Dict[Any, List[LearningCase]] = {}
+    for row in case_rows:
+        if row.learning_case_cluster_id is not None:
+            cases_by_cluster.setdefault(row.learning_case_cluster_id, []).append(row)
+    coach_flags_by_cluster: Dict[Any, List[CoachFlag]] = {}
+    for row in coach_flag_rows:
+        if row.learning_case_cluster_id is not None:
+            coach_flags_by_cluster.setdefault(row.learning_case_cluster_id, []).append(row)
+
+    return {
+        "items": [
+            _build_learning_cluster_item(
+                cluster_row,
+                case_rows=cases_by_cluster.get(cluster_row.learning_case_cluster_id, []),
+                coach_flag_rows=coach_flags_by_cluster.get(cluster_row.learning_case_cluster_id, []),
+            )
+            for cluster_row in cluster_rows
+        ]
+    }
+
+
+@router.get("/players/{player_id}/learning-coverage")
+def get_learning_coverage(
+    player_id: str,
+    season: Optional[int] = None,
+    current_account=Depends(get_current_account),
+    db: Session = Depends(get_db),
+):
+    link = (
+        db.query(AccountPlayerLink)
+        .filter_by(
+            account_id=current_account.account_id,
+            player_id=player_id,
+        )
+        .first()
+    )
+    if not link:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    runs_query = db.query(AnalysisRun).filter(AnalysisRun.player_id == player_id)
+    if season is not None:
+        runs_query = runs_query.filter(AnalysisRun.season == season)
+    runs = runs_query.order_by(AnalysisRun.created_at.desc()).all()
+    run_ids = [row.run_id for row in runs]
+    raw_by_run_id: Dict[Any, AnalysisResultRaw] = {}
+    if run_ids:
+        raw_rows = db.query(AnalysisResultRaw).filter(AnalysisResultRaw.run_id.in_(run_ids)).all()
+        raw_by_run_id = {row.run_id: row for row in raw_rows}
+
+    if run_ids:
+        followups = (
+            db.query(PrescriptionFollowup)
+            .filter(
+                PrescriptionFollowup.player_id == player_id,
+                PrescriptionFollowup.prescription_assigned_at_run_id.in_(run_ids),
+            )
+            .all()
+        )
+        coach_flags = (
+            db.query(CoachFlag)
+            .filter(
+                CoachFlag.player_id == player_id,
+                CoachFlag.run_id.in_(run_ids),
+            )
+            .all()
+        )
+    else:
+        followups = []
+        coach_flags = []
+
+    return _coverage_metrics_payload(
+        runs=runs,
+        raw_by_run_id=raw_by_run_id,
+        followups=followups,
+        coach_flags=coach_flags,
+    )
+
+
+@router.get("/knowledge-pack-release-candidates")
+def list_knowledge_pack_release_candidates(
+    current_account=Depends(get_current_account),
+    db: Session = Depends(get_db),
+):
+    _require_release_reviewer(current_account)
+
+    rows = (
+        db.query(KnowledgePackReleaseCandidate)
+        .order_by(KnowledgePackReleaseCandidate.updated_at.desc())
+        .all()
+    )
+    return {"items": [_build_release_candidate_item(row) for row in rows]}
+
+
+@router.get("/knowledge-pack-release-candidates/{release_candidate_id}")
+def get_knowledge_pack_release_candidate(
+    release_candidate_id: str,
+    current_account=Depends(get_current_account),
+    db: Session = Depends(get_db),
+):
+    _require_release_reviewer(current_account)
+
+    try:
+        release_candidate_uuid = uuid.UUID(release_candidate_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid release_candidate_id format")
+
+    row = (
+        db.query(KnowledgePackReleaseCandidate)
+        .filter(KnowledgePackReleaseCandidate.knowledge_pack_release_candidate_id == release_candidate_uuid)
+        .first()
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="Knowledge-pack release candidate not found")
+
+    events = (
+        db.query(KnowledgePackReleaseEvent)
+        .filter(KnowledgePackReleaseEvent.knowledge_pack_release_candidate_id == release_candidate_uuid)
+        .order_by(KnowledgePackReleaseEvent.created_at.desc())
+        .all()
+    )
+    regression_runs = (
+        db.query(KnowledgePackRegressionRun)
+        .filter(KnowledgePackRegressionRun.knowledge_pack_release_candidate_id == release_candidate_uuid)
+        .order_by(KnowledgePackRegressionRun.created_at.desc())
+        .all()
+    )
+    monitoring_snapshots = (
+        db.query(KnowledgePackMonitoringSnapshot)
+        .filter(KnowledgePackMonitoringSnapshot.knowledge_pack_release_candidate_id == release_candidate_uuid)
+        .order_by(KnowledgePackMonitoringSnapshot.created_at.desc())
+        .all()
+    )
+    rollback_alerts = (
+        db.query(KnowledgePackRollbackAlert)
+        .filter(KnowledgePackRollbackAlert.knowledge_pack_release_candidate_id == release_candidate_uuid)
+        .order_by(KnowledgePackRollbackAlert.updated_at.desc())
+        .all()
+    )
+    return {
+        "candidate": _build_release_candidate_item(row),
+        "events": [_build_release_event_item(event_row) for event_row in events],
+        "regression_runs": [_build_regression_run_item(run_row) for run_row in regression_runs],
+        "monitoring_snapshots": [_build_monitoring_snapshot_item(row) for row in monitoring_snapshots],
+        "rollback_alerts": [_build_rollback_alert_item(row) for row in rollback_alerts],
+    }
+
+
+@router.get("/knowledge-pack-release-candidates/{release_candidate_id}/regression-runs/{regression_run_id}")
+def get_knowledge_pack_release_regression_run(
+    release_candidate_id: str,
+    regression_run_id: str,
+    current_account=Depends(get_current_account),
+    db: Session = Depends(get_db),
+):
+    _require_release_reviewer(current_account)
+
+    try:
+        release_candidate_uuid = uuid.UUID(release_candidate_id)
+        regression_run_uuid = uuid.UUID(regression_run_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid release_candidate_id or regression_run_id format")
+
+    run_row = (
+        db.query(KnowledgePackRegressionRun)
+        .filter(
+            KnowledgePackRegressionRun.knowledge_pack_release_candidate_id == release_candidate_uuid,
+            KnowledgePackRegressionRun.knowledge_pack_regression_run_id == regression_run_uuid,
+        )
+        .first()
+    )
+    if not run_row:
+        raise HTTPException(status_code=404, detail="Knowledge-pack regression run not found")
+
+    case_rows = (
+        db.query(KnowledgePackRegressionCaseResult)
+        .filter(KnowledgePackRegressionCaseResult.knowledge_pack_regression_run_id == regression_run_uuid)
+        .order_by(KnowledgePackRegressionCaseResult.created_at.asc())
+        .all()
+    )
+    return {
+        "regression_run": _build_regression_run_item(run_row),
+        "cases": [_build_regression_case_result_item(row) for row in case_rows],
+    }
+
+
+@router.get("/knowledge-pack-release-candidates/{release_candidate_id}/monitoring-snapshots")
+def list_knowledge_pack_monitoring_snapshots(
+    release_candidate_id: str,
+    current_account=Depends(get_current_account),
+    db: Session = Depends(get_db),
+):
+    _require_release_reviewer(current_account)
+    try:
+        release_candidate_uuid = uuid.UUID(release_candidate_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid release_candidate_id format")
+
+    rows = (
+        db.query(KnowledgePackMonitoringSnapshot)
+        .filter(KnowledgePackMonitoringSnapshot.knowledge_pack_release_candidate_id == release_candidate_uuid)
+        .order_by(KnowledgePackMonitoringSnapshot.created_at.desc())
+        .all()
+    )
+    return {"items": [_build_monitoring_snapshot_item(row) for row in rows]}
+
+
+@router.get("/knowledge-pack-release-candidates/{release_candidate_id}/rollback-alerts")
+def list_knowledge_pack_rollback_alerts(
+    release_candidate_id: str,
+    current_account=Depends(get_current_account),
+    db: Session = Depends(get_db),
+):
+    _require_release_reviewer(current_account)
+    try:
+        release_candidate_uuid = uuid.UUID(release_candidate_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid release_candidate_id format")
+
+    rows = (
+        db.query(KnowledgePackRollbackAlert)
+        .filter(KnowledgePackRollbackAlert.knowledge_pack_release_candidate_id == release_candidate_uuid)
+        .order_by(KnowledgePackRollbackAlert.updated_at.desc())
+        .all()
+    )
+    return {"items": [_build_rollback_alert_item(row) for row in rows]}
+
+
+def _require_release_reviewer(current_account) -> None:
+    if str(getattr(current_account, "role", "")).lower() not in {"coach", "reviewer", "clinician"}:
+        raise HTTPException(
+            status_code=403,
+            detail="Knowledge-pack release workflow is only available to coach, reviewer, or clinician accounts",
+        )

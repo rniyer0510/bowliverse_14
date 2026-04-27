@@ -11,6 +11,7 @@ from app.workers.risk.trunk_rotation_snap import compute_trunk_rotation_snap
 from app.workers.risk.hip_shoulder_mismatch import compute_hip_shoulder_mismatch
 from app.workers.risk.lateral_trunk_lean import compute_lateral_trunk_lean
 from app.workers.risk.foot_line_deviation import compute_foot_line_deviation
+from app.workers.risk.neck_tilt_left_bfc import compute_neck_tilt_left_bfc
 
 from app.workers.risk.benchmarks import attach_deviation_and_impact
 
@@ -31,6 +32,7 @@ RISK_CONFIG = {
     "hip_shoulder_mismatch": {"floor": 0.15},
     "lateral_trunk_lean": {"floor": 0.15},
     "foot_line_deviation": {"floor": 0.15},
+    "neck_tilt_left_bfc": {"floor": 0.15},
 }
 
 # ---------------------------------------------------------------------
@@ -56,6 +58,15 @@ def _f(x: Any, d: float = 0.0) -> float:
         return d
 
 
+def _acceptance_band(signal_strength: float) -> str:
+    value = max(0.0, min(1.0, _f(signal_strength, 0.0)))
+    if value <= 0.25:
+        return "acceptable"
+    if value <= 0.50:
+        return "workable"
+    return "problematic"
+
+
 def _emit(obj: Optional[Dict[str, Any]], risk_id: str) -> Dict[str, Any]:
     """
     Normalize output and enforce floor.
@@ -73,6 +84,7 @@ def _emit(obj: Optional[Dict[str, Any]], risk_id: str) -> Dict[str, Any]:
     out["risk_id"] = risk_id
     out["signal_strength"] = max(_f(out.get("signal_strength"), 0.0), floor)
     out["confidence"] = _f(out.get("confidence"), 0.0)
+    out["acceptance_band"] = _acceptance_band(out["signal_strength"])
     return out
 
 
@@ -157,7 +169,10 @@ def run_risk_worker(
         ),
         _emit(
             compute_knee_brace_failure(
-                pose_frames, ffc, fps, {}
+                pose_frames,
+                ffc,
+                fps,
+                {"hand": ((action or {}).get("hand") or (action or {}).get("bowling_hand") or (action or {}).get("input_hand"))},
             ),
             "knee_brace_failure",
         ),
@@ -185,6 +200,12 @@ def run_risk_worker(
             ),
             "foot_line_deviation",
         ),
+        _emit(
+            compute_neck_tilt_left_bfc(
+                pose_frames, bfc, fps, {}
+            ),
+            "neck_tilt_left_bfc",
+        ),
     ]
 
     out: List[Dict[str, Any]] = []
@@ -198,6 +219,9 @@ def run_risk_worker(
             risk_id=r["risk_id"],
             percentile=percentile,
         )
+        deviation = r.get("deviation")
+        if isinstance(deviation, dict):
+            deviation["acceptance_band"] = r.get("acceptance_band")
         out.append(r)
 
     return out

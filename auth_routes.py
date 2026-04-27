@@ -119,7 +119,7 @@ def register(data: dict, db: Session = Depends(get_db)):
     role = data.get("role", "").strip().lower()
     full_name = data.get("full_name", "").strip()
 
-    if role not in ["player", "coach", "parent"]:
+    if role not in ["player", "coach", "parent", "reviewer", "clinician"]:
         raise HTTPException(status_code=400, detail="Invalid role")
 
     if not username or not password or not full_name:

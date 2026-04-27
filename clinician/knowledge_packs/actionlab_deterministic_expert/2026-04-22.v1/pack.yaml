@@ -1,0 +1,30 @@
+schema_version: actionlab.knowledge_pack.manifest.v1
+pack_id: actionlab_deterministic_expert
+pack_version: 2026-04-22.v1
+release_date: 2026-04-22
+min_engine_version: 1.0.0
+breaking_changes: false
+supersedes: null
+changelog_ref: docs/actionlab_deterministic_expert_2026-04-22.v1.md
+runtime:
+  static_at_runtime: true
+  deterministic_only: true
+index:
+  globals: globals.yaml
+  mechanism_families: mechanism_families.yaml
+  symptoms: symptoms.yaml
+  mechanisms: mechanisms.yaml
+  contributors: contributors.yaml
+  archetypes: archetypes.yaml
+  trajectories: trajectories.yaml
+  prescriptions: prescriptions.yaml
+  followup_checks: followup_checks.yaml
+  render_stories: render_stories.yaml
+  history_bindings: history_bindings.yaml
+  coach_judgments: coach_judgments.yaml
+  capture_templates: capture_templates.yaml
+  architecture_principles: architecture_principles.yaml
+  research_sources: research_sources.yaml
+  knowledge_evidence: knowledge_evidence.yaml
+  reconciliation: reconciliation.yaml
+  wording: wording.yaml

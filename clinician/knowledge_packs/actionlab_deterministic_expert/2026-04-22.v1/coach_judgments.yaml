@@ -1,0 +1,239 @@
+version: actionlab.knowledge_pack.coach_judgments.v1
+
+chain_statuses:
+  connected:
+    id: connected
+    title: "Connected"
+    summary: "Momentum is being carried through the chain with minimal visible leakage."
+    coach_prompt: "Protect what is already connecting well before making a bigger change."
+  workable_but_leaking:
+    id: workable_but_leaking
+    title: "Workable but leaking"
+    summary: "The action can still produce output, but energy or timing is leaking at one key part of the chain."
+    coach_prompt: "Find the main leak and choose the smallest useful intervention."
+  breaking_at_transfer:
+    id: breaking_at_transfer
+    title: "Breaking at transfer"
+    summary: "The chain is losing value around landing instead of turning it into clean transfer."
+    coach_prompt: "Stabilize the landing-to-release transfer before asking for more output."
+  breaking_at_release_timing:
+    id: breaking_at_release_timing
+    title: "Breaking at release timing"
+    summary: "The release window is narrowing enough that distal segments must rescue timing or pace."
+    coach_prompt: "Calm the release window before asking the arm to do more."
+  effective_but_expensive:
+    id: effective_but_expensive
+    title: "Effective but expensive"
+    summary: "The action can still work, but the body is paying a higher cost than we want."
+    coach_prompt: "Respect the output, but reduce the cost before volume or pressure rises."
+  not_interpretable_with_confidence:
+    id: not_interpretable_with_confidence
+    title: "Not interpretable with confidence"
+    summary: "The evidence is too weak to justify a confident coaching story."
+    coach_prompt: "Improve the evidence before introducing a mechanical change."
+
+break_points:
+  approach_build:
+    id: approach_build
+    title: "Approach build"
+    summary: "The chain is losing value before enough usable build reaches the crease."
+    coach_question: "Is the run-up building usable momentum early enough?"
+  gather_and_organize:
+    id: gather_and_organize
+    title: "Gather and organize"
+    summary: "The body is arriving without enough organization to set up clean transfer."
+    coach_question: "Is the bowler organized enough by BFC and into landing?"
+  transfer_and_block:
+    id: transfer_and_block
+    title: "Transfer and block"
+    summary: "The main leak is around landing, where momentum is not becoming a stable transfer point."
+    coach_question: "Is landing turning momentum into a clean, stable transfer?"
+  whip_and_release:
+    id: whip_and_release
+    title: "Whip and release"
+    summary: "The chain is reaching release late enough that distal segments have to rescue timing or pace."
+    coach_question: "Is the release being carried, or is it being rescued late?"
+  dissipation_and_recovery:
+    id: dissipation_and_recovery
+    title: "Dissipation and recovery"
+    summary: "The action is paying for pace after release through a harsh or concentrated finish."
+    coach_question: "How evenly is the body absorbing the finish burden after release?"
+  BFC:
+    id: BFC
+    title: "Back-foot contact"
+    summary: "The chain is already showing a visible organization issue at back-foot contact."
+    coach_question: "Is the bowler already tilted or misaligned at BFC?"
+  FFC:
+    id: FFC
+    title: "Front-foot contact"
+    summary: "The key leak is visible at front-foot contact."
+    coach_question: "What is the landing leg and trunk doing exactly at FFC?"
+  UAH:
+    id: UAH
+    title: "Upper-arm horizontal"
+    summary: "The action is showing a timing or alignment issue by the upper-arm-horizontal anchor."
+    coach_question: "Is the upper chain already chasing timing by UAH?"
+  RELEASE:
+    id: RELEASE
+    title: "Release"
+    summary: "The issue becomes clearest right at release."
+    coach_question: "What visible release symptom is the chain producing?"
+
+change_size_bands:
+  hold:
+    id: hold
+    title: "Hold"
+    summary: "Do not make a change yet because the evidence is not strong enough."
+    adoption_hint: "Protect confidence and improve evidence first."
+  micro:
+    id: micro
+    title: "Micro-change"
+    summary: "A small adjustment that should preserve most of the current action feel."
+    adoption_hint: "Best choice during matches, trials, or selection pressure."
+  moderate:
+    id: moderate
+    title: "Moderate adjustment"
+    summary: "A meaningful change that still aims to preserve the bowler's broad action identity."
+    adoption_hint: "Usually safer in training blocks than under immediate match pressure."
+  major:
+    id: major
+    title: "Major rebuild"
+    summary: "A larger technical change with a higher risk of short-term disruption."
+    adoption_hint: "Best reserved for low-pressure windows or off-season work."
+
+adoption_risk_bands:
+  low:
+    id: low
+    title: "Low adoption risk"
+    summary: "The change is small enough that most bowlers can try it without fearing an immediate performance drop."
+    coach_meaning: "Good first cue when trust and match readiness matter."
+  medium:
+    id: medium
+    title: "Medium adoption risk"
+    summary: "The change may help, but it can briefly disturb rhythm or feel."
+    coach_meaning: "Use in controlled sets before carrying it into higher-pressure work."
+  high:
+    id: high
+    title: "High adoption risk"
+    summary: "The change may be important, but many bowlers will resist it under pressure because it threatens near-term output or feel."
+    coach_meaning: "Introduce only with trust, repetition, and enough protected practice time."
+  unknown:
+    id: unknown
+    title: "Unknown adoption risk"
+    summary: "The system does not yet have enough evidence to estimate the real adoption cost."
+    coach_meaning: "Treat the recommendation cautiously until the story is clearer."
+
+reaction_horizons:
+  near_term:
+    id: near_term
+    title: "Near term"
+    summary: "What may change within the next balls, short set, or immediate session."
+    typical_window: "next_3_balls_to_same_session"
+  medium_term:
+    id: medium_term
+    title: "Medium term"
+    summary: "What may change over the next sessions, spells, or short training block."
+    typical_window: "next_session_to_next_2_weeks"
+  long_term:
+    id: long_term
+    title: "Long term"
+    summary: "What may change across repeated exposure, sustained load, and longer retention windows."
+    typical_window: "repeated_sessions_and_match_cycles"
+
+strength_signals:
+  transfer_efficiency_score:
+    metric_id: transfer_efficiency_score
+    min_value: 0.65
+    summary: "Transfer into release is staying reasonably connected."
+  approach_momentum_score:
+    metric_id: approach_momentum_score
+    min_value: 0.65
+    summary: "Approach intent is bringing usable momentum into the crease."
+  release_timing_stability:
+    metric_id: release_timing_stability
+    min_value: 0.65
+    summary: "Release timing looks calmer than the main leak would suggest."
+  front_leg_support_score:
+    metric_id: front_leg_support_score
+    min_value: 0.65
+    summary: "Landing support is giving the action at least some usable base."
+
+symptom_body_groups:
+  weak_approach_build: whole_chain
+  unstable_gather: whole_chain
+  front_leg_softening: lower_body
+  late_trunk_drift: upper_body
+  arm_chase: upper_body
+  high_terminal_thrust: whole_chain
+  asymmetric_dissipation: whole_chain
+  release_window_instability: upper_body
+  late_chain_load_dump: whole_chain
+  underused_transfer_window: lower_body
+
+compensation_symptom_ids:
+  - arm_chase
+  - high_terminal_thrust
+  - asymmetric_dissipation
+  - late_chain_load_dump
+
+role_detail_policies:
+  player:
+    id: player
+    include_supporting_contributors: false
+    include_body_group_breakdown: false
+    include_compensations: false
+    include_what_is_ok: true
+    include_what_is_not_ok: true
+    include_phase_anchors: false
+    include_history_bindings: false
+    include_change_reaction: false
+    include_evidence_basis: false
+    include_holdback_candidates: false
+  parent:
+    id: parent
+    include_supporting_contributors: false
+    include_body_group_breakdown: false
+    include_compensations: false
+    include_what_is_ok: true
+    include_what_is_not_ok: true
+    include_phase_anchors: false
+    include_history_bindings: false
+    include_change_reaction: false
+    include_evidence_basis: false
+    include_holdback_candidates: false
+  coach:
+    id: coach
+    include_supporting_contributors: true
+    include_body_group_breakdown: true
+    include_compensations: true
+    include_what_is_ok: true
+    include_what_is_not_ok: true
+    include_phase_anchors: true
+    include_history_bindings: true
+    include_change_reaction: true
+    include_evidence_basis: true
+    include_holdback_candidates: true
+  reviewer:
+    id: reviewer
+    include_supporting_contributors: true
+    include_body_group_breakdown: true
+    include_compensations: true
+    include_what_is_ok: true
+    include_what_is_not_ok: true
+    include_phase_anchors: true
+    include_history_bindings: true
+    include_change_reaction: true
+    include_evidence_basis: true
+    include_holdback_candidates: true
+  clinician:
+    id: clinician
+    include_supporting_contributors: true
+    include_body_group_breakdown: true
+    include_compensations: true
+    include_what_is_ok: true
+    include_what_is_not_ok: true
+    include_phase_anchors: true
+    include_history_bindings: true
+    include_change_reaction: true
+    include_evidence_basis: true
+    include_holdback_candidates: true

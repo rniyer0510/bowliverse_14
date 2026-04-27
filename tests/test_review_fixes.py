@@ -2,11 +2,13 @@ import importlib
 import os
 import tempfile
 import unittest
+import uuid
 from datetime import datetime
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import numpy as np
+from fastapi import HTTPException
 
 
 class ResolverFixTests(unittest.TestCase):
@@ -147,6 +149,60 @@ class ClinicianYamlValidationTests(unittest.TestCase):
         importlib.reload(bands)
         importlib.reload(interpreter)
 
+    def test_default_knowledge_pack_validates(self):
+        from app.clinician.knowledge_pack import validate_default_knowledge_pack
+
+        validate_default_knowledge_pack()
+
+    def test_band_helpers_prefer_knowledge_pack_semantic_bands(self):
+        from app.clinician import bands
+
+        pack_globals = {
+            "globals": {
+                "severity_bands": {
+                    "low": {"min": 0.0, "max": 0.2},
+                    "moderate": {"min": 0.2, "max": 0.5},
+                    "high": {"min": 0.5, "max": 0.8},
+                    "very_high": {"min": 0.8, "max": 1.01},
+                },
+                "confidence_bands": {
+                    "high": {"min": 0.9},
+                    "medium": {"min": 0.4},
+                    "low": {"min": 0.0},
+                },
+            }
+        }
+
+        with patch("app.clinician.bands.load_knowledge_pack", return_value=pack_globals), patch(
+            "app.clinician.bands.load_yaml"
+        ) as load_yaml_mock:
+            self.assertEqual(bands.severity_band(0.65), "HIGH")
+            self.assertEqual(bands.confidence_band(0.45), "MEDIUM")
+
+        load_yaml_mock.assert_not_called()
+
+    def test_pillar_positive_bonus_caps_are_enabled(self):
+        from app.clinician.interpreter import PILLAR_MAX_BONUS
+
+        self.assertGreater(PILLAR_MAX_BONUS["POSTURE"], 0.0)
+        self.assertGreater(PILLAR_MAX_BONUS["POWER"], 0.0)
+        self.assertGreater(PILLAR_MAX_BONUS["PROTECTION"], 0.0)
+
+
+class ReviewerRoleTests(unittest.TestCase):
+    def test_review_role_helpers_allow_reviewer_and_clinician(self):
+        from app.persistence.read_api import _require_release_reviewer
+        from app.persistence.write_api import _require_coach_reviewer
+
+        for role in ("coach", "reviewer", "clinician"):
+            _require_release_reviewer(SimpleNamespace(role=role))
+            _require_coach_reviewer(SimpleNamespace(role=role))
+
+        with self.assertRaises(HTTPException):
+            _require_release_reviewer(SimpleNamespace(role="player"))
+        with self.assertRaises(HTTPException):
+            _require_coach_reviewer(SimpleNamespace(role="parent"))
+
 
 class AnalyzePersistenceFallbackTests(unittest.TestCase):
     def test_persist_analysis_result_returns_warning_after_retries_fail(self):
@@ -215,9 +271,19 @@ class AnalyzePersistenceFallbackTests(unittest.TestCase):
 class WriterSessionOwnershipTests(unittest.TestCase):
     def test_write_analysis_with_external_session_flushes_without_committing(self):
         from app.persistence import writer
+        from app.persistence.models import AnalysisExplanationTrace, Player
 
         db = MagicMock()
-        db.get.return_value = SimpleNamespace(season=2026, age_group="U16")
+        player = SimpleNamespace(season=2026, age_group="U16")
+
+        def get_side_effect(model, key):
+            if model is Player:
+                return player
+            if model is AnalysisExplanationTrace:
+                return None
+            return None
+
+        db.get.side_effect = get_side_effect
         result = {
             "input": {"player_id": "11111111-1111-1111-1111-111111111111", "hand": "R"},
             "video": {"fps": 30.0, "total_frames": 120},
@@ -225,6 +291,15 @@ class WriterSessionOwnershipTests(unittest.TestCase):
             "elbow": {},
             "action": {},
             "risks": [],
+            "deterministic_expert_v1": {
+                "knowledge_pack_id": "actionlab_deterministic_expert",
+                "knowledge_pack_version": "2026-04-22.v1",
+                "selection": {
+                    "diagnosis_status": "partial_match",
+                    "primary_mechanism_id": "soft_block_with_trunk_carry",
+                },
+                "archetype_v1": {"id": "soft_block_leakage_bowler"},
+            },
         }
 
         run_id = "22222222-2222-2222-2222-222222222222"
@@ -237,9 +312,70 @@ class WriterSessionOwnershipTests(unittest.TestCase):
         )
 
         self.assertEqual(persisted_run_id, run_id)
+        created_run = db.add.call_args_list[0].args[0]
+        self.assertEqual(created_run.knowledge_pack_id, "actionlab_deterministic_expert")
+        self.assertEqual(created_run.knowledge_pack_version, "2026-04-22.v1")
+        self.assertEqual(created_run.deterministic_diagnosis_status, "partial_match")
+        self.assertEqual(
+            created_run.deterministic_primary_mechanism_id,
+            "soft_block_with_trunk_carry",
+        )
+        self.assertTrue(
+            any(
+                isinstance(call.args[0], AnalysisExplanationTrace)
+                for call in db.add.call_args_list
+            )
+        )
+        self.assertEqual(
+            created_run.deterministic_archetype_id,
+            "soft_block_leakage_bowler",
+        )
         db.flush.assert_called()
         db.commit.assert_not_called()
         db.rollback.assert_not_called()
+
+    def test_write_analysis_rejects_existing_explanation_trace(self):
+        from app.persistence import writer
+        from app.persistence.models import AnalysisExplanationTrace, Player
+
+        db = MagicMock()
+        player = SimpleNamespace(season=2026, age_group="U16")
+        existing_trace = SimpleNamespace(run_id=uuid.UUID("22222222-2222-2222-2222-222222222222"))
+
+        def get_side_effect(model, key):
+            if model is Player:
+                return player
+            if model is AnalysisExplanationTrace:
+                return existing_trace
+            return None
+
+        db.get.side_effect = get_side_effect
+        result = {
+            "input": {"player_id": "11111111-1111-1111-1111-111111111111", "hand": "R"},
+            "video": {"fps": 30.0, "total_frames": 120},
+            "events": {},
+            "elbow": {},
+            "action": {},
+            "risks": [],
+            "deterministic_expert_v1": {
+                "knowledge_pack_id": "actionlab_deterministic_expert",
+                "knowledge_pack_version": "2026-04-22.v1",
+                "selection": {
+                    "diagnosis_status": "partial_match",
+                    "primary_mechanism_id": "soft_block_with_trunk_carry",
+                },
+                "archetype_v1": {"id": "soft_block_leakage_bowler"},
+            },
+        }
+
+        with self.assertRaises(ValueError):
+            writer.write_analysis(
+                result=result,
+                db=db,
+                run_id="22222222-2222-2222-2222-222222222222",
+                season=2026,
+                age_group="U16",
+            )
 
 
 class TempCleanupTests(unittest.TestCase):

@@ -1,0 +1,135 @@
+version: actionlab.knowledge_pack.followup_checks.v1
+
+followup_checks:
+  reduced_trunk_drift_after_ffc:
+    id: reduced_trunk_drift_after_ffc
+    title: "Reduced trunk drift after front-foot contact"
+    simple_title: "Body stays over the front leg better"
+    success_signals:
+      - "Chest stops travelling so far past the landing base."
+      - "Front-leg support looks calmer into release."
+    simple_success_signals:
+      - "The chest stops moving so far past the front leg."
+      - "Front-leg support looks calmer into release."
+    failure_signals:
+      - "Trunk still carries forward aggressively after landing."
+      - "Landing support remains soft ball to ball."
+    simple_failure_signals:
+      - "The body still spills forward after landing."
+      - "The front leg still looks soft from ball to ball."
+    recommended_review_window: "Next 3 deliveries, then next session."
+    history_graph_binding: transfer_block_stability
+
+  cleaner_transfer_score:
+    id: cleaner_transfer_score
+    title: "Cleaner transfer score"
+    simple_title: "Landing becomes a cleaner power move"
+    success_signals:
+      - "Transfer efficiency improves while terminal rush does not increase."
+      - "Landing and release phases look more connected."
+    simple_success_signals:
+      - "Landing is turning into a cleaner power move."
+      - "The action looks more connected from landing to release."
+    failure_signals:
+      - "Transfer score stays flat while late rescue remains visible."
+      - "Momentum still appears to leak before or at block."
+    simple_failure_signals:
+      - "Landing is still leaking before release."
+      - "Late rescue is still easy to see."
+    recommended_review_window: "Next short set, then 1 to 2 sessions."
+    history_graph_binding: transfer_block_stability
+
+  lower_late_thrust_dependence:
+    id: lower_late_thrust_dependence
+    title: "Lower late-thrust dependence"
+    simple_title: "Less speed made at the very end"
+    success_signals:
+      - "Terminal impulse eases while approach carry improves."
+      - "The finish looks less like a rescue action."
+    simple_success_signals:
+      - "The late push eases while earlier carry improves."
+      - "The finish looks less like a rescue."
+    failure_signals:
+      - "The end rush stays just as violent."
+      - "Pace still appears to be created almost entirely near release."
+    simple_failure_signals:
+      - "The end rush still looks just as violent."
+      - "Too much of the speed is still being made right near release."
+    recommended_review_window: "Next short set, then next session."
+    history_graph_binding: pace_translation_profile
+
+  more_stable_release_timing:
+    id: more_stable_release_timing
+    title: "More stable release timing"
+    simple_title: "Release timing stays calmer"
+    success_signals:
+      - "The arm and trunk arrive in a calmer sequence."
+      - "Release timing varies less ball to ball."
+    simple_success_signals:
+      - "The body and arm arrive in a calmer order."
+      - "Release timing changes less from ball to ball."
+    failure_signals:
+      - "The arm still looks rushed."
+      - "Timing drift returns quickly when the bowler adds intent."
+    simple_failure_signals:
+      - "The arm still looks rushed."
+      - "Timing falls apart again when the bowler adds effort."
+    recommended_review_window: "Next 3 to 5 deliveries, then next session."
+    history_graph_binding: pace_translation_profile
+
+  reduced_dissipation_burden:
+    id: reduced_dissipation_burden
+    title: "Reduced dissipation burden"
+    simple_title: "Finish spreads the load better"
+    success_signals:
+      - "Follow-through looks less abrupt and more balanced."
+      - "Side-body and trunk load cues soften after release."
+    simple_success_signals:
+      - "The finish looks less abrupt and more balanced."
+      - "The body is not taking the finish as harshly after release."
+    failure_signals:
+      - "The finish still looks harsh or asymmetric."
+      - "Load concentration remains obvious after release."
+    simple_failure_signals:
+      - "The finish still looks harsh or one-sided."
+      - "Too much load is still landing in one area after release."
+    recommended_review_window: "Next session and next spell."
+    history_graph_binding: dissipation_profile
+
+  calmer_release_window_under_load:
+    id: calmer_release_window_under_load
+    title: "Calmer release window under load"
+    simple_title: "Release stays calm under pressure"
+    success_signals:
+      - "The trunk and arm arrive in a calmer sequence even when intent stays high."
+      - "The release looks less rescued late in the action."
+    simple_success_signals:
+      - "The body and arm still arrive calmly even when effort stays high."
+      - "The release looks less rescued late."
+    failure_signals:
+      - "The arm still looks rushed when the bowler adds pace intent."
+      - "Late-chain rescue reappears as soon as effort rises."
+    simple_failure_signals:
+      - "The arm still rushes when the bowler tries to bowl faster."
+      - "Late rescue comes back as soon as effort rises."
+    recommended_review_window: "Next short set, then next session."
+    history_graph_binding: release_window_control
+
+  more_balanced_finish_absorption:
+    id: more_balanced_finish_absorption
+    title: "More balanced finish absorption"
+    simple_title: "Finish stays more balanced"
+    success_signals:
+      - "The follow-through looks less like a sudden dump into the side body."
+      - "The trunk and front leg share the finish more evenly."
+    simple_success_signals:
+      - "The finish looks less like a sudden dump into one side of the body."
+      - "The front leg and body share the finish more evenly."
+    failure_signals:
+      - "The finish still looks abrupt, folded, or heavily one-sided."
+      - "Late push and harsh deceleration continue to travel together."
+    simple_failure_signals:
+      - "The finish still looks abrupt, folded, or one-sided."
+      - "The late push and harsh finish still show up together."
+    recommended_review_window: "Next session and next 2 weeks."
+    history_graph_binding: late_chain_load_cost

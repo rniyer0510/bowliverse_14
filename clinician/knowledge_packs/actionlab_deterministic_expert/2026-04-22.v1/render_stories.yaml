@@ -1,0 +1,142 @@
+version: actionlab.knowledge_pack.render_stories.v1
+
+render_stories:
+  late_rescue_release_story:
+    id: late_rescue_release_story
+    title: "Late rescue release story"
+    phases:
+      - approach_build
+      - whip_and_release
+    trigger_mechanism_ids:
+      - low_build_forcing_late_rescue
+    focus_regions:
+      - runup_line
+      - trunk
+      - bowling_arm
+    storyboard:
+      - phase: approach_build
+        overlay: rhythm_trace
+        cue: "Show that the final approach does not bring enough usable momentum into the crease."
+      - phase: release
+        overlay: release_burst
+        cue: "Pause at release and show that pace is being rescued late rather than carried through the chain."
+
+  gather_to_block_alignment_story:
+    id: gather_to_block_alignment_story
+    title: "Gather-to-block alignment story"
+    phases:
+      - gather_and_organize
+      - transfer_and_block
+    trigger_mechanism_ids:
+      - gather_disorganization_before_block
+    focus_regions:
+      - hips
+      - trunk
+      - line_of_travel
+    storyboard:
+      - phase: back_foot_contact
+        overlay: line_alignment
+        cue: "Freeze at gather and show the body arriving off the clean transfer line."
+      - phase: front_foot_contact
+        overlay: transfer_path
+        cue: "Show how that disorganization carries into a softer landing base."
+
+  soft_block_trunk_carry_story:
+    id: soft_block_trunk_carry_story
+    title: "Soft block with trunk carry story"
+    phases:
+      - transfer_and_block
+      - whip_and_release
+    trigger_mechanism_ids:
+      - soft_block_with_trunk_carry
+    focus_regions:
+      - front_leg
+      - trunk
+      - shoulder_line
+    storyboard:
+      - phase: front_foot_contact
+        overlay: freeze_frame
+        cue: "Pause at landing and show the front leg failing to become a clear transfer point."
+      - phase: release
+        overlay: trunk_drift
+        cue: "Then show the chest and trunk still travelling past the landing base into release."
+
+  delayed_chain_arm_chase_story:
+    id: delayed_chain_arm_chase_story
+    title: "Delayed chain arm chase story"
+    phases:
+      - gather_and_organize
+      - whip_and_release
+    trigger_mechanism_ids:
+      - late_arm_acceleration_due_to_chain_delay
+    focus_regions:
+      - shoulder_line
+      - trunk
+      - bowling_arm
+    storyboard:
+      - phase: gather_and_organize
+        overlay: sequence_marker
+        cue: "Show that the chain arrives late enough that the release window is already under pressure."
+      - phase: release
+        overlay: arm_chase
+        cue: "Highlight the arm needing to accelerate late to catch up with the release."
+
+  high_dissipation_followthrough_story:
+    id: high_dissipation_followthrough_story
+    title: "High dissipation follow-through story"
+    phases:
+      - whip_and_release
+      - dissipation_and_recovery
+    trigger_mechanism_ids:
+      - high_terminal_impulse_with_high_dissipation_burden
+    focus_regions:
+      - trunk
+      - side_body
+      - front_leg
+    storyboard:
+      - phase: release
+        overlay: release_burst
+        cue: "Pause at release and show how much of the visible pace is being created late."
+      - phase: followthrough
+        overlay: load_hotspot
+        cue: "After the release cue fades, show the trunk and front-leg load burden in the follow-through."
+
+  release_window_under_load_story:
+    id: release_window_under_load_story
+    title: "Release-window under-load story"
+    phases:
+      - whip_and_release
+      - dissipation_and_recovery
+    trigger_mechanism_ids:
+      - release_window_instability_under_load
+    focus_regions:
+      - bowling_arm
+      - shoulder_line
+      - trunk
+    storyboard:
+      - phase: release
+        overlay: sequence_marker
+        cue: "Freeze at release and show the window tightening under higher intent."
+      - phase: followthrough
+        overlay: load_hotspot
+        cue: "Then show how the rushed finish leaves a larger late-chain load burden after the ball is gone."
+
+  underused_transfer_late_dump_story:
+    id: underused_transfer_late_dump_story
+    title: "Underused transfer late-dump story"
+    phases:
+      - transfer_and_block
+      - dissipation_and_recovery
+    trigger_mechanism_ids:
+      - underused_transfer_window_with_late_dump
+    focus_regions:
+      - front_leg
+      - trunk
+      - side_body
+    storyboard:
+      - phase: front_foot_contact
+        overlay: transfer_path
+        cue: "Pause at landing and show that the transfer window is visible but underused."
+      - phase: followthrough
+        overlay: load_hotspot
+        cue: "Then show the finish dumping too much deceleration late into the trunk and side body."

@@ -11,6 +11,10 @@ from app.workers.render.coach_video_renderer import (
     _format_action_label,
     _draw_load_watch_phase,
     _preferred_hotspot_region_key,
+    _root_cause_proof_step,
+    _story_risk_for_phase,
+    _stacked_hotspot_region_keys,
+    _should_render_warning_hotspots,
     _select_hotspot_frame_idx,
     render_skeleton_video,
     _render_timeline_events,
@@ -19,7 +23,10 @@ from app.workers.render.coach_video_renderer import (
 from app.workers.render.render_load_watch import (
     _load_hotspot_regions,
     _preferred_ffc_cue_risk_id,
+    _release_hotspot_risk_id,
+    _summary_load_watch_title,
     _summary_load_watch_text,
+    _summary_symptom_title,
     _summary_symptom_text,
 )
 
@@ -188,6 +195,76 @@ class CoachVideoRendererTest(unittest.TestCase):
     def test_preferred_hotspot_region_key_uses_curated_region_by_risk(self):
         self.assertEqual(_preferred_hotspot_region_key("knee_brace_failure"), "knee")
         self.assertEqual(_preferred_hotspot_region_key("lateral_trunk_lean"), "side_trunk")
+
+    def test_leg_hotspot_stack_prioritizes_anchor_that_matches_card(self):
+        self.assertEqual(
+            _stacked_hotspot_region_keys("knee_brace_failure"),
+            ["knee", "shin", "groin"],
+        )
+        self.assertEqual(
+            _stacked_hotspot_region_keys("foot_line_deviation"),
+            ["shin", "knee", "groin"],
+        )
+
+    def test_connected_story_suppresses_warning_hotspots(self):
+        self.assertFalse(
+            _should_render_warning_hotspots(
+                report_story={"theme": "working_pattern"},
+                root_cause={"status": "no_clear_problem"},
+            )
+        )
+        self.assertTrue(
+            _should_render_warning_hotspots(
+                report_story={"theme": "problem_pattern"},
+                root_cause={"status": "clear"},
+            )
+        )
+
+    def test_root_cause_phase_target_blocks_report_story_fallback(self):
+        self.assertIsNone(
+            _story_risk_for_phase(
+                {"hero_risk_id": "hip_shoulder_mismatch"},
+                phase_key="release",
+                events={"release": {"frame": 10, "confidence": 0.8}},
+                root_cause={"status": "no_clear_problem", "renderer_guidance": None},
+            )
+        )
+        self.assertEqual(
+            _story_risk_for_phase(
+                {"hero_risk_id": "hip_shoulder_mismatch"},
+                phase_key="ffc",
+                events={"ffc": {"frame": 10, "confidence": 0.8}, "event_chain": {"quality": 0.8}},
+                root_cause={
+                    "status": "clear",
+                    "renderer_guidance": {
+                        "phase_targets": {
+                            "ffc": {"risk_id": "knee_brace_failure"},
+                        }
+                    },
+                },
+            ),
+            "knee_brace_failure",
+        )
+
+    def test_root_cause_proof_step_reads_backend_phase_step(self):
+        self.assertEqual(
+            _root_cause_proof_step(
+                {
+                    "renderer_guidance": {
+                        "phase_targets": {
+                            "ffc": {
+                                "proof_step": {
+                                    "title": "Where It Starts",
+                                    "headline": "Front leg doesn't hold strong at landing.",
+                                }
+                            }
+                        }
+                    }
+                },
+                phase_key="ffc",
+            )["title"],
+            "Where It Starts",
+        )
 
     def test_render_skeleton_video_builds_tracks_for_full_pose_sequence(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -554,7 +631,44 @@ class CoachVideoRendererTest(unittest.TestCase):
         )
 
         self.assertEqual(lines[0], "Keep watching Upper Body Opening")
-        self.assertIn("Body stays fairly tall", lines)
+
+    def test_connected_summary_uses_positive_titles_and_copy(self):
+        root_cause = {"status": "no_clear_problem"}
+
+        self.assertEqual(
+            _summary_symptom_title(root_cause=root_cause),
+            "What Is Working",
+        )
+        self.assertEqual(
+            _summary_symptom_text({}, root_cause=root_cause),
+            "Action stays connected through landing and release.",
+        )
+        self.assertEqual(
+            _summary_load_watch_title(root_cause=root_cause),
+            "Load Stays Shared",
+        )
+        self.assertEqual(
+            _summary_load_watch_text({}, root_cause=root_cause),
+            "No one area is taking too much load.",
+        )
+
+    def test_positive_theme_without_watch_focus_does_not_claim_working_title(self):
+        report_story = {"theme": "working_pattern"}
+
+        self.assertEqual(
+            _summary_symptom_title(report_story=report_story),
+            "What To Notice",
+        )
+        self.assertEqual(
+            _summary_symptom_text({}, report_story=report_story),
+            "Action has a usable base, but one part still needs watching.",
+        )
+
+    def test_summary_load_watch_uses_clearer_fallback_when_no_load_label_exists(self):
+        self.assertEqual(
+            _summary_load_watch_text({}, report_story={"theme": "alignment"}),
+            "Need a clearer release view to read load.",
+        )
 
     def test_summary_load_watch_uses_distinct_body_families(self):
         text = _summary_load_watch_text(
@@ -619,6 +733,80 @@ class CoachVideoRendererTest(unittest.TestCase):
         )
 
         self.assertEqual(text, "Body falls away at release")
+
+    def test_preferred_ffc_cue_risk_id_prefers_root_cause_anchor(self):
+        risk_by_id = {
+            "knee_brace_failure": {"risk_id": "knee_brace_failure", "signal_strength": 0.4, "confidence": 0.7},
+            "foot_line_deviation": {"risk_id": "foot_line_deviation", "signal_strength": 0.8, "confidence": 0.9},
+        }
+        events = {
+            "ffc": {"frame": 10, "confidence": 0.9},
+            "event_chain": {"quality": 0.8},
+        }
+
+        preferred = _preferred_ffc_cue_risk_id(
+            risk_by_id,
+            report_story=None,
+            events=events,
+            root_cause={
+                "renderer_guidance": {
+                    "anchor_risk_ids": {"ffc": "knee_brace_failure"},
+                }
+            },
+        )
+
+        self.assertEqual(preferred, "knee_brace_failure")
+
+    def test_release_hotspot_risk_id_prefers_root_cause_anchor(self):
+        risk_by_id = {
+            "lateral_trunk_lean": {"risk_id": "lateral_trunk_lean", "signal_strength": 0.5, "confidence": 0.8},
+            "hip_shoulder_mismatch": {"risk_id": "hip_shoulder_mismatch", "signal_strength": 0.9, "confidence": 0.9},
+        }
+
+        preferred = _release_hotspot_risk_id(
+            risk_by_id,
+            events={"release": {"frame": 14, "confidence": 0.9}},
+            report_story=None,
+            root_cause={
+                "renderer_guidance": {
+                    "anchor_risk_ids": {"release": "lateral_trunk_lean"},
+                }
+            },
+        )
+
+        self.assertEqual(preferred, "lateral_trunk_lean")
+
+    def test_summary_text_prefers_root_cause_guidance(self):
+        risk_by_id = {
+            "knee_brace_failure": {"risk_id": "knee_brace_failure", "signal_strength": 0.9, "confidence": 0.9},
+            "lateral_trunk_lean": {"risk_id": "lateral_trunk_lean", "signal_strength": 0.7, "confidence": 0.8},
+        }
+        root_cause = {
+            "renderer_guidance": {
+                "simple_symptom_text": "Front leg doesn't hold strong at landing, then the body falls away.",
+                "simple_load_watch_text": "Front leg works hard.\nLower back works hard too.",
+                "symptom_text": "Front leg softens first and trunk carry appears after it.",
+                "load_watch_text": "Front knee / leg chain\nLower back / side trunk",
+            }
+        }
+
+        symptom_text = _summary_symptom_text(
+            risk_by_id,
+            root_cause=root_cause,
+        )
+        load_watch_text = _summary_load_watch_text(
+            risk_by_id,
+            root_cause=root_cause,
+        )
+
+        self.assertEqual(
+            symptom_text,
+            "Front leg doesn't hold strong at landing, then the body falls away.",
+        )
+        self.assertEqual(
+            load_watch_text,
+            "Front leg works hard.\nLower back works hard too.",
+        )
 
     def test_load_hotspot_regions_include_leg_and_trunk_targets(self):
         pose_frames = [_pose_frame(i, shift=0.01 * i) for i in range(5)]

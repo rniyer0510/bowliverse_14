@@ -5,7 +5,7 @@ from datetime import datetime
 import os
 import time
 import uuid
-from typing import Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from app.common.logger import get_logger
 from app.common.auth import get_current_account
@@ -43,18 +43,34 @@ from app.interpretation.interpret_risks import interpret_risks
 from app.workers.efficiency.basic_coaching import analyze_basics
 
 # Clinician
+from app.clinician.deterministic_expert import DeterministicExpertSystem
 from app.clinician.loader import validate_known_yaml_files
+from app.clinician.knowledge_pack import validate_default_knowledge_pack
 from app.clinician.interpreter import ClinicianInterpreter
 
 # Persistence
+from app.persistence.learning_cases import (
+    build_learning_case_event,
+    write_learning_case,
+)
+from app.persistence.notifications import (
+    persist_analysis_completed_notification_best_effort,
+)
+from app.persistence.prescription_followups import sync_prescription_followups_for_run
 from app.persistence.writer import write_analysis
 from app.persistence.session import SessionLocal
-from app.persistence.models import Player, AccountPlayerLink
+from app.persistence.models import (
+    Player,
+    AccountPlayerLink,
+    AnalysisRun,
+    AnalysisResultRaw,
+)
 
 # Routers
 from app.persistence.read_api import router as persistence_read_router
 from app.persistence.write_api import router as persistence_write_router
 from app.persistence.account_api import router as account_router
+from app.persistence.notification_api import router as notification_router
 from app.auth_routes import router as auth_router
 
 
@@ -77,17 +93,21 @@ if AUTO_CREATE_SCHEMA:
     Base.metadata.create_all(bind=engine)
 logger = get_logger(__name__)
 clinician_engine: Optional[ClinicianInterpreter] = None
+deterministic_expert_engine: Optional[DeterministicExpertSystem] = None
 RENDERS_DIR = RENDER_DIR
 
 WALKTHROUGH_PAUSE_SECONDS = 3.0
 WALKTHROUGH_SLOW_MOTION_FACTOR = 3.0
 WALKTHROUGH_END_SUMMARY_SECONDS = 2.5
+WALKTHROUGH_RENDERER_VERSION = "coach_video_renderer_v2_2026_04_24"
 
 @app.on_event("startup")
 def _startup_housekeeping() -> None:
-    global clinician_engine
+    global clinician_engine, deterministic_expert_engine
     validate_known_yaml_files()
+    validate_default_knowledge_pack()
     clinician_engine = ClinicianInterpreter()
+    deterministic_expert_engine = DeterministicExpertSystem()
     render_cleanup = cleanup_old_renders(
         RENDER_DIR,
         retention_days=render_retention_days(),
@@ -262,8 +282,105 @@ def _get_clinician_engine() -> ClinicianInterpreter:
     global clinician_engine
     if clinician_engine is None:
         validate_known_yaml_files()
+        validate_default_knowledge_pack()
         clinician_engine = ClinicianInterpreter()
     return clinician_engine
+
+
+def _get_deterministic_expert_engine() -> DeterministicExpertSystem:
+    global deterministic_expert_engine
+    if deterministic_expert_engine is None:
+        validate_default_knowledge_pack()
+        deterministic_expert_engine = DeterministicExpertSystem()
+    return deterministic_expert_engine
+
+
+def _load_recent_expert_history(
+    *,
+    db,
+    player_id: str,
+    limit: int,
+) -> List[Dict[str, Any]]:
+    if limit <= 0:
+        return []
+
+    rows = (
+        db.query(
+            AnalysisRun.run_id,
+            AnalysisRun.created_at,
+            AnalysisResultRaw.result_json,
+        )
+        .join(AnalysisResultRaw, AnalysisResultRaw.run_id == AnalysisRun.run_id)
+        .filter(AnalysisRun.player_id == player_id)
+        .order_by(AnalysisRun.created_at.desc())
+        .limit(limit)
+        .all()
+    )
+    history: List[Dict[str, Any]] = []
+    for run_id, created_at, result_json in rows:
+        if not isinstance(result_json, dict):
+            continue
+        history.append(
+            {
+                "run_id": str(run_id),
+                "created_at": created_at,
+                "result_json": result_json,
+            }
+        )
+    return history
+
+
+def _persist_learning_case_best_effort(
+    *,
+    request_id: str,
+    run_id: str,
+    result: Dict[str, Any],
+    account_id: Optional[str],
+) -> None:
+    try:
+        event_payload = build_learning_case_event(
+            result=result,
+            account_id=account_id,
+        )
+        if not event_payload:
+            logger.info(
+                "[learning_case] request_id=%s run_id=%s skipped=no_gap_trigger",
+                request_id,
+                run_id,
+            )
+            return
+        write_learning_case(event_payload=event_payload)
+    except Exception as exc:
+        logger.error(
+            "[learning_case] request_id=%s run_id=%s persisted=false error=%s",
+            request_id,
+            run_id,
+            exc,
+        )
+
+
+def _sync_prescription_followups_best_effort(
+    *,
+    request_id: str,
+    run_id: str,
+) -> None:
+    try:
+        summary = sync_prescription_followups_for_run(run_id=run_id)
+        logger.info(
+            "[prescription_followup] request_id=%s run_id=%s created=%s updated=%s non_response_cases=%s",
+            request_id,
+            run_id,
+            summary.get("created", 0),
+            summary.get("updated", 0),
+            summary.get("non_response_cases", 0),
+        )
+    except Exception as exc:
+        logger.error(
+            "[prescription_followup] request_id=%s run_id=%s persisted=false error=%s",
+            request_id,
+            run_id,
+            exc,
+        )
 
 
 def _reject_with_code(
@@ -388,6 +505,26 @@ def _gate_speed_estimate(
     return estimated_release_speed
 
 
+def _release_dependent_metrics_should_be_suppressed(capture_quality: dict) -> bool:
+    status = str((capture_quality or {}).get("status") or "").strip().upper()
+    if status == "UNUSABLE":
+        return True
+    notes = {
+        str(item).strip().lower()
+        for item in list((capture_quality or {}).get("notes") or [])
+        if str(item).strip()
+    }
+    return bool(
+        notes.intersection(
+            {
+                "release_unclear",
+                "camera_too_close",
+                "framing_unusable",
+            }
+        )
+    )
+
+
 def _walkthrough_render_window(
     *,
     events: dict,
@@ -425,6 +562,7 @@ def _build_walkthrough_render(
     risks: list,
     estimated_release_speed: dict,
     report_story: Optional[dict],
+    root_cause: Optional[dict],
 ) -> dict:
     video_path = video.get("path")
     if not video_path or not os.path.exists(video_path):
@@ -448,6 +586,7 @@ def _build_walkthrough_render(
             risks=risks,
             estimated_release_speed=estimated_release_speed,
             report_story=report_story,
+            root_cause=root_cause,
             output_path=output_path,
             start_frame=start_frame,
             end_frame=end_frame,
@@ -493,7 +632,7 @@ def _build_walkthrough_render(
 
     return {
         **render_result,
-        "renderer_version": "coach_video_renderer_v1",
+        "renderer_version": WALKTHROUGH_RENDERER_VERSION,
         "artifact_type": "walkthrough_mp4",
         "storage_backend": upload_result.get("storage_backend") or "local",
         "storage_uploaded": bool(upload_result.get("uploaded")),
@@ -521,15 +660,6 @@ def get_walkthrough_render(filename: str):
     if not safe_name or safe_name != filename:
         raise HTTPException(status_code=404, detail="Render not found")
 
-    local_path = os.path.join(RENDERS_DIR, safe_name)
-    if os.path.exists(local_path):
-        logger.info(
-            "[renders:get] filename=%s source=local path=%s",
-            safe_name,
-            local_path,
-        )
-        return FileResponse(local_path, media_type="video/mp4")
-
     remote_bytes = download_render_artifact(safe_name)
     if remote_bytes is not None:
         logger.info(
@@ -538,6 +668,15 @@ def get_walkthrough_render(filename: str):
             len(remote_bytes),
         )
         return Response(content=remote_bytes, media_type="video/mp4")
+
+    local_path = os.path.join(RENDERS_DIR, safe_name)
+    if os.path.exists(local_path):
+        logger.info(
+            "[renders:get] filename=%s source=local path=%s",
+            safe_name,
+            local_path,
+        )
+        return FileResponse(local_path, media_type="video/mp4")
 
     logger.warning("[renders:get] filename=%s source=missing", safe_name)
     raise HTTPException(status_code=404, detail="Render not found")
@@ -600,6 +739,7 @@ def analyze(
     # Enforce Player Ownership
     # ------------------------------------------------------------
     db = SessionLocal()
+    prior_results: List[Dict[str, Any]] = []
     try:
         # Step 1: Check link (ownership)
         link = (
@@ -664,6 +804,12 @@ def analyze(
                     },
                 )
             effective_season = season
+
+        prior_results = _load_recent_expert_history(
+            db=db,
+            player_id=player_id,
+            limit=_get_deterministic_expert_engine().history_window_runs,
+        )
 
     finally:
         db.close()
@@ -737,7 +883,11 @@ def analyze(
         release_frame = (events.get("release") or {}).get("frame")
         delivery_window = events.get("delivery_window")
 
-        if release_frame is not None and delivery_window is not None:
+        if (
+            release_frame is not None
+            and delivery_window is not None
+            and not (events.get("ffc") and events.get("bfc"))
+        ):
             foot_events = detect_ffc_bfc(
                 pose_frames=pose_frames,
                 hand=hand,
@@ -755,16 +905,17 @@ def analyze(
         uah_confidence = float((events.get("uah") or {}).get("confidence") or 0.0)
         ffc_confidence = float((events.get("ffc") or {}).get("confidence") or 0.0)
         bfc_confidence = float((events.get("bfc") or {}).get("confidence") or 0.0)
-        events["event_chain"] = chain_quality(
-            bfc_frame=bfc_frame,
-            ffc_frame=ffc_frame,
-            uah_frame=uah_frame,
-            release_frame=release_frame,
-            bfc_confidence=bfc_confidence,
-            ffc_confidence=ffc_confidence,
-            uah_confidence=uah_confidence,
-            release_confidence=release_confidence,
-        )
+        if not events.get("event_chain"):
+            events["event_chain"] = chain_quality(
+                bfc_frame=bfc_frame,
+                ffc_frame=ffc_frame,
+                uah_frame=uah_frame,
+                release_frame=release_frame,
+                bfc_confidence=bfc_confidence,
+                ffc_confidence=ffc_confidence,
+                uah_confidence=uah_confidence,
+                release_confidence=release_confidence,
+            )
 
         # ------------------------------------------------------------
         # Action Classification
@@ -861,6 +1012,56 @@ def analyze(
             interpretation=interpretation,
             action=action,
         )
+        deterministic_expert = _get_deterministic_expert_engine().build(
+            events=events,
+            action=action,
+            risks=risks,
+            basics=basics,
+            interpretation=interpretation,
+            estimated_release_speed=estimated_release_speed,
+            prior_results=prior_results,
+            account_role=getattr(current_account, "role", None),
+        )
+        capture_quality_status = str(
+            ((deterministic_expert.get("capture_quality_v1") or {}).get("status"))
+            or ""
+        ).upper()
+        capture_quality = (deterministic_expert.get("capture_quality_v1") or {})
+        analysis_capabilities = (deterministic_expert.get("analysis_capabilities_v1") or {})
+        if capture_quality_status == "UNUSABLE":
+            estimated_release_speed = {
+                "available": False,
+                "display": None,
+                "confidence": 0.0,
+                "reason": "capture_quality_unusable",
+            }
+            elbow = {
+                "verdict": "UNKNOWN",
+                "confidence": 0.0,
+                "reason": "capture_quality_unusable",
+            }
+            action = {
+                "action": None,
+                "confidence": 0.0,
+                "reason": "capture_quality_unusable",
+            }
+        elif not bool(analysis_capabilities.get("can_estimate_speed", True)):
+            estimated_release_speed = {
+                "available": False,
+                "display_policy": "suppress",
+                "display": None,
+                "value_kph": None,
+                "confidence": 0.0,
+                "reason": "release_metrics_not_trustworthy",
+            }
+        if capture_quality_status != "UNUSABLE" and not bool(
+            analysis_capabilities.get("can_assess_legality", True)
+        ):
+            elbow = {
+                "verdict": "UNKNOWN",
+                "confidence": 0.0,
+                "reason": "release_metrics_not_trustworthy",
+            }
 
         # ------------------------------------------------------------
         # Build Response
@@ -886,6 +1087,17 @@ def analyze(
             "basics": basics,
             "interpretation": interpretation,
             "clinician": clinician,
+            "deterministic_expert_v1": deterministic_expert,
+            "capture_quality_v1": deterministic_expert.get("capture_quality_v1"),
+            "mechanics_evidence_v1": deterministic_expert.get("mechanics_evidence_v1"),
+            "kinetic_chain_v1": deterministic_expert.get("kinetic_chain_v1"),
+            "render_reasoning_v1": deterministic_expert.get("render_reasoning_v1"),
+            "mechanism_explanation_v1": deterministic_expert.get("mechanism_explanation_v1"),
+            "prescription_plan_v1": deterministic_expert.get("prescription_plan_v1"),
+            "history_plan_v1": deterministic_expert.get("history_plan_v1"),
+            "coach_diagnosis_v1": deterministic_expert.get("coach_diagnosis_v1"),
+            "presentation_payload_v1": deterministic_expert.get("presentation_payload_v1"),
+            "frontend_surface_v1": deterministic_expert.get("frontend_surface_v1"),
         }
         result["visual_walkthrough"] = _build_walkthrough_render(
             run_id=run_id,
@@ -898,12 +1110,13 @@ def analyze(
             risks=risks,
             estimated_release_speed=estimated_release_speed,
             report_story=(clinician or {}).get("report_story_v1"),
+            root_cause=((deterministic_expert.get("coach_diagnosis_v1") or {}).get("root_cause")),
         )
 
         # ------------------------------------------------------------
         # Persist
         # ------------------------------------------------------------
-        _persist_analysis_result(
+        persistence_status = _persist_analysis_result(
             request_id=request_id,
             run_id=run_id,
             result=result,
@@ -913,6 +1126,24 @@ def analyze(
             effective_age_group=effective_age_group,
             effective_season=effective_season,
         )
+        if isinstance(persistence_status, dict) and persistence_status.get("persisted"):
+            background_tasks.add_task(
+                _persist_learning_case_best_effort,
+                request_id=request_id,
+                run_id=run_id,
+                result=result,
+                account_id=str(current_account.account_id),
+            )
+            background_tasks.add_task(
+                _sync_prescription_followups_best_effort,
+                request_id=request_id,
+                run_id=run_id,
+            )
+            background_tasks.add_task(
+                persist_analysis_completed_notification_best_effort,
+                account_id=str(current_account.account_id),
+                result=result,
+            )
 
         logger.info(
             f"[analyze:success] request_id={request_id} run_id={run_id} "
@@ -936,3 +1167,4 @@ app.include_router(auth_router)
 app.include_router(persistence_read_router)
 app.include_router(persistence_write_router)
 app.include_router(account_router)
+app.include_router(notification_router)

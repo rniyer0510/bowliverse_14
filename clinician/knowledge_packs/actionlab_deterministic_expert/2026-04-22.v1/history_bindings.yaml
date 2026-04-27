@@ -1,0 +1,112 @@
+version: actionlab.knowledge_pack.history_bindings.v1
+
+history_bindings:
+  pace_translation_profile:
+    id: pace_translation_profile
+    title: "Pace translation profile"
+    simple_title: "Where speed is being made"
+    mechanism_ids:
+      - low_build_forcing_late_rescue
+      - late_arm_acceleration_due_to_chain_delay
+      - high_terminal_impulse_with_high_dissipation_burden
+    trajectory_ids:
+      - pace_created_late_and_expensively
+      - repeatability_loss_under_fatigue
+    followup_check_ids:
+      - lower_late_thrust_dependence
+      - more_stable_release_timing
+    metrics:
+      - approach_momentum_score
+      - terminal_impulse_score
+      - release_timing_stability
+    primary_metric: terminal_impulse_score
+    chart_summary: "Tracks whether pace is being built earlier in the chain instead of being rescued near release."
+    simple_chart_summary: "Tracks whether speed is being built earlier instead of being rescued near release."
+
+  transfer_block_stability:
+    id: transfer_block_stability
+    title: "Transfer and block stability"
+    simple_title: "Landing stability"
+    mechanism_ids:
+      - gather_disorganization_before_block
+      - soft_block_with_trunk_carry
+    trajectory_ids:
+      - pace_leakage_before_block
+      - pace_leakage_at_block
+      - trunk_and_front_leg_load_accumulation
+    followup_check_ids:
+      - reduced_trunk_drift_after_ffc
+      - cleaner_transfer_score
+    metrics:
+      - gather_line_stability
+      - front_leg_support_score
+      - trunk_drift_after_ffc
+      - transfer_efficiency_score
+    primary_metric: transfer_efficiency_score
+    chart_summary: "Tracks whether the landing leg and trunk are turning landing into a cleaner transfer point."
+    simple_chart_summary: "Tracks whether the front leg and body are turning landing into a cleaner power move."
+
+  dissipation_profile:
+    id: dissipation_profile
+    title: "Dissipation profile"
+    simple_title: "Finish load pattern"
+    mechanism_ids:
+      - soft_block_with_trunk_carry
+      - high_terminal_impulse_with_high_dissipation_burden
+    trajectory_ids:
+      - trunk_and_front_leg_load_accumulation
+    followup_check_ids:
+      - reduced_dissipation_burden
+    metrics:
+      - dissipation_burden_score
+      - followthrough_asymmetry
+      - trunk_fold_severity
+    primary_metric: dissipation_burden_score
+    chart_summary: "Tracks whether the body is spreading deceleration load more evenly after release."
+    simple_chart_summary: "Tracks whether the finish is spreading load more evenly after release."
+
+  release_window_control:
+    id: release_window_control
+    title: "Release-window control"
+    simple_title: "Release timing control"
+    mechanism_ids:
+      - late_arm_acceleration_due_to_chain_delay
+      - release_window_instability_under_load
+    trajectory_ids:
+      - repeatability_loss_under_fatigue
+      - release_window_fragility_under_load
+    followup_check_ids:
+      - more_stable_release_timing
+      - calmer_release_window_under_load
+    metrics:
+      - release_timing_stability
+      - shoulder_rotation_timing
+      - distal_velocity_rescue
+      - dissipation_burden_score
+    primary_metric: release_timing_stability
+    chart_summary: "Tracks whether the release window stays calm and connected even when the bowler adds intent."
+    simple_chart_summary: "Tracks whether release stays calm and connected even when effort goes up."
+
+  late_chain_load_cost:
+    id: late_chain_load_cost
+    title: "Late-chain load cost"
+    simple_title: "Cost of the late finish"
+    mechanism_ids:
+      - high_terminal_impulse_with_high_dissipation_burden
+      - release_window_instability_under_load
+      - underused_transfer_window_with_late_dump
+    trajectory_ids:
+      - trunk_and_front_leg_load_accumulation
+      - late_load_dump_after_underused_transfer
+      - release_window_fragility_under_load
+    followup_check_ids:
+      - reduced_dissipation_burden
+      - more_balanced_finish_absorption
+    metrics:
+      - dissipation_burden_score
+      - followthrough_asymmetry
+      - trunk_fold_severity
+      - terminal_impulse_score
+    primary_metric: dissipation_burden_score
+    chart_summary: "Tracks whether late pace creation is still being paid for through a harsh or concentrated finish."
+    simple_chart_summary: "Tracks whether late speed is still being paid for with a harsh finish."
