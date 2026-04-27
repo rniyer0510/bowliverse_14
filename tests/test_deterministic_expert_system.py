@@ -658,6 +658,69 @@ class DeterministicExpertSystemTests(unittest.TestCase):
         self.assertEqual(payload["coach_diagnosis_v1"]["change_strategy"]["change_size"], "hold")
         self.assertIsNone(payload["coach_diagnosis_v1"]["change_reaction"])
 
+    def test_close_unclear_release_clip_is_weak_not_unusable(self):
+        payload = self.engine.build(
+            events={
+                "event_chain": {"quality": 0.56, "ordered": True},
+                "bfc": {"frame": 173, "confidence": 0.58},
+                "ffc": {"frame": 176, "confidence": 0.63},
+                "release": {
+                    "frame": 190,
+                    "confidence": 0.60,
+                    "method": "peak_plus_offset",
+                },
+            },
+            action={"action": "SEMI_OPEN", "intent": "semi_open", "confidence": 0.74},
+            risks=[],
+            basics={},
+            interpretation={"linear_flow": {"flow_state": "USABLE", "confidence": 0.58, "contributors": []}},
+            estimated_release_speed={
+                "available": True,
+                "confidence": 0.70,
+                "debug": {
+                    "body_height_ratio": 0.40,
+                    "shoulder_body_ratio": 0.98,
+                },
+            },
+        )
+
+        self.assertEqual(payload["capture_quality_v1"]["status"], "WEAK")
+        self.assertIn("release_unclear", payload["capture_quality_v1"]["notes"])
+        self.assertIn("camera_too_close", payload["capture_quality_v1"]["notes"])
+        self.assertIn("framing_unusable", payload["capture_quality_v1"]["notes"])
+        self.assertEqual(
+            payload["presentation_payload_v1"]["capture_quality_status"],
+            "WEAK",
+        )
+        self.assertTrue(payload["analysis_capabilities_v1"]["can_assess_structure"])
+        self.assertFalse(payload["analysis_capabilities_v1"]["can_estimate_speed"])
+        self.assertFalse(payload["analysis_capabilities_v1"]["can_assess_legality"])
+
+    def test_release_missing_makes_capture_quality_unusable(self):
+        payload = self.engine.build(
+            events={
+                "event_chain": {"quality": 0.62, "ordered": True},
+                "bfc": {"frame": 173, "confidence": 0.58},
+                "ffc": {"frame": 176, "confidence": 0.63},
+                "release": {"frame": None, "confidence": 0.0, "method": "peak_plus_offset"},
+            },
+            action={"action": "SEMI_OPEN", "intent": "semi_open", "confidence": 0.74},
+            risks=[],
+            basics={},
+            interpretation={"linear_flow": {"flow_state": "USABLE", "confidence": 0.58, "contributors": []}},
+            estimated_release_speed={
+                "available": False,
+                "confidence": 0.0,
+                "reason": "missing_release_window",
+                "debug": {},
+            },
+        )
+
+        self.assertEqual(payload["capture_quality_v1"]["status"], "UNUSABLE")
+        self.assertIn("release_missing", payload["capture_quality_v1"]["notes"])
+        self.assertFalse(payload["analysis_capabilities_v1"]["can_assess_structure"])
+        self.assertFalse(payload["analysis_capabilities_v1"]["can_assess_release"])
+
 
 if __name__ == "__main__":
     unittest.main()

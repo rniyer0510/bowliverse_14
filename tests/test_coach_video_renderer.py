@@ -652,6 +652,24 @@ class CoachVideoRendererTest(unittest.TestCase):
             "No one area is taking too much load.",
         )
 
+    def test_positive_theme_without_watch_focus_does_not_claim_working_title(self):
+        report_story = {"theme": "working_pattern"}
+
+        self.assertEqual(
+            _summary_symptom_title(report_story=report_story),
+            "What To Notice",
+        )
+        self.assertEqual(
+            _summary_symptom_text({}, report_story=report_story),
+            "Action has a usable base, but one part still needs watching.",
+        )
+
+    def test_summary_load_watch_uses_clearer_fallback_when_no_load_label_exists(self):
+        self.assertEqual(
+            _summary_load_watch_text({}, report_story={"theme": "alignment"}),
+            "Need a clearer release view to read load.",
+        )
+
     def test_summary_load_watch_uses_distinct_body_families(self):
         text = _summary_load_watch_text(
             {

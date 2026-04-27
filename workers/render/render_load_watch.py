@@ -235,6 +235,7 @@ def _summary_symptom_text(
         label = str(((report_story.get("watch_focus") or {}).get("label")) or "").strip()
         if label:
             return f"Keep watching {label}"
+        return "Action has a usable base, but one part still needs watching."
     release_risk_id = _release_hotspot_risk_id(
         risk_by_id,
         events=events,
@@ -272,7 +273,8 @@ def _summary_symptom_title(
     if root_cause_status == "no_clear_problem":
         return "What Is Working"
     if isinstance(report_story, dict) and str(report_story.get("theme") or "") in {"working_pattern", "good_base"}:
-        return "What Is Working"
+        label = str(((report_story.get("watch_focus") or {}).get("label")) or "").strip()
+        return "What Is Working" if label else "What To Notice"
     return "What To Notice"
 
 
@@ -310,7 +312,7 @@ def _summary_load_watch_text(
     primary_risk_id = primary_risk_id or (ranked[0][0] if ranked else None)
     primary_label = _load_watch_label(primary_risk_id)
     if not primary_label:
-        return "Retake from side-on with the full body and release in frame."
+        return "Need a clearer release view to read load."
     primary_family = _body_family(primary_risk_id)
     secondary = next((_load_watch_label(rid) for rid, risk in ranked if rid != primary_risk_id and _body_family(rid) != primary_family and _risk_weight(risk) >= 0.45), None)
     return primary_label if not secondary else f"{primary_label}\n{secondary}"

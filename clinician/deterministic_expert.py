@@ -388,6 +388,10 @@ class DeterministicExpertSystem:
             metrics=metrics,
             estimated_release_speed=estimated_release_speed,
         )
+        analysis_capabilities = self._build_analysis_capabilities(
+            events=events,
+            capture_quality=capture_quality,
+        )
         symptoms = self._build_symptoms(metrics)
         mechanics_evidence = self._build_mechanics_evidence_payload(
             events=events,
@@ -480,6 +484,7 @@ class DeterministicExpertSystem:
             "knowledge_pack_version": self._pack["pack_version"],
             "unknown_path_enforced": True,
             "capture_quality_v1": capture_quality,
+            "analysis_capabilities_v1": analysis_capabilities,
             "mechanics_evidence_v1": mechanics_evidence,
             "metrics": metrics,
             "symptoms": symptoms,
@@ -512,14 +517,20 @@ class DeterministicExpertSystem:
         release_event = (events or {}).get("release") or {}
         release_conf = _clip01(_safe_float(release_event.get("confidence"), 0.0))
         release_method = str(release_event.get("method") or "").strip().lower()
+        release_state = str(release_event.get("state") or "").strip().upper()
+        release_notes = {
+            str(item).strip().lower()
+            for item in list(release_event.get("notes") or [])
+            if str(item).strip()
+        }
         speed_debug = (estimated_release_speed or {}).get("debug") or {}
         speed_reason = str((estimated_release_speed or {}).get("reason") or "").strip().lower()
         body_height_ratio = _safe_float(speed_debug.get("body_height_ratio"), 0.0)
         shoulder_body_ratio = _safe_float(speed_debug.get("shoulder_body_ratio"), 0.0)
         notes: List[str] = []
         for name in ("bfc", "ffc", "release"):
-            event = (events or {}).get(name) or {}
-            if event.get("frame") is None:
+            raw_event = (events or {}).get(name)
+            if isinstance(raw_event, dict) and raw_event.get("frame") is None:
                 notes.append(f"{name}_missing")
         if not ordered:
             notes.append("event_chain_unordered")
@@ -534,8 +545,17 @@ class DeterministicExpertSystem:
         if speed_reason in {"missing_release_window", "release_too_close_to_clip_start", "release_too_close_to_clip_end"}:
             notes.append("release_window_missing")
         weak_release_method = release_method in {"peak_plus_offset", "window_start"}
-        if weak_release_method and release_conf < 0.65:
+        if release_state == "MISSING":
+            notes.append("release_missing")
+        elif release_state == "INVALID":
+            notes.append("release_invalid")
+        elif release_state == "WEAK":
             notes.append("release_unclear")
+        elif weak_release_method and release_conf < 0.65:
+            notes.append("release_unclear")
+        for note in release_notes:
+            if note not in notes:
+                notes.append(note)
         close_camera = body_height_ratio >= 0.38 or shoulder_body_ratio >= 0.95
         if close_camera:
             notes.append("camera_too_close")
@@ -547,11 +567,17 @@ class DeterministicExpertSystem:
             not ordered
             or chain_quality < 0.20
             or action_conf < 0.25
+            or "release_missing" in notes
             or "release_window_missing" in notes
-            or "framing_unusable" in notes
         ):
             status = "UNUSABLE"
-        elif chain_quality < 0.40 or action_conf < 0.40 or "release_unclear" in notes or "camera_too_close" in notes:
+        elif (
+            chain_quality < 0.40
+            or action_conf < 0.40
+            or "release_unclear" in notes
+            or "camera_too_close" in notes
+            or "framing_unusable" in notes
+        ):
             status = "WEAK"
         else:
             status = "USABLE"
@@ -562,6 +588,36 @@ class DeterministicExpertSystem:
             "notes": notes,
             "event_chain_quality": metrics["event_chain_quality"]["value"],
             "action_confidence": metrics["action_confidence"]["value"],
+        }
+
+    def _build_analysis_capabilities(
+        self,
+        *,
+        events: Dict[str, Any],
+        capture_quality: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        status = str(capture_quality.get("status") or "").strip().upper()
+        release = (events or {}).get("release") or {}
+        release_state = str(release.get("state") or "").strip().upper()
+        if not release_state:
+            release_state = "MISSING" if release.get("frame") is None else "WEAK"
+
+        can_assess_structure = status != "UNUSABLE"
+        can_assess_release = can_assess_structure and release_state in {"CONFIDENT", "WEAK"}
+        can_estimate_speed = can_assess_structure and release_state == "CONFIDENT"
+        can_assess_legality = can_assess_structure and release_state == "CONFIDENT"
+        can_render_causal_story = can_assess_structure and release_state in {"CONFIDENT", "WEAK"}
+
+        return {
+            "version": "analysis_capabilities_v1",
+            "capture_quality_status": status or "WEAK",
+            "release_state": release_state,
+            "can_assess_structure": can_assess_structure,
+            "can_assess_release": can_assess_release,
+            "can_estimate_speed": can_estimate_speed,
+            "can_assess_legality": can_assess_legality,
+            "can_render_causal_story": can_render_causal_story,
+            "can_enter_history": can_assess_structure,
         }
 
     def _capture_quality_user_reason(

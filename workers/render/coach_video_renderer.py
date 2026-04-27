@@ -2147,8 +2147,16 @@ def _draw_end_summary_legacy(
             ("Action Type", _format_action_label(action) or "-", (130, 214, 255)),
         ]
         verdict = str((elbow or {}).get("verdict") or "").strip().upper()
-        legality_value = "Legal" if verdict == "LEGAL" else (verdict.title() if verdict else "-")
-        legality_accent = (70, 225, 140) if verdict == "LEGAL" else ((72, 92, 235) if verdict == "ILLEGAL" else (120, 210, 255))
+        legality_value = (
+            "Legal"
+            if verdict == "LEGAL"
+            else ("Illegal" if verdict == "ILLEGAL" else "-")
+        )
+        legality_accent = (
+            (70, 225, 140)
+            if verdict == "LEGAL"
+            else ((72, 92, 235) if verdict == "ILLEGAL" else (120, 210, 255))
+        )
         stats.append(("Legality", legality_value, legality_accent))
         for idx, (title, value, accent) in enumerate(stats):
             x0 = left_x + idx * (stat_w + gap)

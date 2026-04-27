@@ -93,3 +93,82 @@ A hybrid approach is the right long-term fit because it:
 - keeps speed aligned with ActionLab's biomechanics model
 - avoids overclaiming precision where the available evidence does not justify it
 - creates a clean path for future calibration against radar or other ground-truth systems
+
+## ADR-003: Pose Feeds Kinematics, and Heuristics Must Stay Last
+
+- Date: 2026-04-26
+- Status: Accepted
+
+### Decision
+
+ActionLab will treat the analysis stack in this order:
+
+1. pose provides the raw observation layer
+2. kinematics provides the primary truth layer
+3. heuristics provide only inference, arbitration, and fallback behavior
+
+This means the product should not be architected around brittle one-off detector heuristics or single-frame guesses when richer kinematic evidence is available.
+
+### Interpretation Rule
+
+ActionLab should operate on the following principle:
+
+- pose provides the measurements
+- kinematics provides the real signal
+- heuristics help choose among plausible interpretations
+
+Heuristics must not invent causal truth. They may:
+
+- rank or score event candidates
+- enforce temporal plausibility
+- resolve ambiguity between competing anchors
+- decide which outputs are trustworthy enough to show
+
+But they must remain downstream of pose quality and kinematic evidence.
+
+### Implementation Guidance
+
+- Event detection should move toward candidate generation plus multi-signal kinematic scoring, not single-anchor heuristics.
+- Release, BFC, FFC, and UAH should be inferred from globally plausible temporal chains rather than one detector poisoning everything downstream.
+- Capability gating should be per output, not only per clip.
+  Examples:
+  - a clip may still support structure analysis even when release-dependent stats do not
+  - speed and legality should be suppressed when release is weak, invalid, or missing
+- Proximal joint signals should be used as robust fallbacks when distal joints are occluded or weak, especially in close-camera or truncated clips.
+- Missing release and invalid late release should be treated as different states.
+  - missing release may force a full retake path
+  - invalid or weak release may still allow partial pre-release analysis
+
+### Product Consequence
+
+ActionLab should aim to extract the maximum trustworthy analysis from imperfect real-world videos rather than rejecting clips unless nothing defensible remains.
+
+The target behavior is:
+
+- full analysis when anchors are confident
+- partial analysis when only some anchors are trustworthy
+- explicit retake guidance only when the system cannot defend enough useful truth
+
+### Rendering Consequence
+
+Identifying the right frame is paramount.
+
+ActionLab's rendered walkthrough is one of the most important product surfaces, so the system must optimize not only for a durable signal, but also for a durable anchor frame that can be shown and trusted visually.
+
+That means:
+
+- the chosen event frame must be physically plausible, not just numerically convenient
+- the renderer should prefer stable, explainable anchor frames over fragile single-frame guesses
+- a weak signal paired with the wrong frame is worse than a partial analysis with the right frame
+- durable signal plus durable frame is the foundation for trustworthy pause moments, hotspot callouts, and end-card summaries
+
+### Rationale
+
+Users will not consistently capture perfect bowling videos. If the architecture depends too heavily on heuristics or exact distal visibility, the product will fail on too many real clips.
+
+Making kinematics the central truth layer:
+
+- increases robustness to camera angle, occlusion, and truncation
+- supports graceful degradation instead of all-or-nothing failure
+- improves trust because the system can suppress only the outputs that are not defensible
+- creates a cleaner path toward analyzing 70 to 80 percent of real uploaded clips instead of only ideal captures
