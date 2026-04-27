@@ -227,8 +227,6 @@ def _summary_symptom_text(
     if root_cause_text:
         return root_cause_text
     root_cause_status = str((root_cause or {}).get("status") or "").strip().lower()
-    if root_cause_status == "not_interpretable":
-        return "Unable to verify this clip yet."
     if root_cause_status == "no_clear_problem":
         return "Action stays connected through landing and release."
     if isinstance(report_story, dict) and str(report_story.get("theme") or "") in {"working_pattern", "good_base"}:
@@ -259,7 +257,7 @@ def _summary_symptom_text(
         return "Front leg softens at landing"
     if ffc_risk_id == "foot_line_deviation":
         return "Front foot lands across line"
-    return "No clear coaching cue from this clip."
+    return "What to watch"
 
 
 def _summary_symptom_title(
@@ -268,13 +266,14 @@ def _summary_symptom_title(
     root_cause: Optional[Dict[str, Any]] = None,
 ) -> str:
     root_cause_status = str((root_cause or {}).get("status") or "").strip().lower()
-    if root_cause_status == "not_interpretable":
-        return "Unable To Verify"
     if root_cause_status == "no_clear_problem":
         return "What Is Working"
-    if isinstance(report_story, dict) and str(report_story.get("theme") or "") in {"working_pattern", "good_base"}:
-        label = str(((report_story.get("watch_focus") or {}).get("label")) or "").strip()
-        return "What Is Working" if label else "What To Notice"
+    if (
+        isinstance(report_story, dict)
+        and str(report_story.get("theme") or "") in {"working_pattern", "good_base"}
+        and str(((report_story.get("watch_focus") or {}).get("label")) or "").strip()
+    ):
+        return "What Is Working"
     return "What To Notice"
 
 
@@ -293,8 +292,6 @@ def _summary_load_watch_text(
     if root_cause_text:
         return root_cause_text
     root_cause_status = str((root_cause or {}).get("status") or "").strip().lower()
-    if root_cause_status == "not_interpretable":
-        return "Retake from side-on with the full body and release in frame."
     if root_cause_status == "no_clear_problem":
         return "No one area is taking too much load."
     primary_risk_id = _story_risk_for_phase(
@@ -323,8 +320,6 @@ def _summary_load_watch_title(
     root_cause: Optional[Dict[str, Any]] = None,
 ) -> str:
     root_cause_status = str((root_cause or {}).get("status") or "").strip().lower()
-    if root_cause_status == "not_interpretable":
-        return "Retake This Video"
     if root_cause_status == "no_clear_problem":
         return "Load Stays Shared"
     return "Works Harder Here"

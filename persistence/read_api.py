@@ -408,33 +408,6 @@ def _extract_root_cause_summary(result_json: Optional[Dict[str, Any]]) -> Option
     }
 
 
-
-def _is_history_eligible_result(result_json: Optional[Dict[str, Any]]) -> bool:
-    if not isinstance(result_json, dict):
-        return True
-
-    capture_quality = result_json.get("capture_quality_v1") or {}
-    if isinstance(capture_quality, dict):
-        status = str(capture_quality.get("status") or "").strip().upper()
-        if status == "UNUSABLE":
-            return False
-
-    coach_diagnosis = result_json.get("coach_diagnosis_v1") or {}
-    if isinstance(coach_diagnosis, dict):
-        root_cause = coach_diagnosis.get("root_cause") or {}
-        if isinstance(root_cause, dict):
-            status = str(root_cause.get("status") or "").strip().lower()
-            if status == "not_interpretable":
-                return False
-
-    kinetic_chain = result_json.get("kinetic_chain_v1") or {}
-    if isinstance(kinetic_chain, dict):
-        chain_id = str(kinetic_chain.get("status") or kinetic_chain.get("id") or "").strip().lower()
-        if chain_id == "not_interpretable_with_confidence":
-            return False
-
-    return True
-
 def _extract_history_plan_summary(result_json: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
     if not isinstance(result_json, dict):
         return None
@@ -1668,17 +1641,6 @@ def list_analysis_runs(
     if run_ids:
         raw_rows = db.query(AnalysisResultRaw).filter(AnalysisResultRaw.run_id.in_(run_ids)).all()
         raw_by_run_id = {row.run_id: row for row in raw_rows}
-        runs = [
-            run
-            for run in runs
-            if _is_history_eligible_result(
-                raw_by_run_id.get(run.run_id).result_json
-                if raw_by_run_id.get(run.run_id) is not None
-                else None
-            )
-        ]
-        run_ids = [r.run_id for r in runs]
-        raw_by_run_id = {run_id: row for run_id, row in raw_by_run_id.items() if run_id in run_ids}
     trace_by_run_id: Dict[Any, AnalysisExplanationTrace] = {}
     if run_ids:
         trace_rows = (

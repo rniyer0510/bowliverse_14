@@ -1,5 +1,4 @@
 import unittest
-from unittest.mock import patch
 
 from app.workers.events.ffc_bfc import detect_ffc_bfc
 from app.workers.events.release_uah import detect_release_uah, _nb_elbow_peak_is_plausible
@@ -125,58 +124,7 @@ class EventDetectionContractTest(unittest.TestCase):
         self.assertIn("candidates", events["release"])
         self.assertTrue(events["release"]["candidates"])
         self.assertIn("window", events["release"])
-        self.assertIn("state", events["release"])
-        self.assertIn("score", events["release"])
-        self.assertIn("notes", events["release"])
         self.assertLessEqual(events["uah"]["frame"], events["release"]["frame"])
-
-    def test_release_uah_uses_consensus_to_avoid_invalid_peak_offset_anchor(self):
-        pose_frames = [_frame(i) for i in range(40)]
-
-        events = detect_release_uah(
-            pose_frames=pose_frames,
-            hand="R",
-            fps=30.0,
-        )
-
-        self.assertNotEqual(events["release"]["method"], "peak_plus_offset")
-        self.assertEqual(events["release"]["state"], "WEAK")
-        self.assertTrue(
-            any(
-                candidate.get("method") == "proximal_consensus"
-                for candidate in events["release"]["candidates"]
-            )
-        )
-
-    def test_release_uah_returns_joint_selected_chain_when_available(self):
-        pose_frames = [_frame(i) for i in range(40)]
-
-        def fake_detect_ffc_bfc(*, release_frame, **kwargs):
-            if int(release_frame) <= 5:
-                return {
-                    "ffc": {"frame": 0, "confidence": 0.86, "method": "release_backward_chain_grounding"},
-                    "bfc": {"frame": 0, "confidence": 0.82, "method": "single_foot_fallback"},
-                }
-            return {
-                "ffc": {"frame": max(0, int(release_frame) - 1), "confidence": 0.15, "method": "ultimate_fallback"},
-                "bfc": {"frame": max(0, int(release_frame) - 2), "confidence": 0.15, "method": "ultimate_fallback"},
-            }
-
-        with patch("app.workers.events.ffc_bfc.detect_ffc_bfc", side_effect=fake_detect_ffc_bfc):
-            events = detect_release_uah(
-                pose_frames=pose_frames,
-                hand="R",
-                fps=30.0,
-            )
-
-        self.assertIn("ffc", events)
-        self.assertIn("bfc", events)
-        self.assertIn("event_chain", events)
-        self.assertEqual(events["release"]["frame"], 5)
-        self.assertEqual(events["ffc"]["frame"], 0)
-        self.assertEqual(events["bfc"]["frame"], 0)
-        self.assertTrue(events["event_chain"]["ordered"])
-        self.assertGreater(events["event_chain"]["quality"], 0.5)
 
     def test_ffc_bfc_obeys_release_window(self):
         pose_frames = [_frame(i) for i in range(40)]
@@ -200,14 +148,8 @@ class EventDetectionContractTest(unittest.TestCase):
         self.assertTrue(result["ffc"]["candidates"])
         self.assertLessEqual(result["bfc"]["frame"], result["ffc"]["frame"])
         self.assertLessEqual(result["ffc"]["frame"], release_events["release"]["frame"])
-        self.assertIn(
-            result["ffc"]["method"],
-            {"release_backward_chain_grounding", "single_foot_fallback", "ultimate_fallback"},
-        )
-        self.assertIn(
-            result["bfc"]["method"],
-            {"simple_grounded_bfc", "context_pre_ffc", "no_ground_confirmed", "single_foot_fallback", "ultimate_fallback"},
-        )
+        self.assertEqual(result["ffc"]["method"], "release_backward_chain_grounding")
+        self.assertIn(result["bfc"]["method"], {"simple_grounded_bfc", "context_pre_ffc", "no_ground_confirmed"})
 
     def test_ffc_bfc_returns_empty_for_too_few_frames(self):
         result = detect_ffc_bfc(

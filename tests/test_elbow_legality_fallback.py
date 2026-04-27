@@ -119,6 +119,34 @@ class ElbowLegalityFallbackTests(unittest.TestCase):
         self.assertAlmostEqual(result["baseline_angle_deg"], 130.0, places=2)
         self.assertAlmostEqual(result["extension_deg"], 15.0, places=2)
 
+    def test_prefers_uah_to_release_before_post_release_grace_window(self):
+        elbow_signal = [
+            {"frame": 2, "angle_deg": 100.0, "valid": True},
+            {"frame": 5, "angle_deg": 102.0, "valid": True},
+            {"frame": 8, "angle_deg": 104.0, "valid": True},
+            {"frame": 11, "angle_deg": 106.0, "valid": True},
+            {"frame": 14, "angle_deg": 108.0, "valid": True},
+            {"frame": 17, "angle_deg": 110.0, "valid": True},
+            {"frame": 22, "angle_deg": 128.0, "valid": True},
+            {"frame": 23, "angle_deg": 134.0, "valid": True},
+            {"frame": 24, "angle_deg": 140.0, "valid": True},
+        ]
+        events = {
+            "ffc": {"frame": 0},
+            "uah": {"frame": 2},
+            "release": {"frame": 20},
+        }
+
+        result = evaluate_elbow_legality(
+            elbow_signal=elbow_signal,
+            events=events,
+            pose_frames=self._low_vis_pose_frames(30),
+            hand="R",
+        )
+
+        self.assertEqual(result["debug"]["window_mode"], "uah_to_release")
+        self.assertEqual(result["verdict"], "LEGAL")
+
     def test_release_trim_frames_scales_with_fps(self):
         self.assertEqual(_release_trim_frames(30.0), 2)
         self.assertEqual(_release_trim_frames(60.0), 3)
@@ -191,7 +219,7 @@ class ElbowLegalityFallbackTests(unittest.TestCase):
         )
 
         self.assertEqual(result["verdict"], "LEGAL")
-        self.assertEqual(result["reason"], "weak_window_but_clear_margin")
+        self.assertEqual(result["reason"], "post_release_window_but_clear_margin")
 
     def test_gap_aware_measurement_can_clear_a_previously_near_threshold_window(self):
         elbow_signal = [
@@ -216,7 +244,7 @@ class ElbowLegalityFallbackTests(unittest.TestCase):
         )
 
         self.assertEqual(result["verdict"], "LEGAL")
-        self.assertEqual(result["reason"], "weak_window_but_clear_margin")
+        self.assertEqual(result["reason"], "post_release_window_but_clear_margin")
 
     def test_weak_borderline_window_degrades_to_suspect_without_rescue_confirmation(self):
         elbow_signal = [
@@ -250,7 +278,41 @@ class ElbowLegalityFallbackTests(unittest.TestCase):
         )
 
         self.assertEqual(result["verdict"], "SUSPECT")
-        self.assertEqual(result["reason"], "weak_window_borderline")
+        self.assertEqual(result["reason"], "post_release_window_unconfirmed")
+
+    def test_post_release_grace_window_does_not_convict_without_confirmation(self):
+        elbow_signal = [
+            {"frame": 19, "angle_deg": 110.0, "valid": True},
+            {"frame": 20, "angle_deg": 112.0, "valid": True},
+            {"frame": 22, "angle_deg": 115.0, "valid": True},
+            {"frame": 23, "angle_deg": 132.0, "valid": True},
+            {"frame": 24, "angle_deg": 136.0, "valid": True},
+            {"frame": 25, "angle_deg": 138.0, "valid": True},
+        ]
+        pose_frames = []
+        for i in range(30):
+            landmarks = [
+                {"x": 0.0, "y": 0.0, "z": 0.0, "visibility": 0.0}
+                for _ in range(33)
+            ]
+            landmarks[12] = {"x": 0.0, "y": 0.0, "z": 0.0, "visibility": 0.95}
+            pose_frames.append({"frame": i, "landmarks": landmarks})
+
+        events = {
+            "ffc": {"frame": 12},
+            "uah": {"frame": 21},
+            "release": {"frame": 22},
+        }
+
+        result = evaluate_elbow_legality(
+            elbow_signal=elbow_signal,
+            events=events,
+            pose_frames=pose_frames,
+            hand="R",
+        )
+
+        self.assertEqual(result["verdict"], "SUSPECT")
+        self.assertEqual(result["reason"], "post_release_window_unconfirmed")
 
     def test_low_visibility_rescue_degrades_to_suspect_when_only_grace_window_supports_it(self):
         pose_frames = self._low_vis_pose_frames(8)

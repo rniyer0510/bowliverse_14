@@ -1109,6 +1109,22 @@ def _draw_phase_overlay(
     _draw_phase_rail(frame, phase_idx=phase_idx, progress=progress)
 
 
+def _top_risk_panel_metrics(width: int, height: int) -> Dict[str, Any]:
+    card_w = int(round(width * 0.66))
+    card_h = int(round(height * 0.145))
+    return {
+        "card_w": card_w,
+        "card_h": card_h,
+        "title_scale": max(0.46, min(width, height) / 1320.0),
+        "headline_base_scale": max(0.62, min(width, height) / 980.0),
+        "headline_min_scale": max(0.48, min(width, height) / 1280.0),
+        "headline_max_lines": 2,
+        "body_base_scale": max(0.38, min(width, height) / 1480.0),
+        "body_min_scale": max(0.31, min(width, height) / 1780.0),
+        "body_max_lines": 1,
+    }
+
+
 def _draw_top_risk_panel(
     frame: np.ndarray,
     *,
@@ -1119,8 +1135,9 @@ def _draw_top_risk_panel(
 ) -> None:
     width = frame.shape[1]
     height = frame.shape[0]
-    card_w = int(round(width * 0.58))
-    card_h = int(round(height * 0.16))
+    metrics = _top_risk_panel_metrics(width, height)
+    card_w = int(metrics["card_w"])
+    card_h = int(metrics["card_h"])
     x0 = int(round(width * 0.05))
     y0 = int(round(height * 0.05))
     x1 = min(width - 18, x0 + card_w)
@@ -1139,9 +1156,9 @@ def _draw_top_risk_panel(
     cv2.putText(
         frame,
         title,
-        (x0 + 18, y0 + int(card_h * 0.28)),
+        (x0 + 18, y0 + int(card_h * 0.27)),
         TEXT_FONT,
-        max(0.44, min(width, height) / 1400.0),
+        float(metrics["title_scale"]),
         accent,
         1,
         cv2.LINE_AA,
@@ -1149,13 +1166,13 @@ def _draw_top_risk_panel(
     headline_lines, headline_scale = _fit_wrapped_text(
         headline,
         max_width=inner_w,
-        max_lines=2,
-        base_scale=max(0.58, min(width, height) / 1100.0),
-        min_scale=max(0.46, min(width, height) / 1380.0),
+        max_lines=int(metrics["headline_max_lines"]),
+        base_scale=float(metrics["headline_base_scale"]),
+        min_scale=float(metrics["headline_min_scale"]),
         thickness=2,
     )
-    headline_y = y0 + int(card_h * 0.48)
-    headline_step = max(20, int(round(card_h * 0.20)))
+    headline_y = y0 + int(card_h * 0.52)
+    headline_step = max(18, int(round(card_h * 0.19)))
     for idx, line in enumerate(headline_lines):
         cv2.putText(
             frame,
@@ -1170,18 +1187,17 @@ def _draw_top_risk_panel(
     body_lines, body_scale = _fit_wrapped_text(
         body,
         max_width=inner_w,
-        max_lines=2,
-        base_scale=max(0.38, min(width, height) / 1550.0),
-        min_scale=max(0.30, min(width, height) / 1880.0),
+        max_lines=int(metrics["body_max_lines"]),
+        base_scale=float(metrics["body_base_scale"]),
+        min_scale=float(metrics["body_min_scale"]),
         thickness=1,
     )
-    body_y = y0 + int(card_h * 0.81)
-    body_step = max(15, int(round(card_h * 0.15)))
-    for idx, line in enumerate(body_lines):
+    body_y = y0 + int(card_h * 0.83)
+    for line in body_lines:
         cv2.putText(
             frame,
             line,
-            (x0 + 18, body_y + idx * body_step),
+            (x0 + 18, body_y),
             TEXT_FONT,
             body_scale,
             MUTED_TEXT,
@@ -1868,12 +1884,12 @@ def _draw_themed_story_card(
     inner_pad_y = max(11, int(round(card_h * 0.09)))
     content_width = max(40, x1 - x0 - inner_pad_x * 2)
     content_height = max(36, y1 - y0 - inner_pad_y * 2)
-    title_base = max(17, int(round(card_h * 0.115)))
-    title_min = max(14, int(round(card_h * 0.090)))
-    headline_base = max(24, int(round(card_h * 0.18)))
-    headline_min = max(18, int(round(card_h * 0.130)))
-    body_base = max(15, int(round(card_h * 0.115)))
-    body_min = max(12, int(round(card_h * 0.085)))
+    title_base = max(18, int(round(card_h * 0.125)))
+    title_min = max(15, int(round(card_h * 0.098)))
+    headline_base = max(27, int(round(card_h * 0.195)))
+    headline_min = max(20, int(round(card_h * 0.142)))
+    body_base = max(17, int(round(card_h * 0.128)))
+    body_min = max(13, int(round(card_h * 0.094)))
     title_font = None
     title_lines: List[str] = []
     headline_font = None
@@ -1973,6 +1989,77 @@ def _draw_themed_story_card(
         current_y += line_h + line_gap
 
 
+def _draw_themed_telemetry_pill(
+    draw: Any,
+    *,
+    x0: int,
+    y0: int,
+    x1: int,
+    y1: int,
+    title: str,
+    value: str,
+    accent: Tuple[int, int, int],
+    width: int,
+    height: int,
+) -> None:
+    card_w = max(1, x1 - x0)
+    card_h = max(1, y1 - y0)
+    radius = max(20, int(round(card_h * 0.46)))
+    draw.rounded_rectangle(
+        (x0, y0, x1, y1),
+        radius=radius,
+        fill=_bgr_to_rgb((12, 14, 14), 232),
+        outline=_bgr_to_rgb((34, 36, 35), 102),
+        width=1,
+    )
+    inner_pad_x = max(14, int(round(card_w * 0.11)))
+    inner_pad_y = max(9, int(round(card_h * 0.16)))
+    dot_r = max(4, int(round(card_h * 0.055)))
+    dot_cx = x0 + inner_pad_x + dot_r
+    dot_cy = y0 + inner_pad_y + dot_r + 1
+    draw.ellipse(
+        (dot_cx - dot_r, dot_cy - dot_r, dot_cx + dot_r, dot_cy + dot_r),
+        fill=_bgr_to_rgb(accent, 255),
+    )
+    title_font = _load_theme_font(
+        BODY_FONT_MEDIUM_FILE,
+        max(13, int(round(card_h * 0.18))),
+    )
+    value_font, value_lines = _fit_pil_wrapped_text(
+        draw,
+        str(value or ""),
+        font_file=BODY_FONT_FILE,
+        base_size=max(22, int(round(card_h * 0.34))),
+        min_size=max(16, int(round(card_h * 0.24))),
+        max_width=max(28, card_w - inner_pad_x * 2),
+        max_lines=1,
+    )
+    title_x = dot_cx + dot_r + max(7, int(round(card_w * 0.035)))
+    title_y = y0 + inner_pad_y - 1
+    if title_font is not None:
+        draw.text(
+            (title_x, title_y),
+            str(title or "").upper(),
+            font=title_font,
+            fill=_bgr_to_rgb(THEME_TEXT_SECONDARY, 170),
+        )
+        _, title_h = _pil_text_size(draw, str(title or "").upper(), title_font)
+    else:
+        title_h = max(10, int(round(card_h * 0.14)))
+    value_y = title_y + title_h + max(7, int(round(card_h * 0.10)))
+    for line in value_lines:
+        if value_font is None:
+            break
+        draw.text(
+            (x0 + inner_pad_x, value_y),
+            line,
+            font=value_font,
+            fill=_bgr_to_rgb(THEME_TEXT_PRIMARY),
+        )
+        _, line_h = _pil_text_size(draw, line, value_font)
+        value_y += line_h + max(2, int(round(card_h * 0.03)))
+
+
 def _draw_themed_stat_card(
     draw: Any,
     *,
@@ -2056,6 +2143,62 @@ def _commit_frame_draw_context(frame: np.ndarray, image: Any, overlay: Any) -> N
     frame[:, :] = cv2.cvtColor(np.array(composited), cv2.COLOR_RGB2BGR)
 
 
+def _story_headline_and_support(text: str) -> Tuple[str, str]:
+    parts = [
+        segment.strip()
+        for segment in str(text or "").replace("\n", " ").split(".")
+        if segment.strip()
+    ]
+    if not parts:
+        return "", ""
+    headline = parts[0]
+    support = ". ".join(parts[1:]).strip()
+    if support and not support.endswith("."):
+        support = f"{support}."
+    return headline, support
+
+
+def _draw_story_overlay_card(
+    frame: np.ndarray,
+    *,
+    x0: int,
+    y0: int,
+    x1: int,
+    y1: int,
+    title: str,
+    headline: str,
+    body: str,
+    accent: Tuple[int, int, int],
+) -> None:
+    if Image is None or ImageDraw is None:
+        _overlay_panel(
+            frame,
+            x0=x0,
+            y0=y0,
+            x1=x1,
+            y1=y1,
+            fill_color=PANEL_BG,
+            edge_color=accent,
+            alpha=0.90,
+        )
+        return
+    image, overlay, draw = _frame_draw_context(frame)
+    _draw_themed_story_card(
+        draw,
+        x0=x0,
+        y0=y0,
+        x1=x1,
+        y1=y1,
+        title=title,
+        headline=headline,
+        body=body,
+        accent=accent,
+        width=frame.shape[1],
+        height=frame.shape[0],
+    )
+    _commit_frame_draw_context(frame, image, overlay)
+
+
 def _draw_end_summary_legacy(
     frame: np.ndarray,
     *,
@@ -2114,57 +2257,86 @@ def _draw_end_summary_legacy(
         y0 = top_y + idx * (top_h + top_gap)
         x1 = min(width - 18, x0 + top_w)
         y1 = y0 + top_h
-        inner_w = max(40, x1 - x0 - 32)
-        _overlay_panel(frame, x0=x0, y0=y0, x1=x1, y1=y1, fill_color=PANEL_BG, edge_color=accent, alpha=0.90)
-        cv2.putText(frame, title, (x0 + 16, y0 + int(top_h * 0.22)), TEXT_FONT, max(0.50, min(width, height) / 1260.0), accent, 1, cv2.LINE_AA)
-        lines, body_scale = _fit_wrapped_text(
-            str(body or ""),
-            max_width=inner_w,
-            max_lines=3,
-            base_scale=max(0.78, min(width, height) / 900.0),
-            min_scale=max(0.58, min(width, height) / 1140.0),
-            thickness=2,
-        )
-        for idx, line in enumerate(lines):
-            cv2.putText(
+        headline, support = _story_headline_and_support(str(body or ""))
+        _draw_story_overlay_card(
             frame,
-            line,
-            (x0 + 16, y0 + int(top_h * (0.48 + idx * 0.18))),
-            TEXT_FONT,
-            body_scale,
-            TEXT_COLOR if idx == 0 else MUTED_TEXT,
-            2 if idx == 0 else 1,
-            cv2.LINE_AA,
+            x0=x0,
+            y0=y0,
+            x1=x1,
+            y1=y1,
+            title=title,
+            headline=headline,
+            body=support,
+            accent=accent,
         )
 
     if root_cause_status != "not_interpretable":
         bottom_y = int(round(height * 0.73))
-        stat_h = int(round(height * 0.13))
-        gap = int(round(width * 0.03))
-        stat_w = int(round((width - (left_x * 2) - (gap * 2)) / 3.0))
+        telemetry = _summary_telemetry_layout(width, height)
+        stat_h = int(telemetry["stat_h"])
+        gap = int(telemetry["gap"])
+        stat_w = int(telemetry["stat_w"])
         stats = [
             ("Speed", _speed_display_text(speed) or "-", (70, 225, 140)),
             ("Action Type", _format_action_label(action) or "-", (130, 214, 255)),
         ]
         verdict = str((elbow or {}).get("verdict") or "").strip().upper()
-        legality_value = (
-            "Legal"
-            if verdict == "LEGAL"
-            else ("Illegal" if verdict == "ILLEGAL" else "-")
-        )
-        legality_accent = (
-            (70, 225, 140)
-            if verdict == "LEGAL"
-            else ((72, 92, 235) if verdict == "ILLEGAL" else (120, 210, 255))
-        )
+        if verdict == "LEGAL":
+            legality_value = "Legal"
+            legality_accent = (70, 225, 140)
+        elif verdict == "ILLEGAL":
+            legality_value = "Illegal"
+            legality_accent = (72, 92, 235)
+        elif verdict == "BORDERLINE":
+            legality_value = "Borderline"
+            legality_accent = (0, 196, 255)
+        elif verdict == "SUSPECT":
+            legality_value = "Suspect"
+            legality_accent = (0, 196, 255)
+        else:
+            legality_value = "-"
+            legality_accent = (120, 210, 255)
         stats.append(("Legality", legality_value, legality_accent))
-        for idx, (title, value, accent) in enumerate(stats):
-            x0 = left_x + idx * (stat_w + gap)
-            x1 = x0 + stat_w
-            y1 = bottom_y + stat_h
-            _overlay_panel(frame, x0=x0, y0=bottom_y, x1=x1, y1=y1, fill_color=PANEL_BG, edge_color=accent, alpha=0.90)
-            cv2.putText(frame, title, (x0 + 14, bottom_y + int(stat_h * 0.26)), cv2.FONT_HERSHEY_SIMPLEX, max(0.40, min(width, height) / 1500.0), MUTED_TEXT, 1, cv2.LINE_AA)
-            cv2.putText(frame, value, (x0 + 14, bottom_y + int(stat_h * 0.64)), cv2.FONT_HERSHEY_SIMPLEX, max(0.56, min(width, height) / 1120.0), TEXT_COLOR, 2, cv2.LINE_AA)
+        if Image is not None and ImageDraw is not None:
+            image, overlay, draw = _frame_draw_context(frame)
+            for idx, (title, value, accent) in enumerate(stats):
+                x0 = left_x + idx * (stat_w + gap)
+                x1 = x0 + stat_w
+                y1 = bottom_y + stat_h
+                _draw_themed_telemetry_pill(
+                    draw,
+                    x0=x0,
+                    y0=bottom_y,
+                    x1=x1,
+                    y1=y1,
+                    title=title,
+                    value=value,
+                    accent=accent,
+                    width=width,
+                    height=height,
+                )
+            _commit_frame_draw_context(frame, image, overlay)
+        else:
+            for idx, (title, value, accent) in enumerate(stats):
+                x0 = left_x + idx * (stat_w + gap)
+                x1 = x0 + stat_w
+                y1 = bottom_y + stat_h
+                _overlay_panel(frame, x0=x0, y0=bottom_y, x1=x1, y1=y1, fill_color=PANEL_BG, edge_color=accent, alpha=0.90)
+                cv2.putText(frame, title, (x0 + 14, bottom_y + int(stat_h * 0.26)), cv2.FONT_HERSHEY_SIMPLEX, max(0.40, min(width, height) / 1500.0), MUTED_TEXT, 1, cv2.LINE_AA)
+                cv2.putText(frame, value, (x0 + 14, bottom_y + int(stat_h * 0.64)), cv2.FONT_HERSHEY_SIMPLEX, max(0.56, min(width, height) / 1120.0), TEXT_COLOR, 2, cv2.LINE_AA)
+
+
+def _summary_telemetry_layout(width: int, height: int) -> Dict[str, Any]:
+    left_x = int(round(width * 0.04))
+    gap = int(round(width * 0.024))
+    stat_h = int(round(height * 0.085))
+    stat_w = int(round((width - (left_x * 2) - (gap * 2)) / 3.0))
+    return {
+        "left_x": left_x,
+        "gap": gap,
+        "stat_h": stat_h,
+        "stat_w": stat_w,
+    }
 
 
 def _draw_end_summary(
@@ -2735,6 +2907,18 @@ def _pause_anchor_frames(
     return dict(sorted(anchors.items()))
 
 
+def _pause_hold_plan(*, pause_frames: int, has_hotspot: bool) -> Tuple[int, int]:
+    base_pause = max(0, int(pause_frames))
+    if base_pause <= 0:
+        return 0, 0
+    if not has_hotspot:
+        return base_pause, 0
+    cue_hold = max(1, int(round(base_pause * 0.45)))
+    hotspot_hold = max(1, base_pause - cue_hold)
+    hotspot_bonus = max(1, int(round(base_pause * 0.35)))
+    return cue_hold, hotspot_hold + hotspot_bonus
+
+
 def render_skeleton_video(
     *,
     video_path: str,
@@ -2980,8 +3164,10 @@ def render_skeleton_video(
                                     root_cause=root_cause,
                                 ),
                             }
-                cue_hold = pause_frames if hotspot_payload is None else max(1, int(round(pause_frames * 0.45)))
-                hotspot_hold = 0 if hotspot_payload is None else max(1, pause_frames - cue_hold)
+                cue_hold, hotspot_hold = _pause_hold_plan(
+                    pause_frames=pause_frames,
+                    has_hotspot=hotspot_payload is not None,
+                )
                 for _ in range(cue_hold):
                     writer.write(paused_frame)
                     frames_rendered += 1

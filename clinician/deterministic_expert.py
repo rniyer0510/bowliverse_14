@@ -386,11 +386,6 @@ class DeterministicExpertSystem:
             events=events,
             action=action,
             metrics=metrics,
-            estimated_release_speed=estimated_release_speed,
-        )
-        analysis_capabilities = self._build_analysis_capabilities(
-            events=events,
-            capture_quality=capture_quality,
         )
         symptoms = self._build_symptoms(metrics)
         mechanics_evidence = self._build_mechanics_evidence_payload(
@@ -484,7 +479,6 @@ class DeterministicExpertSystem:
             "knowledge_pack_version": self._pack["pack_version"],
             "unknown_path_enforced": True,
             "capture_quality_v1": capture_quality,
-            "analysis_capabilities_v1": analysis_capabilities,
             "mechanics_evidence_v1": mechanics_evidence,
             "metrics": metrics,
             "symptoms": symptoms,
@@ -508,29 +502,15 @@ class DeterministicExpertSystem:
         events: Dict[str, Any],
         action: Dict[str, Any],
         metrics: Dict[str, Any],
-        estimated_release_speed: Dict[str, Any],
     ) -> Dict[str, Any]:
         event_chain = (events or {}).get("event_chain") or {}
         ordered = bool(event_chain.get("ordered", True))
         chain_quality = _clip01(_safe_float(event_chain.get("quality"), 0.0))
         action_conf = _clip01(_safe_float((action or {}).get("confidence"), 0.0))
-        release_event = (events or {}).get("release") or {}
-        release_conf = _clip01(_safe_float(release_event.get("confidence"), 0.0))
-        release_method = str(release_event.get("method") or "").strip().lower()
-        release_state = str(release_event.get("state") or "").strip().upper()
-        release_notes = {
-            str(item).strip().lower()
-            for item in list(release_event.get("notes") or [])
-            if str(item).strip()
-        }
-        speed_debug = (estimated_release_speed or {}).get("debug") or {}
-        speed_reason = str((estimated_release_speed or {}).get("reason") or "").strip().lower()
-        body_height_ratio = _safe_float(speed_debug.get("body_height_ratio"), 0.0)
-        shoulder_body_ratio = _safe_float(speed_debug.get("shoulder_body_ratio"), 0.0)
         notes: List[str] = []
         for name in ("bfc", "ffc", "release"):
-            raw_event = (events or {}).get(name)
-            if isinstance(raw_event, dict) and raw_event.get("frame") is None:
+            event = (events or {}).get(name) or {}
+            if event.get("frame") is None:
                 notes.append(f"{name}_missing")
         if not ordered:
             notes.append("event_chain_unordered")
@@ -542,42 +522,10 @@ class DeterministicExpertSystem:
             notes.append("action_confidence_too_low")
         elif action_conf < 0.40:
             notes.append("action_confidence_weak")
-        if speed_reason in {"missing_release_window", "release_too_close_to_clip_start", "release_too_close_to_clip_end"}:
-            notes.append("release_window_missing")
-        weak_release_method = release_method in {"peak_plus_offset", "window_start"}
-        if release_state == "MISSING":
-            notes.append("release_missing")
-        elif release_state == "INVALID":
-            notes.append("release_invalid")
-        elif release_state == "WEAK":
-            notes.append("release_unclear")
-        elif weak_release_method and release_conf < 0.65:
-            notes.append("release_unclear")
-        for note in release_notes:
-            if note not in notes:
-                notes.append(note)
-        close_camera = body_height_ratio >= 0.38 or shoulder_body_ratio >= 0.95
-        if close_camera:
-            notes.append("camera_too_close")
-        framing_unusable = close_camera and (weak_release_method or release_conf < 0.70 or chain_quality < 0.55)
-        if framing_unusable:
-            notes.append("framing_unusable")
 
-        if (
-            not ordered
-            or chain_quality < 0.20
-            or action_conf < 0.25
-            or "release_missing" in notes
-            or "release_window_missing" in notes
-        ):
+        if not ordered or chain_quality < 0.20 or action_conf < 0.25:
             status = "UNUSABLE"
-        elif (
-            chain_quality < 0.40
-            or action_conf < 0.40
-            or "release_unclear" in notes
-            or "camera_too_close" in notes
-            or "framing_unusable" in notes
-        ):
+        elif chain_quality < 0.40 or action_conf < 0.40:
             status = "WEAK"
         else:
             status = "USABLE"
@@ -589,88 +537,6 @@ class DeterministicExpertSystem:
             "event_chain_quality": metrics["event_chain_quality"]["value"],
             "action_confidence": metrics["action_confidence"]["value"],
         }
-
-    def _build_analysis_capabilities(
-        self,
-        *,
-        events: Dict[str, Any],
-        capture_quality: Dict[str, Any],
-    ) -> Dict[str, Any]:
-        status = str(capture_quality.get("status") or "").strip().upper()
-        release = (events or {}).get("release") or {}
-        release_state = str(release.get("state") or "").strip().upper()
-        if not release_state:
-            release_state = "MISSING" if release.get("frame") is None else "WEAK"
-
-        can_assess_structure = status != "UNUSABLE"
-        can_assess_release = can_assess_structure and release_state in {"CONFIDENT", "WEAK"}
-        can_estimate_speed = can_assess_structure and release_state == "CONFIDENT"
-        can_assess_legality = can_assess_structure and release_state == "CONFIDENT"
-        can_render_causal_story = can_assess_structure and release_state in {"CONFIDENT", "WEAK"}
-
-        return {
-            "version": "analysis_capabilities_v1",
-            "capture_quality_status": status or "WEAK",
-            "release_state": release_state,
-            "can_assess_structure": can_assess_structure,
-            "can_assess_release": can_assess_release,
-            "can_estimate_speed": can_estimate_speed,
-            "can_assess_legality": can_assess_legality,
-            "can_render_causal_story": can_render_causal_story,
-            "can_enter_history": can_assess_structure,
-        }
-
-    def _capture_quality_user_reason(
-        self,
-        capture_quality: Dict[str, Any],
-    ) -> str:
-        notes = {
-            str(item).strip().lower()
-            for item in list(capture_quality.get("notes") or [])
-            if str(item).strip()
-        }
-        if "release_missing" in notes or "release_window_missing" in notes or "release_unclear" in notes:
-            return "We could not detect release clearly enough to verify this clip."
-        if "framing_unusable" in notes or "camera_too_close" in notes:
-            return "The camera is too close to the bowler to verify release and follow-through clearly enough."
-        if "ffc_missing" in notes or "bfc_missing" in notes:
-            return "We could not detect the landing and release anchors clearly enough to verify this clip."
-        if "event_chain_unordered" in notes:
-            return "The key bowling moments did not stay clear enough in sequence to verify this clip."
-        if "event_chain_low_quality" in notes or "event_chain_weak_quality" in notes:
-            return "The key bowling moments are too weak in this clip to verify the action confidently."
-        if "action_confidence_too_low" in notes or "action_confidence_weak" in notes:
-            return "The bowler is not visible clearly enough through the whole action to verify this clip."
-        return "This clip does not show the bowling action clearly enough to verify it yet."
-
-    def _capture_quality_user_retake_guidance(
-        self,
-        capture_quality: Dict[str, Any],
-    ) -> str:
-        notes = {
-            str(item).strip().lower()
-            for item in list(capture_quality.get("notes") or [])
-            if str(item).strip()
-        }
-        if "release_missing" in notes or "release_window_missing" in notes or "release_unclear" in notes:
-            return (
-                "Retake from side-on, keep the full run-up through release and follow-through in frame, "
-                "stand about 8 to 12 metres away, and avoid zooming."
-            )
-        if "framing_unusable" in notes or "camera_too_close" in notes:
-            return (
-                "Retake from side-on, stand about 8 to 12 metres away, avoid zooming, and keep the full run-up, "
-                "release, and follow-through visible in frame."
-            )
-        if "ffc_missing" in notes or "bfc_missing" in notes:
-            return (
-                "Retake from side-on, keep both feet and the full body visible through landing "
-                "and release, stand about 8 to 12 metres away, and keep the phone steady."
-            )
-        return (
-            "Retake from side-on, keep the full body and ball release in frame, "
-            "stand about 8 to 12 metres away, keep the phone steady, and avoid zooming."
-        )
 
     def _build_mechanics_evidence_payload(
         self,
@@ -2445,26 +2311,6 @@ class DeterministicExpertSystem:
         kinetic_chain_status = coach_diagnosis.get("kinetic_chain_status") or {}
         mechanism_cfg = (self._pack.get("mechanisms") or {}).get(str(root_cause.get("mechanism_id") or "")) or {}
         state_id = str(kinetic_chain_status.get("id") or "")
-        root_cause_status = str(root_cause.get("status") or "").strip().lower()
-
-        if root_cause_status == "not_interpretable":
-            return {
-                "headline": "Unable to verify this clip yet.",
-                "what_to_notice": (
-                    renderer_guidance.get("simple_symptom_text")
-                    or root_cause.get("summary")
-                    or "We could not verify this clip from the current video."
-                ),
-                "why_it_happens": (
-                    root_cause.get("why_it_is_happening")
-                    or "The clip does not show the bowling action clearly enough yet."
-                ),
-                "first_fix": None,
-                "check_next": (
-                    renderer_guidance.get("simple_load_watch_text")
-                    or "Retake from side-on and make sure release and follow-through are visible."
-                ),
-            }
 
         if state_id == "connected":
             return {
@@ -3136,7 +2982,7 @@ class DeterministicExpertSystem:
             return "Front leg gets soft at landing."
         if symptom_id in {"arm_chase", "release_window_instability"}:
             return "The arm has to rush late."
-        return None
+        return "This is the main thing to notice."
 
     def _root_cause_simple_load_watch_text(
         self,
@@ -3155,7 +3001,7 @@ class DeterministicExpertSystem:
             return "Lower back works harder here."
         if compensation_group == "upper_body":
             return "Lower back works harder here."
-        return None
+        return "This is where the body works harder."
 
     def _root_cause_anchor_risk_ids(
         self,
@@ -3702,18 +3548,12 @@ class DeterministicExpertSystem:
         )
 
         if capture_status == "UNUSABLE":
-            reason = self._capture_quality_user_reason(capture_quality)
-            retake_guidance = self._capture_quality_user_retake_guidance(
-                capture_quality
-            )
             return {
                 "status": "not_interpretable",
                 "mechanism_id": None,
-                "title": "Unable to verify this clip yet",
-                "summary": reason,
-                "why_it_is_happening": (
-                    "The clip does not show the chain clearly enough to justify a root-cause story yet."
-                ),
+                "title": "Root cause not interpretable yet",
+                "summary": "Capture quality is too weak to call a root cause from this clip.",
+                "why_it_is_happening": "The clip does not show the chain clearly enough to justify a root-cause story yet.",
                 "where_it_starts": None,
                 "primary_driver": None,
                 "compensation": None,
@@ -3722,20 +3562,7 @@ class DeterministicExpertSystem:
                 "performance_impact": None,
                 "load_impact": None,
                 "biomechanics_basis": None,
-                "renderer_guidance": {
-                    "story_id": None,
-                    "title": "Unable to verify",
-                    "focus_regions": [],
-                    "phases": [],
-                    "cue_points": [],
-                    "anchor_risk_ids": {"ffc": None, "release": None},
-                    "phase_targets": {},
-                    "warning_hotspots_allowed": False,
-                    "symptom_text": reason,
-                    "load_watch_text": retake_guidance,
-                    "simple_symptom_text": reason,
-                    "simple_load_watch_text": retake_guidance,
-                },
+                "renderer_guidance": None,
             }
 
         if diagnosis_status == "no_match" and str(kinetic_chain_status.get("id") or "") == "connected":

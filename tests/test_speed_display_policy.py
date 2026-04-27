@@ -1,9 +1,6 @@
 import unittest
 
-from app.orchestrator.orchestrator import (
-    _gate_speed_estimate,
-    _release_dependent_metrics_should_be_suppressed,
-)
+from app.orchestrator.orchestrator import _gate_speed_estimate
 
 
 class SpeedDisplayPolicyTest(unittest.TestCase):
@@ -59,33 +56,6 @@ class SpeedDisplayPolicyTest(unittest.TestCase):
         self.assertFalse(result["available"])
         self.assertEqual(result["display_policy"], "suppress")
         self.assertEqual(result["reason"], "low_event_chain_quality")
-
-    def test_release_dependent_metrics_suppressed_for_close_unclear_clip(self):
-        self.assertTrue(
-            _release_dependent_metrics_should_be_suppressed(
-                {
-                    "status": "WEAK",
-                    "notes": [
-                        "release_unclear",
-                        "camera_too_close",
-                        "framing_unusable",
-                    ],
-                }
-            )
-        )
-
-    def test_release_dependent_metrics_not_suppressed_for_clean_weak_clip(self):
-        self.assertFalse(
-            _release_dependent_metrics_should_be_suppressed(
-                {
-                    "status": "WEAK",
-                    "notes": [
-                        "event_chain_weak_quality",
-                        "action_confidence_weak",
-                    ],
-                }
-            )
-        )
 
 
 if __name__ == "__main__":

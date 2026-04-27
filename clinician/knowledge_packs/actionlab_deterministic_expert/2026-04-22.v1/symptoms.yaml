@@ -7,8 +7,8 @@ symptoms:
     simple_title: "Not enough build"
     category: "build"
     phase: approach_build
-    description: "The run-up is not carrying enough momentum into landing."
-    simple_description: "The run-up is not bringing enough into landing."
+    description: "The run-up and final strides do not appear to carry enough usable momentum into the crease."
+    simple_description: "The run-up is not bringing enough energy into the action."
     evidence_inputs:
       - approach_momentum_score
       - runup_rhythm_stability

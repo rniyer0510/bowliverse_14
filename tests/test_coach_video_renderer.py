@@ -10,12 +10,16 @@ from app.workers.render import coach_video_renderer
 from app.workers.render.coach_video_renderer import (
     _format_action_label,
     _draw_load_watch_phase,
+    _pause_hold_plan,
     _preferred_hotspot_region_key,
     _root_cause_proof_step,
+    _story_headline_and_support,
     _story_risk_for_phase,
+    _summary_telemetry_layout,
     _stacked_hotspot_region_keys,
     _should_render_warning_hotspots,
     _select_hotspot_frame_idx,
+    _top_risk_panel_metrics,
     render_skeleton_video,
     _render_timeline_events,
     _summary_issue_lines,
@@ -66,6 +70,45 @@ def _pose_frame(frame_idx: int, shift: float):
 
 
 class CoachVideoRendererTest(unittest.TestCase):
+    def test_pause_hold_plan_gives_hotspots_extra_read_time(self):
+        normal_cue, normal_hotspot = _pause_hold_plan(
+            pause_frames=10,
+            has_hotspot=False,
+        )
+        hotspot_cue, hotspot_hold = _pause_hold_plan(
+            pause_frames=10,
+            has_hotspot=True,
+        )
+
+        self.assertEqual((normal_cue, normal_hotspot), (10, 0))
+        self.assertLess(hotspot_cue, normal_cue)
+        self.assertGreater(hotspot_hold, 5)
+        self.assertGreater(hotspot_cue + hotspot_hold, normal_cue)
+
+    def test_top_risk_panel_metrics_keep_headline_dominant_and_body_secondary(self):
+        metrics = _top_risk_panel_metrics(1080, 1920)
+
+        self.assertEqual(metrics["headline_max_lines"], 2)
+        self.assertEqual(metrics["body_max_lines"], 1)
+        self.assertGreater(metrics["headline_base_scale"], metrics["body_base_scale"])
+        self.assertGreater(metrics["card_w"], 600)
+        self.assertLess(metrics["card_h"], 320)
+
+    def test_summary_telemetry_layout_stays_compact(self):
+        layout = _summary_telemetry_layout(1080, 1920)
+
+        self.assertLess(layout["stat_h"], 200)
+        self.assertGreater(layout["stat_w"], 250)
+        self.assertLess(layout["gap"], 40)
+
+    def test_story_headline_and_support_split_long_copy(self):
+        headline, support = _story_headline_and_support(
+            "Front leg doesn't hold strong at landing. The body then falls away."
+        )
+
+        self.assertEqual(headline, "Front leg doesn't hold strong at landing")
+        self.assertEqual(support, "The body then falls away.")
+
     def test_format_action_label_prefers_intent_when_present(self):
         self.assertEqual(
             _format_action_label({"action": "FRONT_ON", "intent": "semi_open"}),
@@ -491,6 +534,7 @@ class CoachVideoRendererTest(unittest.TestCase):
             self.assertTrue(result["available"])
             self.assertGreaterEqual(draw_phase.call_count, 1)
             self.assertLessEqual(draw_phase.call_count, 3)
+            self.assertGreater(result["frames_rendered"], 41)
 
     def test_render_skeleton_video_stops_drawing_skeleton_late_after_release(self):
         with tempfile.TemporaryDirectory() as tmpdir:

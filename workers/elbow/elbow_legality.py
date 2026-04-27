@@ -330,6 +330,24 @@ def _select_measurement_rows(
             },
         )
 
+    primary_rows = (
+        _collect_rows(elbow_signal, uah, release_used)
+        if uah is not None and uah <= release_used
+        else []
+    )
+    if len(primary_rows) >= MIN_SAMPLES:
+        return (
+            uah if uah is not None else release_start,
+            release_used,
+            primary_rows,
+            {
+                "window_mode": "uah_to_release",
+                "window_start": uah,
+                "window_end": release_used,
+                "valid_samples": len(primary_rows),
+            },
+        )
+
     grace_limit = min(max_frame or release_used, release_used + POST_RELEASE_GRACE)
     for candidate_end in range(release_used + 1, grace_limit + 1):
         candidate_start = max(0, candidate_end - PRE_RELEASE_LOOKBACK)
@@ -348,24 +366,6 @@ def _select_measurement_rows(
                     "valid_samples": len(candidate_rows),
                 },
             )
-
-    primary_rows = (
-        _collect_rows(elbow_signal, uah, release_used)
-        if uah is not None and uah <= release_used
-        else []
-    )
-    if len(primary_rows) >= MIN_SAMPLES:
-        return (
-            uah if uah is not None else release_start,
-            release_used,
-            primary_rows,
-            {
-                "window_mode": "uah_to_release",
-                "window_start": uah,
-                "window_end": release_used,
-                "valid_samples": len(primary_rows),
-            },
-        )
 
     return (
         release_start,
@@ -532,7 +532,9 @@ def _is_weak_primary_window(primary: Dict[str, Any]) -> bool:
     debug = primary.get("debug") or {}
     window_mode = debug.get("window_mode")
     valid_samples = int(debug.get("valid_samples") or 0)
-    return window_mode == "release_grace_rescue" and valid_samples <= MIN_SAMPLES
+    if window_mode == "release_grace_rescue":
+        return True
+    return valid_samples <= MIN_SAMPLES
 
 
 def _review_weak_primary_window(
@@ -549,8 +551,27 @@ def _review_weak_primary_window(
     reviewed["debug"] = reviewed_debug
 
     extension = reviewed.get("extension_deg")
+    window_mode = reviewed_debug.get("window_mode")
     if extension is None:
         return rescue
+
+    if window_mode == "release_grace_rescue":
+        if reviewed.get("verdict") == "LEGAL":
+            if extension <= (THRESH_LEGAL - WEAK_WINDOW_MARGIN_DEG):
+                reviewed["confidence"] = min(float(reviewed.get("confidence") or 0.0), 0.65)
+                reviewed["reason"] = "post_release_window_but_clear_margin"
+                return reviewed
+            if rescue.get("verdict") == "LEGAL":
+                reviewed["confidence"] = min(float(reviewed.get("confidence") or 0.0), 0.60)
+                reviewed["reason"] = "post_release_window_confirmed"
+                return reviewed
+        return {
+            "verdict": "SUSPECT",
+            "confidence": 0.45,
+            "reason": "post_release_window_unconfirmed",
+            "extension_deg": extension,
+            "debug": reviewed_debug,
+        }
 
     # Strongly legal measured windows stay legal even if the rescue is cautious.
     if reviewed.get("verdict") == "LEGAL" and extension <= (THRESH_LEGAL - WEAK_WINDOW_MARGIN_DEG):

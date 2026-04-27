@@ -505,26 +505,6 @@ def _gate_speed_estimate(
     return estimated_release_speed
 
 
-def _release_dependent_metrics_should_be_suppressed(capture_quality: dict) -> bool:
-    status = str((capture_quality or {}).get("status") or "").strip().upper()
-    if status == "UNUSABLE":
-        return True
-    notes = {
-        str(item).strip().lower()
-        for item in list((capture_quality or {}).get("notes") or [])
-        if str(item).strip()
-    }
-    return bool(
-        notes.intersection(
-            {
-                "release_unclear",
-                "camera_too_close",
-                "framing_unusable",
-            }
-        )
-    )
-
-
 def _walkthrough_render_window(
     *,
     events: dict,
@@ -883,11 +863,7 @@ def analyze(
         release_frame = (events.get("release") or {}).get("frame")
         delivery_window = events.get("delivery_window")
 
-        if (
-            release_frame is not None
-            and delivery_window is not None
-            and not (events.get("ffc") and events.get("bfc"))
-        ):
+        if release_frame is not None and delivery_window is not None:
             foot_events = detect_ffc_bfc(
                 pose_frames=pose_frames,
                 hand=hand,
@@ -905,17 +881,16 @@ def analyze(
         uah_confidence = float((events.get("uah") or {}).get("confidence") or 0.0)
         ffc_confidence = float((events.get("ffc") or {}).get("confidence") or 0.0)
         bfc_confidence = float((events.get("bfc") or {}).get("confidence") or 0.0)
-        if not events.get("event_chain"):
-            events["event_chain"] = chain_quality(
-                bfc_frame=bfc_frame,
-                ffc_frame=ffc_frame,
-                uah_frame=uah_frame,
-                release_frame=release_frame,
-                bfc_confidence=bfc_confidence,
-                ffc_confidence=ffc_confidence,
-                uah_confidence=uah_confidence,
-                release_confidence=release_confidence,
-            )
+        events["event_chain"] = chain_quality(
+            bfc_frame=bfc_frame,
+            ffc_frame=ffc_frame,
+            uah_frame=uah_frame,
+            release_frame=release_frame,
+            bfc_confidence=bfc_confidence,
+            ffc_confidence=ffc_confidence,
+            uah_confidence=uah_confidence,
+            release_confidence=release_confidence,
+        )
 
         # ------------------------------------------------------------
         # Action Classification
@@ -1022,46 +997,6 @@ def analyze(
             prior_results=prior_results,
             account_role=getattr(current_account, "role", None),
         )
-        capture_quality_status = str(
-            ((deterministic_expert.get("capture_quality_v1") or {}).get("status"))
-            or ""
-        ).upper()
-        capture_quality = (deterministic_expert.get("capture_quality_v1") or {})
-        analysis_capabilities = (deterministic_expert.get("analysis_capabilities_v1") or {})
-        if capture_quality_status == "UNUSABLE":
-            estimated_release_speed = {
-                "available": False,
-                "display": None,
-                "confidence": 0.0,
-                "reason": "capture_quality_unusable",
-            }
-            elbow = {
-                "verdict": "UNKNOWN",
-                "confidence": 0.0,
-                "reason": "capture_quality_unusable",
-            }
-            action = {
-                "action": None,
-                "confidence": 0.0,
-                "reason": "capture_quality_unusable",
-            }
-        elif not bool(analysis_capabilities.get("can_estimate_speed", True)):
-            estimated_release_speed = {
-                "available": False,
-                "display_policy": "suppress",
-                "display": None,
-                "value_kph": None,
-                "confidence": 0.0,
-                "reason": "release_metrics_not_trustworthy",
-            }
-        if capture_quality_status != "UNUSABLE" and not bool(
-            analysis_capabilities.get("can_assess_legality", True)
-        ):
-            elbow = {
-                "verdict": "UNKNOWN",
-                "confidence": 0.0,
-                "reason": "release_metrics_not_trustworthy",
-            }
 
         # ------------------------------------------------------------
         # Build Response
