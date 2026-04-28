@@ -103,20 +103,11 @@ def _draw_load_watch_phase(
                 pulse_phase=pulse_phase,
             )
     if stage == "label":
-        occupied_rects: List[Tuple[int, int, int, int]] = []
-        for region in stacked_regions:
-            stacked_center = region.get("center")
-            if not isinstance(stacked_center, tuple) or len(stacked_center) != 2:
-                continue
-            stacked_direction = tuple(region.get("direction") or direction)
-            stacked_label = str(region.get("label") or "")
-            rect = _draw_hotspot_compact_label(
-                frame,
-                center=(int(stacked_center[0]), int(stacked_center[1])),
-                direction=stacked_direction,
-                label=stacked_label,
-                scale=scale,
-                occupied_rects=occupied_rects,
-            )
-            if rect is not None:
-                occupied_rects.append(rect)
+        rect = _draw_hotspot_compact_label(
+            frame,
+            center=center_xy,
+            direction=direction,
+            label=label,
+            scale=scale,
+            occupied_rects=[],
+        )

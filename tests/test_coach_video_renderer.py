@@ -33,6 +33,9 @@ from app.workers.render.coach_video_renderer import (
 from app.workers.render.coach_video_renderer_parts.drawing_base import (
     _draw_skeleton_legend,
 )
+from app.workers.render.coach_video_renderer_parts.render_pause_sequence import (
+    _write_stage_frames,
+)
 from app.workers.render.render_load_watch import (
     _load_hotspot_regions,
     _preferred_ffc_cue_risk_id,
@@ -150,6 +153,56 @@ class CoachVideoRendererTest(unittest.TestCase):
         self.assertEqual(stages[-1][0], "label")
         self.assertGreater(stages[-1][1], 0)
         self.assertEqual(sum(count for _, count in stages), 8)
+
+    def test_load_watch_label_stage_draws_only_primary_compact_tag(self):
+        pose_frames = [_pose_frame(i, shift=0.0) for i in range(5)]
+        tracks = coach_video_renderer._build_smoothed_tracks(
+            pose_frames,
+            width=160,
+            height=120,
+            fps=24.0,
+        )
+        frame = np.zeros((120, 160, 3), dtype=np.uint8)
+        with mock.patch(
+            "app.workers.render.coach_video_renderer_parts.hotspot_phase._draw_hotspot_compact_label",
+            side_effect=[(1, 1, 10, 10)],
+        ) as compact_label:
+            _draw_load_watch_phase(
+                frame,
+                tracks=tracks,
+                frame_idx=2,
+                hand="R",
+                risk_id="knee_brace_failure",
+                risk_by_id={
+                    "knee_brace_failure": {
+                        "risk_id": "knee_brace_failure",
+                        "signal_strength": 0.9,
+                        "confidence": 0.9,
+                    }
+                },
+                load_watch_text="Front knee / leg chain",
+                pulse_phase=0.85,
+                stage="label",
+            )
+        self.assertEqual(compact_label.call_count, 1)
+
+    def test_write_stage_frames_blends_transition_from_previous_stage(self):
+        previous = np.zeros((8, 8, 3), dtype=np.uint8)
+        current = np.full((8, 8, 3), 240, dtype=np.uint8)
+        writer = mock.Mock()
+
+        written, final_frame = _write_stage_frames(
+            writer=writer,
+            stage_frames=[current.copy() for _ in range(4)],
+            previous_frame=previous,
+            fps=24.0,
+        )
+
+        self.assertEqual(written, 4)
+        self.assertIsNotNone(final_frame)
+        first_written = writer.write.call_args_list[0].args[0]
+        self.assertGreater(int(first_written.sum()), int(previous.sum()))
+        self.assertLess(int(first_written.sum()), int(current.sum()))
 
     def test_reading_hold_frames_gives_short_bubbles_real_read_time(self):
         hold_frames = _reading_hold_frames(
