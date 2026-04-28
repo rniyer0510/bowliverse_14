@@ -13,23 +13,27 @@ def _hotspot_stage_plan(hotspot_hold: int) -> List[Tuple[str, int]]:
     if hotspot_hold <= 0:
         return []
     if hotspot_hold == 1:
-        return [("rings", 1)]
+        return [("label", 1)]
     if hotspot_hold == 2:
-        return [("line", 1), ("rings", 1)]
-
-    line_count = max(1, int(round(hotspot_hold * 0.16)))
-    label_count = 0
-    rings_count = max(1, hotspot_hold - line_count)
-    while line_count + rings_count > hotspot_hold:
+        return [("rings", 1), ("label", 1)]
+    if hotspot_hold == 3:
+        return [("line", 1), ("rings", 1), ("label", 1)]
+    line_count = max(1, int(round(hotspot_hold * 0.14)))
+    label_count = max(1, int(round(hotspot_hold * 0.48)))
+    rings_count = max(1, hotspot_hold - line_count - label_count)
+    while line_count + rings_count + label_count > hotspot_hold:
         if rings_count > 1:
             rings_count -= 1
+        elif label_count > 1:
+            label_count -= 1
         else:
             line_count -= 1
-    while line_count + rings_count < hotspot_hold:
-        rings_count += 1
+    while line_count + rings_count + label_count < hotspot_hold:
+        label_count += 1
     return [
         ("line", line_count),
         ("rings", rings_count),
+        ("label", label_count),
     ]
 def _hotspot_search_window(
     *,
@@ -61,7 +65,6 @@ def _select_hotspot_frame_idx(
 ) -> int:
     if not risk_id:
         return int(anchor_frame)
-
     best_frame = int(anchor_frame)
     best_score = float("-inf")
     for candidate in _hotspot_search_window(

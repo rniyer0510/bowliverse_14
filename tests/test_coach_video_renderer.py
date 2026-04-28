@@ -144,6 +144,13 @@ class CoachVideoRendererTest(unittest.TestCase):
         self.assertGreater(sequence["hotspot"], 0)
         self.assertEqual(sum(sequence.values()), sum(_pause_hold_plan(pause_frames=10, has_hotspot=True)))
 
+    def test_hotspot_stage_plan_ends_on_compact_label(self):
+        stages = coach_video_renderer._hotspot_stage_plan(8)
+
+        self.assertEqual(stages[-1][0], "label")
+        self.assertGreater(stages[-1][1], 0)
+        self.assertEqual(sum(count for _, count in stages), 8)
+
     def test_reading_hold_frames_gives_short_bubbles_real_read_time(self):
         hold_frames = _reading_hold_frames(
             text="Energy leaks here.",

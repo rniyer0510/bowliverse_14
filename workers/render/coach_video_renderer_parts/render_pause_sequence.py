@@ -16,11 +16,11 @@ def _render_pause_sequence(*, writer: Any, frame: np.ndarray, tracks: Dict[int, 
     hotspot_hold = int(sequence_plan.get("hotspot") or 0)
     proof_bubble_text = _proof_bubble_text_for_phase(phase_key=pause_key, risk_id=str((hotspot_payload or {}).get("risk_id") or ""), proof_step=proof_step, risk_by_id=risk_by_id)
     if proof_bubble_text:
-        proof_hold = max(proof_hold, _reading_hold_frames(text=proof_bubble_text, fps=fps, minimum_seconds=1.85, max_seconds=3.35))
+        proof_hold = max(proof_hold, _reading_hold_frames(text=proof_bubble_text, fps=fps, minimum_seconds=2.30, max_seconds=3.60))
     if leakage_payload:
-        leakage_hold = max(leakage_hold, _reading_hold_frames(text=str((leakage_payload or {}).get("bubble") or ""), fps=fps, minimum_seconds=1.55, max_seconds=2.6))
+        leakage_hold = max(leakage_hold, _reading_hold_frames(text=str((leakage_payload or {}).get("bubble") or ""), fps=fps, minimum_seconds=1.90, max_seconds=2.80))
     if leakage_payload and hotspot_payload:
-        body_pay_hold = max(body_pay_hold, _reading_hold_frames(text="Body pays here.", fps=fps, minimum_seconds=1.45, max_seconds=2.35))
+        body_pay_hold = max(body_pay_hold, _reading_hold_frames(text="Body pays here.", fps=fps, minimum_seconds=1.80, max_seconds=2.45))
     for _ in range(proof_hold):
         writer.write(paused_frame)
         frames_rendered += 1
@@ -33,6 +33,15 @@ def _render_pause_sequence(*, writer: Any, frame: np.ndarray, tracks: Dict[int, 
     hotspot_frame_idx = frame_idx
     if hotspot_payload:
         hotspot_frame_idx = _select_hotspot_frame_idx(tracks=tracks, hand=hand, risk_id=str((hotspot_payload or {}).get("risk_id") or ""), risk_by_id=risk_by_id, phase_key=pause_key, anchor_frame=frame_idx, start=start, stop=stop)
+        hotspot_hold = max(
+            hotspot_hold,
+            _reading_hold_frames(
+                text="Load / fault point",
+                fps=fps,
+                minimum_seconds=1.60,
+                max_seconds=2.10,
+            ),
+        )
     if leakage_payload and hotspot_payload and body_pay_hold > 0:
         for pay_idx in range(body_pay_hold):
             pay_frame = frame.copy()
