@@ -4,6 +4,10 @@ from .font_utils import _fit_pil_wrapped_text, _pil_text_size, _pil_text_block_h
 from .pil_context import _bgr_to_rgb
 from .themed_card_shell import _draw_themed_card_shell
 
+def _normalized_story_label(text: str) -> str:
+    cleaned = "".join(ch.lower() for ch in str(text or "").strip() if ch.isalnum() or ch.isspace())
+    return " ".join(cleaned.split())
+
 def _draw_themed_story_card(
     draw: Any,
     *,
@@ -26,27 +30,38 @@ def _draw_themed_story_card(
     vertical_align: str = "top",
 ) -> int:
     card_w = max(1, x1 - x0)
-    outer_margin = 1
-    text_size = _phase_label_font_size(min(width, height))
-    title_size = text_size
-    title_font = _fit_pil_wrapped_text(
+    scale = min(width, height)
+    base_text_size = _phase_label_font_size(scale)
+    normalized_title = _normalized_story_label(title)
+    normalized_headline = _normalized_story_label(headline)
+    if normalized_title and normalized_headline and normalized_title == normalized_headline:
+        headline = ""
+    title_size = max(14, int(round(base_text_size * 0.82 * max(0.7, float(title_scale_boost)))))
+    headline_size = max(18, int(round(base_text_size * 1.08 * max(0.7, float(headline_scale_boost)))))
+    body_size = max(14, int(round(base_text_size * 0.82 * max(0.7, float(body_scale_boost)))))
+    rail_probe = max(3, int(round(card_w * 0.020))) + max(3, int(round(min(width, height) * 0.006)))
+    left_pad = max(14, int(round(card_w * 0.064))) + rail_probe + 2
+    right_pad = max(14, int(round(card_w * 0.058))) + 2
+    top_pad = max(12, int(round(body_size * 0.72))) + 2
+    bottom_pad = max(16, int(round(body_size * 0.90))) + 4
+    inner_pad_x = left_pad
+    content_width = max(40, x1 - x0 - inner_pad_x * 2)
+    content_width = max(40, x1 - x0 - left_pad - right_pad)
+    title_font, title_lines = _fit_pil_wrapped_text(
         draw,
         str(title or ""),
         font_file=LABEL_FONT_FILE,
         base_size=title_size,
-        min_size=title_size,
-        max_width=max(40, int(round(card_w * 0.75))),
+        min_size=max(12, int(round(title_size * 0.90))),
+        max_width=content_width,
         max_lines=max(1, int(title_max_lines)),
-    )[0]
-    rail_probe = max(3, int(round(card_w * 0.020))) + max(3, int(round(min(width, height) * 0.006)))
-    inner_pad_x = max(14, int(round(card_w * 0.064))) + rail_probe + outer_margin
-    content_width = max(40, x1 - x0 - inner_pad_x * 2)
+    )
     headline_font, headline_lines = _fit_pil_wrapped_text(
         draw,
         str(headline or ""),
         font_file=BODY_FONT_FILE,
-        base_size=text_size,
-        min_size=text_size,
+        base_size=headline_size,
+        min_size=max(14, int(round(headline_size * 0.76))),
         max_width=content_width,
         max_lines=max(1, int(headline_max_lines)),
     )
@@ -54,22 +69,13 @@ def _draw_themed_story_card(
         draw,
         str(body or ""),
         font_file=BODY_FONT_MEDIUM_FILE,
-        base_size=text_size,
-        min_size=text_size,
+        base_size=body_size,
+        min_size=max(12, int(round(body_size * 0.78))),
         max_width=content_width,
         max_lines=max(1, int(body_max_lines)),
     )
-    title_lines = _fit_pil_wrapped_text(
-        draw,
-        str(title or ""),
-        font_file=LABEL_FONT_FILE,
-        base_size=title_size,
-        min_size=title_size,
-        max_width=content_width,
-        max_lines=max(1, int(title_max_lines)),
-    )[1]
-    line_gap = max(5, int(round(text_size * 0.30)))
-    section_gap = max(10, int(round(text_size * 0.55)))
+    line_gap = max(4, int(round(body_size * 0.26)))
+    section_gap = max(8, int(round(base_text_size * 0.42)))
     title_h = _pil_text_block_height(draw, title_lines, title_font, line_gap=line_gap)
     headline_h = _pil_text_block_height(draw, headline_lines, headline_font, line_gap=line_gap)
     body_h = _pil_text_block_height(draw, body_lines, body_font, line_gap=line_gap)
@@ -84,8 +90,7 @@ def _draw_themed_story_card(
         if total_h:
             total_h += max(4, section_gap - 2)
         total_h += body_h
-    inner_pad_y = max(12, int(round(text_size * 0.70))) + outer_margin
-    y1 = max(y1, y0 + inner_pad_y * 2 + total_h)
+    y1 = max(y1, y0 + top_pad + bottom_pad + total_h)
     card_h = max(1, y1 - y0)
     rail_offset = _draw_themed_card_shell(
         draw,
@@ -97,13 +102,13 @@ def _draw_themed_story_card(
         width=width,
         height=height,
     )
-    inner_pad_x = max(14, int(round(card_w * 0.064))) + rail_offset + outer_margin
+    inner_pad_x = max(left_pad, rail_offset + 2)
 
-    available_h = max(1, y1 - y0 - inner_pad_y * 2)
-    current_y = y0 + inner_pad_y
+    available_h = max(1, y1 - y0 - top_pad - bottom_pad)
+    current_y = y0 + top_pad
     if str(vertical_align).strip().lower() == "center" and total_h < available_h:
-        current_y = y0 + inner_pad_y + int(round((available_h - total_h) / 2.0))
-    for line in title_lines:
+        current_y = y0 + top_pad + int(round((available_h - total_h) / 2.0))
+    for idx, line in enumerate(title_lines):
         if title_font is None:
             break
         draw.text(
@@ -113,10 +118,12 @@ def _draw_themed_story_card(
             fill=_bgr_to_rgb(accent),
         )
         _, line_h = _pil_text_size(draw, str(line or "").upper(), title_font)
-        current_y += line_h + line_gap
+        current_y += line_h
+        if idx < len(title_lines) - 1:
+            current_y += line_gap
     if title_lines:
         current_y += section_gap
-    for line in headline_lines:
+    for idx, line in enumerate(headline_lines):
         if headline_font is None:
             break
         draw.text(
@@ -126,10 +133,12 @@ def _draw_themed_story_card(
             fill=_bgr_to_rgb(THEME_TEXT_PRIMARY),
         )
         _, line_h = _pil_text_size(draw, line, headline_font)
-        current_y += line_h + line_gap
+        current_y += line_h
+        if idx < len(headline_lines) - 1:
+            current_y += line_gap
     if headline_lines and body_lines:
         current_y += max(3, section_gap - 1)
-    for line in body_lines:
+    for idx, line in enumerate(body_lines):
         if body_font is None:
             break
         draw.text(
@@ -139,5 +148,7 @@ def _draw_themed_story_card(
             fill=_bgr_to_rgb(THEME_TEXT_PRIMARY),
         )
         _, line_h = _pil_text_size(draw, line, body_font)
-        current_y += line_h + line_gap
+        current_y += line_h
+        if idx < len(body_lines) - 1:
+            current_y += line_gap
     return y1

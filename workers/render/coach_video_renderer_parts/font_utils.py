@@ -119,7 +119,11 @@ def _wrap_pil_text(
             if width_px <= max_width:
                 lines[-1] = candidate
                 break
-            tail = tail.rsplit(" ", 1)[0].strip()
+            next_tail = tail.rsplit(" ", 1)[0].strip()
+            if next_tail == tail:
+                tail = ""
+                break
+            tail = next_tail
         if not tail:
             lines[-1] = "..."
     return lines
@@ -146,7 +150,8 @@ def _fit_pil_wrapped_text(
         )
         if not lines:
             return font, []
-        if len(lines) <= max_lines:
+        truncated = any(str(line).endswith("...") for line in lines)
+        if len(lines) <= max_lines and not truncated:
             return font, lines
     fallback_font = _load_theme_font(font_file, min_size)
     return fallback_font, _wrap_pil_text(

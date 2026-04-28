@@ -5,6 +5,7 @@ from unittest import mock
 
 import cv2
 import numpy as np
+from PIL import Image, ImageDraw
 
 from app.workers.render import coach_video_renderer
 from app.workers.render.coach_video_renderer import (
@@ -38,6 +39,12 @@ from app.workers.render.coach_video_renderer_parts.bubble_base import (
 )
 from app.workers.render.coach_video_renderer_parts.hotspot_draw import (
     _draw_hotspot_compact_label,
+)
+from app.workers.render.coach_video_renderer_parts.font_utils import (
+    _fit_pil_wrapped_text,
+)
+from app.workers.render.coach_video_renderer_parts.themed_story import (
+    _normalized_story_label,
 )
 from app.workers.render.coach_video_renderer_parts.render_pause_sequence import (
     _write_stage_frames,
@@ -289,6 +296,27 @@ class CoachVideoRendererTest(unittest.TestCase):
         self.assertIsNotNone(rect)
         _, y0, _, y1 = rect
         self.assertTrue(y1 <= 120 or y0 >= 120)
+
+    def test_fit_pil_wrapped_text_avoids_ellipsis_when_font_can_shrink(self):
+        image = Image.new("RGBA", (320, 240), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(image)
+
+        font, lines = _fit_pil_wrapped_text(
+            draw,
+            "Watch how the upper body is sequencing as the ball comes out.",
+            font_file="Inter-Medium.ttf",
+            base_size=22,
+            min_size=14,
+            max_width=132,
+            max_lines=5,
+        )
+
+        self.assertIsNotNone(font)
+        self.assertTrue(lines)
+        self.assertFalse(any(str(line).endswith("...") for line in lines))
+
+    def test_story_label_normalization_collapses_release_duplicate(self):
+        self.assertEqual(_normalized_story_label("Release"), _normalized_story_label("Release."))
 
     def test_summary_telemetry_layout_stays_compact(self):
         layout = _summary_telemetry_layout(1080, 1920)

@@ -60,7 +60,7 @@ def _story_card_layout(
     height: int,
     anchor: Optional[Tuple[int, int]] = None,
     bowler_hand: Optional[str] = None,
-    width_ratio: float = 0.28,
+    width_ratio: float = 0.32,
     margin_ratio: float = 0.05,
     top_height_ratio: float = 0.05,
 ) -> Dict[str, Any]:
@@ -211,8 +211,8 @@ def _draw_top_risk_panel(
         title_scale_boost=1.0,
         headline_scale_boost=1.08,
         body_scale_boost=1.0,
-        headline_max_lines=3,
-        body_max_lines=2,
+        headline_max_lines=6,
+        body_max_lines=5,
         vertical_align="top",
     )
     if anchor is not None:

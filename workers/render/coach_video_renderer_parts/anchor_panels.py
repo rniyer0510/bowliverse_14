@@ -54,8 +54,8 @@ def _draw_phase_anchor_panel(
         accent=tuple(config["accent"]),
         width=width,
         height=height,
-        headline_max_lines=2,
-        body_max_lines=2,
+        headline_max_lines=5,
+        body_max_lines=5,
         vertical_align="top",
     )
     _commit_frame_draw_context(frame, image, overlay)
