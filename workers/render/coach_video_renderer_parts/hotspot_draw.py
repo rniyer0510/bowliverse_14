@@ -60,14 +60,14 @@ def _draw_hotspot_compact_label(
     height = frame.shape[0]
     if Image is None or ImageDraw is None:
         return None
-    font = _load_theme_font(LABEL_FONT_FILE, max(14, int(round(scale * 0.030))))
+    font = _load_theme_font(LABEL_FONT_FILE, max(18, int(round(scale * 0.038))))
     if font is None:
         return None
     measure_image = Image.new("RGBA", (1, 1), (0, 0, 0, 0))
     measure_draw = ImageDraw.Draw(measure_image)
     text_w, text_h = _pil_text_size(measure_draw, label, font)
-    pad_x = max(10, scale // 70)
-    pad_y = max(6, scale // 90)
+    pad_x = max(12, scale // 54)
+    pad_y = max(7, scale // 76)
     dx, dy = direction
     candidates = [
         (center[0] + int(scale * 0.10), center[1] - int(scale * 0.05)),

@@ -29,11 +29,11 @@ def _draw_phase_rail(
     height = frame.shape[0]
     rail_x0 = int(round(width * 0.05))
     rail_x1 = int(round(width * 0.95))
-    rail_y0 = int(round(height * 0.90))
-    rail_h = int(round(height * 0.05))
+    rail_y0 = int(round(height * 0.89))
+    rail_h = int(round(height * 0.058))
     gap = int(round(width * 0.012))
     segment_w = max(30, int((rail_x1 - rail_x0 - gap * (len(PHASES) - 1)) / len(PHASES)))
-    font_size = max(14, int(round(min(width, height) * 0.030)))
+    font_size = max(18, int(round(min(width, height) * 0.038)))
     font = _load_theme_font(LABEL_FONT_FILE, font_size)
     measure_draw = None
     if font is not None and Image is not None and ImageDraw is not None:
@@ -74,8 +74,8 @@ def _draw_phase_rail(
     image, overlay, draw = _frame_draw_context(frame)
     for label, text_x, text_y, text_w, text_h, active in text_instructions:
         if active:
-            pill_pad_x = 6
-            pill_pad_y = 3
+            pill_pad_x = 8
+            pill_pad_y = 4
             draw.rounded_rectangle(
                 (
                     text_x - pill_pad_x,

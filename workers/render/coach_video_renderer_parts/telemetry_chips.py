@@ -23,19 +23,19 @@ def _draw_chip_text(
         return
     width = frame.shape[1]
     height = frame.shape[0]
-    title_font = _load_theme_font(LABEL_FONT_FILE, max(13, int(round(min(width, height) * 0.027))))
-    value_font = _load_theme_font(BODY_FONT_FILE, max(18, int(round(min(width, height) * 0.038))))
+    title_font = _load_theme_font(LABEL_FONT_FILE, max(15, int(round(min(width, height) * 0.031))))
+    value_font = _load_theme_font(BODY_FONT_FILE, max(20, int(round(min(width, height) * 0.043))))
     if title_font is None or value_font is None:
         return
     image, overlay, draw = _frame_draw_context(frame)
     draw.text(
-        (x0 + 16, y0 + int(card_h * 0.16)),
+        (x0 + 16, y0 + int(card_h * 0.14)),
         title,
         font=title_font,
         fill=_bgr_to_rgb(accent, 255),
     )
     draw.text(
-        (x0 + 16, y0 + int(card_h * 0.47)),
+        (x0 + 16, y0 + int(card_h * 0.44)),
         value,
         font=value_font,
         fill=_bgr_to_rgb(TEXT_COLOR, 255),
@@ -56,8 +56,8 @@ def _draw_speed_chip(
     low_conf = str(speed.get("display_policy") or "") == "show_low_confidence"
     accent = (110, 210, 255) if low_conf else (70, 225, 140)
     title = "Ball Speed"
-    card_w = int(round(width * 0.28))
-    card_h = int(round(height * 0.10))
+    card_w = int(round(width * 0.30))
+    card_h = int(round(height * 0.11))
     x1 = int(round(width * 0.95))
     x0 = x1 - card_w
     y0 = int(round(height * 0.05))
@@ -79,8 +79,8 @@ def _draw_action_chip(
     height = frame.shape[0]
     accent = (130, 214, 255)
     title = "Action Type"
-    card_w = int(round(width * 0.28))
-    card_h = int(round(height * 0.10))
+    card_w = int(round(width * 0.30))
+    card_h = int(round(height * 0.11))
     x1 = int(round(width * 0.95))
     x0 = x1 - card_w
     y0 = int(round(height * 0.05)) + (card_h + int(round(height * 0.015)) if below_speed else 0)
@@ -107,8 +107,8 @@ def _draw_legality_chip(
         value, accent = "Illegal", (72, 92, 235)
     else:
         value, accent = verdict.title(), (120, 210, 255)
-    card_w = int(round(width * 0.28))
-    card_h = int(round(height * 0.10))
+    card_w = int(round(width * 0.30))
+    card_h = int(round(height * 0.11))
     x1 = int(round(width * 0.95))
     x0 = x1 - card_w
     y0 = int(round(height * 0.05)) + stack_index * (card_h + int(round(height * 0.015)))
