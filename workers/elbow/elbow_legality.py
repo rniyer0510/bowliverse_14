@@ -22,13 +22,12 @@ PEAK_Q = 90
 PRE_RELEASE_LOOKBACK = 10
 POST_RELEASE_GRACE = 12
 
-FPS_NORMALIZATION_REF = 30.0
-BASELINE_VEL_MAX = 3.0  # deg/frame at 30 fps
+BASELINE_VEL_MAX = 3.0  # deg/frame
 FLOW_MIN_SAMPLES = 6
 FLOW_MIN_SPAN_FRAMES = 5
 FLOW_SIGN_EPS = 1.0
-FLOW_MAX_RATE = 12.0  # deg/frame at 30 fps
-FLOW_MAX_JERK = 10.0  # deg/frame^2 at 30 fps
+FLOW_MAX_RATE = 12.0
+FLOW_MAX_JERK = 10.0
 FLOW_MAX_SIGN_FLIPS = 1
 
 LOW_VIS_RESCUE_MIN_VIS = 0.10
@@ -127,50 +126,20 @@ def _percentile(vals: List[float], q: int) -> float:
     return xs[f] if f == c else xs[f] + (xs[c] - xs[f]) * (k - f)
 
 
-def _effective_fps(fps: Optional[float]) -> float:
-    try:
-        fps_f = float(fps or 0.0)
-    except Exception:
-        fps_f = 0.0
-    return fps_f if fps_f > 1e-6 else FPS_NORMALIZATION_REF
-
-
-def _baseline_velocity_limit_deg_per_sec() -> float:
-    return BASELINE_VEL_MAX * FPS_NORMALIZATION_REF
-
-
-def _flow_rate_limit_deg_per_sec() -> float:
-    return FLOW_MAX_RATE * FPS_NORMALIZATION_REF
-
-
-def _flow_jerk_limit_deg_per_sec2() -> float:
-    return FLOW_MAX_JERK * FPS_NORMALIZATION_REF * FPS_NORMALIZATION_REF
-
-
-def _release_trim_frames(fps: Optional[float]) -> int:
-    fps_f = _effective_fps(fps)
-    return max(RELEASE_TRIM_FRAMES, int(round(0.05 * fps_f)))
-
-
-def _mad_filter_rows(
-    rows: List[tuple[int, float]],
-    z: float = 6.0,
-) -> List[tuple[int, float]]:
-    if len(rows) < 5:
-        return rows
-    vals = [angle for _, angle in rows]
+def _mad_filter(vals: List[float], z: float = 6.0) -> List[float]:
+    if len(vals) < 5:
+        return vals
     med = sorted(vals)[len(vals) // 2]
     dev = [abs(v - med) for v in vals]
     mad = sorted(dev)[len(dev) // 2]
     if mad < 1e-9:
-        return rows
-    out: List[tuple[int, float]] = []
-    for row in rows:
-        v = row[1]
+        return vals
+    out = []
+    for v in vals:
         mz = 0.6745 * (v - med) / mad
         if abs(mz) <= z:
-            out.append(row)
-    return out if len(out) >= 3 else rows
+            out.append(v)
+    return out if len(out) >= 3 else vals
 
 
 def _collect_rows(
@@ -209,7 +178,6 @@ def _flow_based_legality(
     elbow_signal: List[Dict[str, Any]],
     events: Dict[str, Any],
     *,
-    fps: Optional[float] = None,
     primary_reason: str,
     primary_debug: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
@@ -248,14 +216,10 @@ def _flow_based_legality(
             "debug": primary_debug or {},
         }
 
-    fps_f = _effective_fps(fps)
-    rate_rows: List[tuple[float, float]] = []
+    rates: List[float] = []
     for (f0, a0), (f1, a1) in zip(rows, rows[1:]):
         gap = max(1, f1 - f0)
-        dt = gap / fps_f
-        rate_rows.append((((f0 + f1) / 2.0) / fps_f, (a1 - a0) / dt))
-
-    rates = [rate for _, rate in rate_rows]
+        rates.append((a1 - a0) / gap)
 
     if len(rates) < 2:
         return {
@@ -273,17 +237,14 @@ def _flow_based_legality(
         }
 
     abs_rates = [abs(r) for r in rates]
-    jerks = []
-    for (t0, r0), (t1, r1) in zip(rate_rows, rate_rows[1:]):
-        dt = max(1e-6, t1 - t0)
-        jerks.append(abs(r1 - r0) / dt)
+    jerks = [abs(rates[i] - rates[i - 1]) for i in range(1, len(rates))]
     sign_flips = _sign_flips(rates)
     p90_rate = _percentile(abs_rates, 90)
     p90_jerk = _percentile(jerks, 90) if jerks else 0.0
 
     irregular = (
-        p90_rate > _flow_rate_limit_deg_per_sec()
-        or p90_jerk > _flow_jerk_limit_deg_per_sec2()
+        p90_rate > FLOW_MAX_RATE
+        or p90_jerk > FLOW_MAX_JERK
         or sign_flips > FLOW_MAX_SIGN_FLIPS
     )
 
@@ -297,10 +258,9 @@ def _flow_based_legality(
             "start_frame": start_frame,
             "end_frame": release,
             "valid_samples": len(rows),
-            "p90_rate_deg_per_sec": round(p90_rate, 2),
-            "p90_jerk_deg_per_sec2": round(p90_jerk, 2),
+            "p90_rate_deg_per_frame": round(p90_rate, 2),
+            "p90_jerk_deg_per_frame": round(p90_jerk, 2),
             "sign_flips": sign_flips,
-            "fps": round(fps_f, 2),
         },
         "debug": {
             "primary_reason": primary_reason,
@@ -313,10 +273,10 @@ def _select_measurement_rows(
     elbow_signal: List[Dict[str, Any]],
     uah: Optional[int],
     release_used: int,
-) -> tuple[int, int, List[tuple[int, float]], Dict[str, Any]]:
+) -> tuple[int, int, List[float], Dict[str, Any]]:
     max_frame = max((_safe_int(it.get("frame")) for it in elbow_signal if isinstance(it, dict)), default=release_used)
     release_start = max(0, release_used - PRE_RELEASE_LOOKBACK)
-    release_rows = _collect_rows(elbow_signal, release_start, release_used)
+    release_rows = [a for _, a in _collect_rows(elbow_signal, release_start, release_used)]
     if len(release_rows) >= MIN_SAMPLES:
         return (
             release_start,
@@ -330,8 +290,27 @@ def _select_measurement_rows(
             },
         )
 
+    grace_limit = min(max_frame or release_used, release_used + POST_RELEASE_GRACE)
+    for candidate_end in range(release_used + 1, grace_limit + 1):
+        candidate_start = max(0, candidate_end - PRE_RELEASE_LOOKBACK)
+        candidate_rows = [a for _, a in _collect_rows(elbow_signal, candidate_start, candidate_end)]
+        if len(candidate_rows) >= MIN_SAMPLES:
+            return (
+                candidate_start,
+                candidate_end,
+                candidate_rows,
+                {
+                    "window_mode": "release_grace_rescue",
+                    "window_start": candidate_start,
+                    "window_end": candidate_end,
+                    "release_used": release_used,
+                    "grace_frames": candidate_end - release_used,
+                    "valid_samples": len(candidate_rows),
+                },
+            )
+
     primary_rows = (
-        _collect_rows(elbow_signal, uah, release_used)
+        [a for _, a in _collect_rows(elbow_signal, uah, release_used)]
         if uah is not None and uah <= release_used
         else []
     )
@@ -347,25 +326,6 @@ def _select_measurement_rows(
                 "valid_samples": len(primary_rows),
             },
         )
-
-    grace_limit = min(max_frame or release_used, release_used + POST_RELEASE_GRACE)
-    for candidate_end in range(release_used + 1, grace_limit + 1):
-        candidate_start = max(0, candidate_end - PRE_RELEASE_LOOKBACK)
-        candidate_rows = _collect_rows(elbow_signal, candidate_start, candidate_end)
-        if len(candidate_rows) >= MIN_SAMPLES:
-            return (
-                candidate_start,
-                candidate_end,
-                candidate_rows,
-                {
-                    "window_mode": "release_grace_rescue",
-                    "window_start": candidate_start,
-                    "window_end": candidate_end,
-                    "release_used": release_used,
-                    "grace_frames": candidate_end - release_used,
-                    "valid_samples": len(candidate_rows),
-                },
-            )
 
     return (
         release_start,
@@ -461,10 +421,9 @@ def _apply_low_visibility_rescue(
     pose_frames: List[Dict[str, Any]],
     hand: str,
     events: Dict[str, Any],
-    fps: Optional[float] = None,
 ) -> Dict[str, Any]:
     rescue_signal = _compute_low_visibility_signal(pose_frames, hand)
-    rescue = _compute_elbow_legality(rescue_signal, events, fps=fps)
+    rescue = _compute_elbow_legality(rescue_signal, events)
 
     debug = dict(rescue.get("debug") or {})
     debug["rescue_min_vis"] = LOW_VIS_RESCUE_MIN_VIS
@@ -532,9 +491,7 @@ def _is_weak_primary_window(primary: Dict[str, Any]) -> bool:
     debug = primary.get("debug") or {}
     window_mode = debug.get("window_mode")
     valid_samples = int(debug.get("valid_samples") or 0)
-    if window_mode == "release_grace_rescue":
-        return True
-    return valid_samples <= MIN_SAMPLES
+    return window_mode == "release_grace_rescue" and valid_samples <= MIN_SAMPLES
 
 
 def _review_weak_primary_window(
@@ -542,36 +499,16 @@ def _review_weak_primary_window(
     pose_frames: List[Dict[str, Any]],
     hand: str,
     events: Dict[str, Any],
-    fps: Optional[float] = None,
 ) -> Dict[str, Any]:
-    rescue = _apply_low_visibility_rescue(pose_frames, hand, events, fps=fps)
+    rescue = _apply_low_visibility_rescue(pose_frames, hand, events)
     reviewed = dict(primary)
     reviewed_debug = dict(reviewed.get("debug") or {})
     reviewed_debug["secondary_rescue"] = rescue
     reviewed["debug"] = reviewed_debug
 
     extension = reviewed.get("extension_deg")
-    window_mode = reviewed_debug.get("window_mode")
     if extension is None:
         return rescue
-
-    if window_mode == "release_grace_rescue":
-        if reviewed.get("verdict") == "LEGAL":
-            if extension <= (THRESH_LEGAL - WEAK_WINDOW_MARGIN_DEG):
-                reviewed["confidence"] = min(float(reviewed.get("confidence") or 0.0), 0.65)
-                reviewed["reason"] = "post_release_window_but_clear_margin"
-                return reviewed
-            if rescue.get("verdict") == "LEGAL":
-                reviewed["confidence"] = min(float(reviewed.get("confidence") or 0.0), 0.60)
-                reviewed["reason"] = "post_release_window_confirmed"
-                return reviewed
-        return {
-            "verdict": "SUSPECT",
-            "confidence": 0.45,
-            "reason": "post_release_window_unconfirmed",
-            "extension_deg": extension,
-            "debug": reviewed_debug,
-        }
 
     # Strongly legal measured windows stay legal even if the rescue is cautious.
     if reviewed.get("verdict") == "LEGAL" and extension <= (THRESH_LEGAL - WEAK_WINDOW_MARGIN_DEG):
@@ -602,15 +539,6 @@ def _review_weak_primary_window(
             "debug": reviewed_debug,
         }
 
-    if reviewed.get("verdict") == "BORDERLINE":
-        return {
-            "verdict": "SUSPECT",
-            "confidence": 0.45,
-            "reason": "weak_window_borderline",
-            "extension_deg": extension,
-            "debug": reviewed_debug,
-        }
-
     reviewed["confidence"] = min(float(reviewed.get("confidence") or 0.0), 0.60)
     reviewed["reason"] = "weak_window_unconfirmed"
     return reviewed
@@ -623,7 +551,6 @@ def _review_weak_primary_window(
 def _compute_elbow_legality(
     elbow_signal: List[Dict[str, Any]],
     events: Dict[str, Any],
-    fps: Optional[float] = None,
 ) -> Dict[str, Any]:
 
     uah = _extract_event_frame(events, "uah")
@@ -633,17 +560,15 @@ def _compute_elbow_legality(
         return _flow_based_legality(
             elbow_signal,
             events,
-            fps=fps,
             primary_reason="events_missing",
             primary_debug={"uah": uah, "release": release},
         )
 
-    release_used = release - _release_trim_frames(fps)
+    release_used = release - RELEASE_TRIM_FRAMES
     if release_used < 0:
         return _flow_based_legality(
             elbow_signal,
             events,
-            fps=fps,
             primary_reason="event_window_too_short",
             primary_debug={"uah": uah, "release": release, "release_used": release_used},
         )
@@ -661,7 +586,6 @@ def _compute_elbow_legality(
         return _flow_based_legality(
             elbow_signal,
             events,
-            fps=fps,
             primary_reason="insufficient_signal_density",
             primary_debug={
                 "valid_samples": len(rows),
@@ -673,27 +597,22 @@ def _compute_elbow_legality(
             },
         )
 
-    rows = _mad_filter_rows(rows)
+    rows = _mad_filter(rows)
 
-    fps_f = _effective_fps(fps)
-    velocities = []
-    for (f0, a0), (f1, a1) in zip(rows, rows[1:]):
-        gap = max(1, f1 - f0)
-        dt = gap / fps_f
-        velocities.append(abs(a1 - a0) / dt)
+    velocities = [abs(rows[i] - rows[i-1]) for i in range(1, len(rows))]
     baseline_candidates = []
 
     for i, v in enumerate(velocities):
-        if v <= _baseline_velocity_limit_deg_per_sec():
-            baseline_candidates.append(rows[i + 1][1])
+        if v <= BASELINE_VEL_MAX:
+            baseline_candidates.append(rows[i])
         if len(baseline_candidates) >= BASELINE_MAX_SAMPLES:
             break
 
     if len(baseline_candidates) < 2:
-        baseline_candidates = [angle for _, angle in rows[:BASELINE_MAX_SAMPLES]]
+        baseline_candidates = rows[:BASELINE_MAX_SAMPLES]
 
     baseline = sorted(baseline_candidates)[len(baseline_candidates) // 2]
-    peak = _percentile([angle for _, angle in rows], PEAK_Q)
+    peak = _percentile(rows, PEAK_Q)
     extension = peak - baseline
 
     if extension > THRESH_BORDERLINE:
@@ -724,9 +643,9 @@ def _compute_elbow_legality(
 def evaluate_elbow_legality(
     elbow_signal: List[Dict[str, Any]],
     events: Dict[str, Any] = None,
-    fps: Optional[float] = None,
     pose_frames: Optional[List[Dict[str, Any]]] = None,
     hand: Optional[str] = None,
+    **kwargs,
 ) -> Dict[str, Any]:
     if not isinstance(events, dict):
         return {
@@ -734,16 +653,16 @@ def evaluate_elbow_legality(
             "confidence": 0.20,
             "reason": "events_missing",
         }
-    primary = _compute_elbow_legality(elbow_signal, events, fps=fps)
+    primary = _compute_elbow_legality(elbow_signal, events)
     if primary.get("verdict") == "UNKNOWN":
         if not pose_frames or not hand:
             return primary
-        return _apply_low_visibility_rescue(pose_frames, hand, events, fps=fps)
+        return _apply_low_visibility_rescue(pose_frames, hand, events)
 
     if not pose_frames or not hand:
         return primary
 
     if _is_weak_primary_window(primary):
-        return _review_weak_primary_window(primary, pose_frames, hand, events, fps=fps)
+        return _review_weak_primary_window(primary, pose_frames, hand, events)
 
     return primary
