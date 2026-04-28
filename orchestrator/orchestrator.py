@@ -541,6 +541,7 @@ def _build_walkthrough_render(
     elbow: dict,
     risks: list,
     estimated_release_speed: dict,
+    kinetic_chain: Optional[dict] = None,
     report_story: Optional[dict],
     root_cause: Optional[dict],
 ) -> dict:
@@ -565,6 +566,7 @@ def _build_walkthrough_render(
             elbow=elbow,
             risks=risks,
             estimated_release_speed=estimated_release_speed,
+            kinetic_chain=kinetic_chain,
             report_story=report_story,
             root_cause=root_cause,
             output_path=output_path,
@@ -1044,6 +1046,7 @@ def analyze(
             elbow=elbow,
             risks=risks,
             estimated_release_speed=estimated_release_speed,
+            kinetic_chain=deterministic_expert.get("kinetic_chain_v1"),
             report_story=(clinician or {}).get("report_story_v1"),
             root_cause=((deterministic_expert.get("coach_diagnosis_v1") or {}).get("root_cause")),
         )
