@@ -23,6 +23,7 @@ def _draw_themed_story_card(
     title_max_lines: int = 2,
     headline_max_lines: int = 4,
     body_max_lines: int = 3,
+    vertical_align: str = "top",
 ) -> int:
     card_w = max(1, x1 - x0)
     text_size = _phase_label_font_size(min(width, height))
@@ -97,7 +98,10 @@ def _draw_themed_story_card(
     )
     inner_pad_x = max(14, int(round(card_w * 0.064))) + rail_offset
 
+    available_h = max(1, y1 - y0 - inner_pad_y * 2)
     current_y = y0 + inner_pad_y
+    if str(vertical_align).strip().lower() == "center" and total_h < available_h:
+        current_y = y0 + inner_pad_y + int(round((available_h - total_h) / 2.0))
     for line in title_lines:
         if title_font is None:
             break

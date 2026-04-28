@@ -71,6 +71,7 @@ def _draw_front_leg_support_callout(
         body=str((proof_step or {}).get("body") or (caption or {}).get("body") or ""),
         accent=accent,
         anchor=knee,
+        bowler_hand=hand,
     )
 def _draw_foot_line_overlay(
     frame: np.ndarray,
@@ -112,4 +113,5 @@ def _draw_foot_line_overlay(
         body=str((proof_step or {}).get("body") or "The landing foot is not lining force up cleanly toward target."),
         accent=accent,
         anchor=front_toe,
+        bowler_hand=hand,
     )

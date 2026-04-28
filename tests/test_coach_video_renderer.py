@@ -33,6 +33,12 @@ from app.workers.render.coach_video_renderer import (
 from app.workers.render.coach_video_renderer_parts.drawing_base import (
     _draw_skeleton_legend,
 )
+from app.workers.render.coach_video_renderer_parts.bubble_base import (
+    _story_card_layout,
+)
+from app.workers.render.coach_video_renderer_parts.hotspot_draw import (
+    _draw_hotspot_compact_label,
+)
 from app.workers.render.coach_video_renderer_parts.render_pause_sequence import (
     _write_stage_frames,
 )
@@ -222,6 +228,67 @@ class CoachVideoRendererTest(unittest.TestCase):
         self.assertGreater(metrics["headline_base_scale"], metrics["body_base_scale"])
         self.assertGreater(metrics["card_w"], 600)
         self.assertLess(metrics["card_h"], 320)
+
+    def test_story_card_layout_uses_opposite_lane_from_left_anchor(self):
+        layout = _story_card_layout(width=478, height=850, anchor=(110, 420))
+
+        self.assertEqual(layout["side"], "right")
+        self.assertGreater(layout["x0"], 300)
+        self.assertLess(layout["line_x"], layout["x1"])
+        self.assertGreater(layout["y1"] - layout["y0"], 120)
+        self.assertLess(layout["y1"] - layout["y0"], 220)
+
+    def test_story_card_layout_uses_opposite_lane_from_right_anchor(self):
+        layout = _story_card_layout(width=478, height=850, anchor=(380, 420))
+
+        self.assertEqual(layout["side"], "left")
+        self.assertLess(layout["x1"], 180)
+        self.assertGreater(layout["line_x"], layout["x0"])
+        self.assertGreater(layout["y1"] - layout["y0"], 120)
+        self.assertLess(layout["y1"] - layout["y0"], 220)
+
+    def test_story_card_layout_uses_right_lane_for_left_arm_without_anchor(self):
+        layout = _story_card_layout(width=478, height=850, bowler_hand="L")
+
+        self.assertEqual(layout["side"], "right")
+        self.assertGreater(layout["x0"], 300)
+
+    def test_story_card_layout_prefers_hand_hint_over_anchor_side(self):
+        layout = _story_card_layout(width=478, height=850, anchor=(110, 420), bowler_hand="R")
+
+        self.assertEqual(layout["side"], "left")
+
+    def test_hotspot_compact_label_prefers_vertical_lane_for_left_side_anchor(self):
+        frame = np.zeros((240, 320, 3), dtype=np.uint8)
+
+        rect = _draw_hotspot_compact_label(
+            frame,
+            center=(100, 120),
+            direction=(1.0, 0.0),
+            label="Knee",
+            scale=240,
+            occupied_rects=[],
+        )
+
+        self.assertIsNotNone(rect)
+        _, y0, _, y1 = rect
+        self.assertTrue(y1 <= 120 or y0 >= 120)
+
+    def test_hotspot_compact_label_prefers_vertical_lane_for_right_side_anchor(self):
+        frame = np.zeros((240, 320, 3), dtype=np.uint8)
+
+        rect = _draw_hotspot_compact_label(
+            frame,
+            center=(220, 120),
+            direction=(-1.0, 0.0),
+            label="Knee",
+            scale=240,
+            occupied_rects=[],
+        )
+
+        self.assertIsNotNone(rect)
+        _, y0, _, y1 = rect
+        self.assertTrue(y1 <= 120 or y0 >= 120)
 
     def test_summary_telemetry_layout_stays_compact(self):
         layout = _summary_telemetry_layout(1080, 1920)

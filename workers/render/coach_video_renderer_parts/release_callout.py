@@ -10,6 +10,7 @@ def _draw_release_callout(
     *,
     tracks: Dict[int, Dict[str, Any]],
     frame_idx: int,
+    hand: Optional[str] = None,
     risk_by_id: Dict[str, Dict[str, Any]],
     report_story: Optional[Dict[str, Any]] = None,
     events: Optional[Dict[str, Any]] = None,
@@ -27,6 +28,7 @@ def _draw_release_callout(
             frame,
             tracks=tracks,
             frame_idx=frame_idx,
+            hand=hand,
             risk=risk_by_id.get("hip_shoulder_mismatch"),
             proof_step=proof_step,
         )
@@ -36,6 +38,7 @@ def _draw_release_callout(
             frame,
             tracks=tracks,
             frame_idx=frame_idx,
+            hand=hand,
             risk=risk_by_id.get("lateral_trunk_lean"),
             proof_step=proof_step,
         )
@@ -53,6 +56,7 @@ def _draw_release_callout(
             frame,
             tracks=tracks,
             frame_idx=frame_idx,
+            hand=hand,
             risk=hip_shoulder,
             proof_step=proof_step,
         )
@@ -61,6 +65,7 @@ def _draw_release_callout(
         frame,
         tracks=tracks,
         frame_idx=frame_idx,
+        hand=hand,
         risk=trunk_lean,
         proof_step=proof_step,
     )

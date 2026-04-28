@@ -26,6 +26,7 @@ def _draw_trunk_lean_callout(
     *,
     tracks: Dict[int, Dict[str, Any]],
     frame_idx: int,
+    hand: Optional[str] = None,
     risk: Optional[Dict[str, Any]],
     proof_step: Optional[Dict[str, Any]] = None,
 ) -> None:
@@ -62,4 +63,5 @@ def _draw_trunk_lean_callout(
         body=str((proof_step or {}).get("body") or (caption or {}).get("body") or ""),
         accent=accent,
         anchor=shoulder_mid,
+        bowler_hand=hand,
     )

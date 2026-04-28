@@ -27,7 +27,7 @@ def _prepare_pause_context(*, frame: np.ndarray, pose_frames: List[Dict[str, Any
     phase_target = _root_cause_phase_target(root_cause, phase_key=pause_key)
     allow_warning_hotspots = _should_render_warning_hotspots(report_story=report_story, root_cause=root_cause)
     if pause_key == "bfc":
-        _draw_phase_anchor_panel(paused_frame, phase_key="bfc")
+        _draw_phase_anchor_panel(paused_frame, phase_key="bfc", hand=hand)
         return {"paused_frame": paused_frame, "hotspot_payload": None, "leakage_payload": None, "proof_step": proof_step}
     if pause_key == "ffc" and allow_warning_hotspots and _supports_ffc_story(render_events):
         preferred_ffc_risk = _preferred_ffc_cue_risk_id(risk_by_id, report_story=report_story, events=render_events, root_cause=root_cause) or _story_risk_for_phase(report_story, phase_key="ffc", events=render_events, root_cause=root_cause)
@@ -36,23 +36,23 @@ def _prepare_pause_context(*, frame: np.ndarray, pose_frames: List[Dict[str, Any
         elif preferred_ffc_risk == "foot_line_deviation":
             _draw_foot_line_overlay(paused_frame, pose_frames=pose_frames, frame_idx=frame_idx, events=render_events, hand=hand, risk=risk_by_id.get("foot_line_deviation"), proof_step=proof_step)
         elif preferred_ffc_risk and proof_step:
-            _draw_top_risk_panel(paused_frame, title=str((proof_step or {}).get("title") or "Where It Starts"), headline=str((proof_step or {}).get("headline") or ""), body=str((proof_step or {}).get("body") or ""), accent=(92, 220, 255))
+            _draw_top_risk_panel(paused_frame, title=str((proof_step or {}).get("title") or "Where It Starts"), headline=str((proof_step or {}).get("headline") or ""), body=str((proof_step or {}).get("body") or ""), accent=(92, 220, 255), bowler_hand=hand)
         else:
-            _draw_phase_anchor_panel(paused_frame, phase_key="ffc")
+            _draw_phase_anchor_panel(paused_frame, phase_key="ffc", hand=hand)
         if preferred_ffc_risk:
             hotspot_payload = _hotspot_payload(preferred_ffc_risk, phase_target, risk_by_id, render_events, report_story, root_cause)
             leakage_payload = _phase_leakage_payload(kinetic_chain=kinetic_chain, phase_key="ffc", risk_id=preferred_ffc_risk, events=render_events)
         return {"paused_frame": paused_frame, "hotspot_payload": hotspot_payload, "leakage_payload": leakage_payload, "proof_step": proof_step}
     if pause_key == "release" and allow_warning_hotspots:
         release_hotspot_risk = _release_hotspot_risk_id(risk_by_id, events=render_events, report_story=report_story, root_cause=root_cause)
-        _draw_release_callout(paused_frame, tracks=tracks, frame_idx=frame_idx, risk_by_id=risk_by_id, report_story=report_story, events=render_events, root_cause=root_cause, proof_step=proof_step)
+        _draw_release_callout(paused_frame, tracks=tracks, frame_idx=frame_idx, hand=hand, risk_by_id=risk_by_id, report_story=report_story, events=render_events, root_cause=root_cause, proof_step=proof_step)
         if not release_hotspot_risk and proof_step:
-            _draw_top_risk_panel(paused_frame, title=str((proof_step or {}).get("title") or "What Happens Next"), headline=str((proof_step or {}).get("headline") or ""), body=str((proof_step or {}).get("body") or ""), accent=(0, 132, 255))
+            _draw_top_risk_panel(paused_frame, title=str((proof_step or {}).get("title") or "What Happens Next"), headline=str((proof_step or {}).get("headline") or ""), body=str((proof_step or {}).get("body") or ""), accent=(0, 132, 255), bowler_hand=hand)
         elif not release_hotspot_risk:
-            _draw_phase_anchor_panel(paused_frame, phase_key="release")
+            _draw_phase_anchor_panel(paused_frame, phase_key="release", hand=hand)
         if release_hotspot_risk:
             hotspot_payload = _hotspot_payload(release_hotspot_risk, phase_target, risk_by_id, render_events, report_story, root_cause)
             leakage_payload = _phase_leakage_payload(kinetic_chain=kinetic_chain, phase_key="release", risk_id=release_hotspot_risk, events=render_events)
         return {"paused_frame": paused_frame, "hotspot_payload": hotspot_payload, "leakage_payload": leakage_payload, "proof_step": proof_step}
-    _draw_phase_anchor_panel(paused_frame, phase_key=pause_key)
+    _draw_phase_anchor_panel(paused_frame, phase_key=pause_key, hand=hand)
     return {"paused_frame": paused_frame, "hotspot_payload": None, "leakage_payload": None, "proof_step": proof_step}

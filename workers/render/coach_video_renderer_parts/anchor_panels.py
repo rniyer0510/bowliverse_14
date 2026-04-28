@@ -2,11 +2,13 @@ from __future__ import annotations
 from .shared import *
 from .pil_context import _frame_draw_context, _commit_frame_draw_context
 from .themed_story import _draw_themed_story_card
+from .bubble_base import _story_card_layout
 
 def _draw_phase_anchor_panel(
     frame: np.ndarray,
     *,
     phase_key: str,
+    hand: Optional[str] = None,
 ) -> None:
     config = {
         "bfc": {
@@ -35,10 +37,11 @@ def _draw_phase_anchor_panel(
     width = frame.shape[1]
     height = frame.shape[0]
     image, overlay, draw = _frame_draw_context(frame)
-    card_x0 = int(round(width * 0.05))
-    card_y0 = max(92, int(round(height * 0.145)))
-    card_x1 = int(round(width * 0.74))
-    card_y1 = card_y0 + int(round(height * 0.16))
+    layout = _story_card_layout(width=width, height=height, bowler_hand=hand)
+    card_x0 = int(layout["x0"])
+    card_y0 = int(layout["y0"])
+    card_x1 = int(layout["x1"])
+    card_y1 = int(layout["y1"])
     _draw_themed_story_card(
         draw,
         x0=card_x0,
@@ -51,5 +54,8 @@ def _draw_phase_anchor_panel(
         accent=tuple(config["accent"]),
         width=width,
         height=height,
+        headline_max_lines=2,
+        body_max_lines=2,
+        vertical_align="top",
     )
     _commit_frame_draw_context(frame, image, overlay)

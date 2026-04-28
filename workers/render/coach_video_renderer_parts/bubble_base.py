@@ -54,12 +54,55 @@ def _reading_hold_frames(
 def _explanation_top_y(height: int) -> int:
     return max(92, int(round(height * 0.145)))
 
+def _story_card_layout(
+    *,
+    width: int,
+    height: int,
+    anchor: Optional[Tuple[int, int]] = None,
+    bowler_hand: Optional[str] = None,
+    width_ratio: float = 0.28,
+    margin_ratio: float = 0.05,
+    top_height_ratio: float = 0.16,
+) -> Dict[str, Any]:
+    margin = int(round(width * margin_ratio))
+    card_w = max(80, int(round(width * width_ratio)))
+    top_y = max(84, int(round(height * 0.16)))
+    card_h = int(round(height * top_height_ratio))
+    side = "left"
+    hand_hint = str(bowler_hand or "").strip().upper()
+    if hand_hint == "L":
+        side = "right"
+    elif hand_hint == "R":
+        side = "left"
+    elif anchor is not None:
+        left_space = max(0, anchor[0] - margin)
+        right_space = max(0, (width - margin) - anchor[0])
+        side = "right" if right_space >= left_space else "left"
+    if side == "right":
+        x1 = width - margin
+        x0 = max(margin, x1 - card_w)
+    else:
+        x0 = margin
+        x1 = min(width - margin, x0 + card_w)
+    usable_w = max(1, x1 - x0)
+    edge_inset = max(12, int(round(usable_w * 0.08)))
+    line_x = x1 - edge_inset if side == "left" else x0 + edge_inset
+    return {
+        "x0": x0,
+        "y0": top_y,
+        "x1": x1,
+        "y1": top_y + card_h,
+        "line_x": line_x,
+        "side": side,
+    }
+
 def _draw_pointer_bubble(
     frame: np.ndarray,
     *,
     anchor: Tuple[int, int],
     text: str,
     accent: Tuple[int, int, int],
+    bowler_hand: Optional[str] = None,
 ) -> None:
     message = _compact_pointer_copy(text)
     if not message or Image is None or ImageDraw is None:
@@ -67,10 +110,11 @@ def _draw_pointer_bubble(
     width = frame.shape[1]
     height = frame.shape[0]
     image, overlay, draw = _frame_draw_context(frame)
-    card_x0 = int(round(width * 0.05))
-    card_y0 = _explanation_top_y(height)
-    card_x1 = int(round(width * 0.84))
-    card_y1 = card_y0 + int(round(height * 0.12))
+    layout = _story_card_layout(width=width, height=height, anchor=anchor, bowler_hand=bowler_hand)
+    card_x0 = int(layout["x0"])
+    card_y0 = int(layout["y0"])
+    card_x1 = int(layout["x1"])
+    card_y1 = int(layout["y1"])
     card_w = max(1, card_x1 - card_x0)
     scale = min(width, height)
     headline_base = _phase_label_font_size(scale)
@@ -116,7 +160,7 @@ def _draw_pointer_bubble(
         )
         _, line_h = _pil_text_size(draw, line, headline_font)
         current_y += line_h + line_gap
-    line_x = card_x0 + int(round((card_x1 - card_x0) * 0.44))
+    line_x = int(layout["line_x"])
     line_y0 = card_y1 + max(8, int(round(scale * 0.012)))
     line_y1 = line_y0 + max(22, int(round(scale * 0.044)))
     draw.line(
@@ -138,6 +182,7 @@ def _draw_top_risk_panel(
     body: str,
     accent: Tuple[int, int, int],
     anchor: Optional[Tuple[int, int]] = None,
+    bowler_hand: Optional[str] = None,
 ) -> None:
     if Image is None or ImageDraw is None:
         return
@@ -146,10 +191,11 @@ def _draw_top_risk_panel(
     width = frame.shape[1]
     height = frame.shape[0]
     image, overlay, draw = _frame_draw_context(frame)
-    card_x0 = int(round(width * 0.05))
-    card_y0 = _explanation_top_y(height)
-    card_x1 = int(round(width * 0.84))
-    card_y1 = card_y0 + int(round(height * 0.12))
+    layout = _story_card_layout(width=width, height=height, anchor=anchor, bowler_hand=bowler_hand)
+    card_x0 = int(layout["x0"])
+    card_y0 = int(layout["y0"])
+    card_x1 = int(layout["x1"])
+    card_y1 = int(layout["y1"])
     final_y1 = _draw_themed_story_card(
         draw,
         x0=card_x0,
@@ -167,10 +213,11 @@ def _draw_top_risk_panel(
         body_scale_boost=1.0,
         headline_max_lines=3,
         body_max_lines=2,
+        vertical_align="top",
     )
     if anchor is not None:
         scale = min(width, height)
-        line_x = card_x0 + int(round((card_x1 - card_x0) * 0.44))
+        line_x = int(layout["line_x"])
         line_y0 = int(final_y1) + max(6, int(round(scale * 0.010)))
         line_y1 = line_y0 + max(30, int(round(scale * 0.070)))
         draw.line(

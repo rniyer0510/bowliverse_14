@@ -4,6 +4,35 @@ from .drawing_base import _overlay_panel
 from .font_utils import _load_theme_font, _pil_text_size
 from .pil_context import _bgr_to_rgb, _frame_draw_context, _commit_frame_draw_context
 
+def _vertical_label_candidates(
+    *,
+    center: Tuple[int, int],
+    text_w: int,
+    text_h: int,
+    pad_x: int,
+    pad_y: int,
+    scale: int,
+    width: int,
+) -> List[Tuple[int, int]]:
+    outward_right = center[0] < (width * 0.5)
+    side_offset = max(10, int(round(scale * 0.03)))
+    vertical_gap = max(20, int(round(scale * 0.12)))
+    centered_x = center[0] - text_w // 2 - pad_x
+    right_x = centered_x + side_offset
+    left_x = centered_x - side_offset
+    above_y = center[1] - text_h - pad_y * 2 - vertical_gap
+    below_y = center[1] + vertical_gap
+    preferred_x = right_x if outward_right else left_x
+    secondary_x = left_x if outward_right else right_x
+    return [
+        (preferred_x, above_y),
+        (preferred_x, below_y),
+        (secondary_x, above_y),
+        (secondary_x, below_y),
+        (centered_x, above_y),
+        (centered_x, below_y),
+    ]
+
 def _draw_hotspot_marker(
     frame: np.ndarray,
     *,
@@ -69,17 +98,19 @@ def _draw_hotspot_compact_label(
     pad_x = max(14, scale // 46)
     pad_y = max(8, scale // 68)
     dx, dy = direction
-    candidates = [
-        (center[0] + int(scale * 0.10), center[1] - int(scale * 0.05)),
-        (center[0] - int(scale * 0.10) - text_w - pad_x * 2, center[1] - int(scale * 0.05)),
-        (center[0] + int(scale * 0.10), center[1] + int(scale * 0.05)),
-        (center[0] - int(scale * 0.10) - text_w - pad_x * 2, center[1] + int(scale * 0.05)),
-        (center[0] - text_w // 2 - pad_x, center[1] - int(scale * 0.11)),
-        (center[0] - text_w // 2 - pad_x, center[1] + int(scale * 0.08)),
-    ]
+    candidates = _vertical_label_candidates(
+        center=center,
+        text_w=text_w,
+        text_h=text_h,
+        pad_x=pad_x,
+        pad_y=pad_y,
+        scale=scale,
+        width=width,
+    )
     best = None
     best_score = float("-inf")
     occupied_rects = occupied_rects or []
+    outward_right = center[0] < (width * 0.5)
     for cand_x0, cand_y0_base in candidates:
         cand_x0 = int(cand_x0)
         cand_y0 = int(cand_y0_base - text_h // 2 - pad_y)
@@ -91,13 +122,14 @@ def _draw_hotspot_compact_label(
         vec_y = y_center - center[1]
         dist_score = min(1.0, float(np.hypot(vec_x, vec_y)) / max(1.0, scale * 0.16))
         dir_score = 0.0
-        if abs(dx) >= abs(dy):
-            dir_score = 1.0 if (dx >= 0 and vec_x >= 0) or (dx < 0 and vec_x <= 0) else 0.0
-        else:
-            dir_score = 1.0 if (dy >= 0 and vec_y >= 0) or (dy < 0 and vec_y <= 0) else 0.0
+        dir_score += 1.0 if ((outward_right and vec_x >= 0) or ((not outward_right) and vec_x <= 0)) else 0.0
+        dir_score += 0.6 if abs(vec_y) >= abs(vec_x) else 0.0
         top_panel_penalty = 0.0
         if cand_y0 < int(height * 0.24) and cand_x0 < int(width * 0.72):
             top_panel_penalty = 1.0
+        arm_occlusion_penalty = 0.0
+        if abs(vec_x) < scale * 0.06:
+            arm_occlusion_penalty = 1.2
         overlap_penalty = 0.0
         cand_rect = (
             cand_x0,
@@ -113,7 +145,7 @@ def _draw_hotspot_compact_label(
                 or cand_rect[1] >= other_y1
             ):
                 overlap_penalty += 2.5
-        score = dir_score * 1.4 + dist_score * 0.6 - top_panel_penalty * 2.0 - overlap_penalty
+        score = dir_score * 1.6 + dist_score * 0.5 - top_panel_penalty * 2.0 - arm_occlusion_penalty - overlap_penalty
         if score > best_score:
             best_score = score
             best = (cand_x0, cand_y0)
