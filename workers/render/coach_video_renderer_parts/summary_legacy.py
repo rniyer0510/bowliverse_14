@@ -59,33 +59,35 @@ def _draw_end_summary_legacy(
         report_story=report_story,
         root_cause=root_cause,
     )
-    current_top_y = top_y
-    for title, body, accent in (
-        (
-            (symptom_title, symptom_text, (92, 220, 255)),
-            (load_watch_title, load_watch_text, (0, 132, 255)),
-        )
-    ):
-        x0 = left_x
-        y0 = current_top_y
-        x1 = min(width - 18, x0 + top_w)
-        y1 = y0 + top_h
-        headline, support = _story_headline_and_support(str(body or ""))
-        final_y1 = _draw_story_overlay_card(
-            frame,
-            x0=x0,
-            y0=y0,
-            x1=x1,
-            y1=y1,
-            title=title,
-            headline=headline,
-            body=support,
-            accent=accent,
-            title_scale_boost=1.18,
-            headline_scale_boost=1.30,
-            body_scale_boost=1.24,
-        )
-        current_top_y = int(final_y1) + top_gap
+    x0 = left_x
+    y0 = top_y
+    x1 = min(width - 18, x0 + top_w)
+    y1 = y0 + top_h
+    headline, support = _story_headline_and_support(str(symptom_text or ""))
+    secondary_body = str(load_watch_text or "").strip()
+    if secondary_body:
+        secondary_body = f"{str(load_watch_title or '').upper()}: {secondary_body}"
+    if support:
+        merged_body = f"{support} {secondary_body}".strip()
+    else:
+        merged_body = secondary_body
+    final_y1 = _draw_story_overlay_card(
+        frame,
+        x0=x0,
+        y0=y0,
+        x1=x1,
+        y1=y1,
+        title=symptom_title,
+        headline=headline,
+        body=merged_body,
+        accent=(92, 220, 255),
+        title_scale_boost=1.18,
+        headline_scale_boost=1.26,
+        body_scale_boost=1.14,
+        headline_max_lines=2,
+        body_max_lines=3,
+    )
+    current_top_y = int(final_y1) + top_gap
 
     if root_cause_status != "not_interpretable":
         bottom_y = max(int(round(height * 0.73)), current_top_y + int(round(height * 0.03)))

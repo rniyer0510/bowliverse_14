@@ -69,8 +69,8 @@ def _draw_pointer_bubble(
     image, overlay, draw = _frame_draw_context(frame)
     card_x0 = int(round(width * 0.05))
     card_y0 = _explanation_top_y(height)
-    card_x1 = int(round(width * 0.74))
-    card_y1 = card_y0 + int(round(height * 0.14))
+    card_x1 = int(round(width * 0.84))
+    card_y1 = card_y0 + int(round(height * 0.12))
     card_w = max(1, card_x1 - card_x0)
     scale = min(width, height)
     headline_base = _phase_label_font_size(scale)
@@ -148,9 +148,9 @@ def _draw_top_risk_panel(
     image, overlay, draw = _frame_draw_context(frame)
     card_x0 = int(round(width * 0.05))
     card_y0 = _explanation_top_y(height)
-    card_x1 = int(round(width * 0.74))
-    card_y1 = card_y0 + int(round(height * 0.16))
-    _draw_themed_story_card(
+    card_x1 = int(round(width * 0.84))
+    card_y1 = card_y0 + int(round(height * 0.12))
+    final_y1 = _draw_themed_story_card(
         draw,
         x0=card_x0,
         y0=card_y0,
@@ -165,12 +165,14 @@ def _draw_top_risk_panel(
         title_scale_boost=1.0,
         headline_scale_boost=1.08,
         body_scale_boost=1.0,
+        headline_max_lines=3,
+        body_max_lines=2,
     )
     if anchor is not None:
         scale = min(width, height)
         line_x = card_x0 + int(round((card_x1 - card_x0) * 0.44))
-        line_y0 = card_y1 + max(8, int(round(scale * 0.012)))
-        line_y1 = line_y0 + max(22, int(round(scale * 0.044)))
+        line_y0 = int(final_y1) + max(6, int(round(scale * 0.010)))
+        line_y1 = line_y0 + max(30, int(round(scale * 0.070)))
         draw.line(
             (line_x, line_y0, line_x, line_y1),
             fill=(255, 255, 255, 168),

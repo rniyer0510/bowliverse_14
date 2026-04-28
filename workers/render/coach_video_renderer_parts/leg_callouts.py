@@ -53,20 +53,16 @@ def _draw_front_leg_support_callout(
 
     if hip is not None and ankle is not None:
         direction = (ankle[0] - hip[0], ankle[1] - hip[1])
-        arrow_start = (int(round(knee[0] + direction[0] * 0.10)), int(round(knee[1] - radius * 1.25)))
-        arrow_end = (int(round(knee[0] + direction[0] * 0.16)), int(round(knee[1] + radius * 1.20)))
+        arrow_start = (int(round(knee[0] + direction[0] * 0.10)), int(round(knee[1] - radius * 1.50)))
     else:
-        arrow_start = (knee[0], knee[1] - int(radius * 1.6))
-        arrow_end = (knee[0], knee[1] + int(radius * 1.4))
-
-    cv2.arrowedLine(
+        arrow_start = (knee[0], knee[1] - int(radius * 1.75))
+    cv2.line(
         frame,
         arrow_start,
-        arrow_end,
+        knee,
         accent,
         thickness,
         cv2.LINE_AA,
-        tipLength=0.16,
     )
     _draw_top_risk_panel(
         frame,

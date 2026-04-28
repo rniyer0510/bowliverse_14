@@ -20,6 +20,9 @@ def _draw_themed_story_card(
     title_scale_boost: float = 1.0,
     headline_scale_boost: float = 1.0,
     body_scale_boost: float = 1.0,
+    title_max_lines: int = 2,
+    headline_max_lines: int = 4,
+    body_max_lines: int = 3,
 ) -> int:
     card_w = max(1, x1 - x0)
     text_size = _phase_label_font_size(min(width, height))
@@ -31,7 +34,7 @@ def _draw_themed_story_card(
         base_size=title_size,
         min_size=title_size,
         max_width=max(40, int(round(card_w * 0.75))),
-        max_lines=2,
+        max_lines=max(1, int(title_max_lines)),
     )[0]
     rail_probe = max(3, int(round(card_w * 0.020))) + max(3, int(round(min(width, height) * 0.006)))
     inner_pad_x = max(14, int(round(card_w * 0.064))) + rail_probe
@@ -43,7 +46,7 @@ def _draw_themed_story_card(
         base_size=text_size,
         min_size=text_size,
         max_width=content_width,
-        max_lines=4,
+        max_lines=max(1, int(headline_max_lines)),
     )
     body_font, body_lines = _fit_pil_wrapped_text(
         draw,
@@ -52,7 +55,7 @@ def _draw_themed_story_card(
         base_size=text_size,
         min_size=text_size,
         max_width=content_width,
-        max_lines=3,
+        max_lines=max(1, int(body_max_lines)),
     )
     title_lines = _fit_pil_wrapped_text(
         draw,
@@ -61,7 +64,7 @@ def _draw_themed_story_card(
         base_size=title_size,
         min_size=title_size,
         max_width=content_width,
-        max_lines=2,
+        max_lines=max(1, int(title_max_lines)),
     )[1]
     line_gap = max(5, int(round(text_size * 0.30)))
     section_gap = max(10, int(round(text_size * 0.55)))
