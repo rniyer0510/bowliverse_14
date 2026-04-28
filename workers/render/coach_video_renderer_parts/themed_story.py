@@ -26,6 +26,7 @@ def _draw_themed_story_card(
     vertical_align: str = "top",
 ) -> int:
     card_w = max(1, x1 - x0)
+    outer_margin = 1
     text_size = _phase_label_font_size(min(width, height))
     title_size = text_size
     title_font = _fit_pil_wrapped_text(
@@ -38,7 +39,7 @@ def _draw_themed_story_card(
         max_lines=max(1, int(title_max_lines)),
     )[0]
     rail_probe = max(3, int(round(card_w * 0.020))) + max(3, int(round(min(width, height) * 0.006)))
-    inner_pad_x = max(14, int(round(card_w * 0.064))) + rail_probe
+    inner_pad_x = max(14, int(round(card_w * 0.064))) + rail_probe + outer_margin
     content_width = max(40, x1 - x0 - inner_pad_x * 2)
     headline_font, headline_lines = _fit_pil_wrapped_text(
         draw,
@@ -83,7 +84,7 @@ def _draw_themed_story_card(
         if total_h:
             total_h += max(4, section_gap - 2)
         total_h += body_h
-    inner_pad_y = max(12, int(round(text_size * 0.70)))
+    inner_pad_y = max(12, int(round(text_size * 0.70))) + outer_margin
     y1 = max(y1, y0 + inner_pad_y * 2 + total_h)
     card_h = max(1, y1 - y0)
     rail_offset = _draw_themed_card_shell(
@@ -96,7 +97,7 @@ def _draw_themed_story_card(
         width=width,
         height=height,
     )
-    inner_pad_x = max(14, int(round(card_w * 0.064))) + rail_offset
+    inner_pad_x = max(14, int(round(card_w * 0.064))) + rail_offset + outer_margin
 
     available_h = max(1, y1 - y0 - inner_pad_y * 2)
     current_y = y0 + inner_pad_y

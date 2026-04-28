@@ -62,12 +62,12 @@ def _story_card_layout(
     bowler_hand: Optional[str] = None,
     width_ratio: float = 0.28,
     margin_ratio: float = 0.05,
-    top_height_ratio: float = 0.16,
+    top_height_ratio: float = 0.05,
 ) -> Dict[str, Any]:
     margin = int(round(width * margin_ratio))
     card_w = max(80, int(round(width * width_ratio)))
     top_y = max(84, int(round(height * 0.16)))
-    card_h = int(round(height * top_height_ratio))
+    card_h = max(24, int(round(height * top_height_ratio)))
     side = "left"
     hand_hint = str(bowler_hand or "").strip().upper()
     if hand_hint == "L":

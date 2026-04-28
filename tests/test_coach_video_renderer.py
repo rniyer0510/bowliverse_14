@@ -235,8 +235,8 @@ class CoachVideoRendererTest(unittest.TestCase):
         self.assertEqual(layout["side"], "right")
         self.assertGreater(layout["x0"], 300)
         self.assertLess(layout["line_x"], layout["x1"])
-        self.assertGreater(layout["y1"] - layout["y0"], 120)
-        self.assertLess(layout["y1"] - layout["y0"], 220)
+        self.assertGreaterEqual(layout["y1"] - layout["y0"], 24)
+        self.assertLess(layout["y1"] - layout["y0"], 80)
 
     def test_story_card_layout_uses_opposite_lane_from_right_anchor(self):
         layout = _story_card_layout(width=478, height=850, anchor=(380, 420))
@@ -244,8 +244,8 @@ class CoachVideoRendererTest(unittest.TestCase):
         self.assertEqual(layout["side"], "left")
         self.assertLess(layout["x1"], 180)
         self.assertGreater(layout["line_x"], layout["x0"])
-        self.assertGreater(layout["y1"] - layout["y0"], 120)
-        self.assertLess(layout["y1"] - layout["y0"], 220)
+        self.assertGreaterEqual(layout["y1"] - layout["y0"], 24)
+        self.assertLess(layout["y1"] - layout["y0"], 80)
 
     def test_story_card_layout_uses_right_lane_for_left_arm_without_anchor(self):
         layout = _story_card_layout(width=478, height=850, bowler_hand="L")
