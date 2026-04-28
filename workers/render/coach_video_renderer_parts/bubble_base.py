@@ -2,6 +2,8 @@ from __future__ import annotations
 from .shared import *
 from .font_utils import _fit_pil_wrapped_text, _pil_text_size
 from .pil_context import _bgr_to_rgb, _frame_draw_context, _commit_frame_draw_context
+from .themed_story import _draw_themed_story_card
+from .themed_card_shell import _draw_themed_card_shell
 
 def _bubble_copy(
     *,
@@ -40,120 +42,78 @@ def _draw_pointer_bubble(
     message = " ".join(str(text or "").split())
     if not message or Image is None or ImageDraw is None:
         return
-
     width = frame.shape[1]
     height = frame.shape[0]
-    scale = min(width, height)
     image, overlay, draw = _frame_draw_context(frame)
-    dim = Image.new("RGBA", image.size, (0, 0, 0, 26))
-    overlay = Image.alpha_composite(dim, overlay)
-    draw = ImageDraw.Draw(overlay)
-    font, lines = _fit_pil_wrapped_text(
+    card_x0 = int(round(width * 0.05))
+    card_y0 = int(round(height * 0.05))
+    card_x1 = int(round(width * 0.61))
+    card_y1 = card_y0 + int(round(height * 0.21))
+    card_w = max(1, card_x1 - card_x0)
+    card_h = max(1, card_y1 - card_y0)
+    rail_offset = _draw_themed_card_shell(
         draw,
-        message,
-        font_file=BODY_FONT_FILE,
-        base_size=max(42, int(round(scale * 0.068))),
-        min_size=max(34, int(round(scale * 0.056))),
-        max_width=max(280, int(round(width * 0.76))),
-        max_lines=2,
+        x0=card_x0,
+        y0=card_y0,
+        x1=card_x1,
+        y1=card_y1,
+        accent=accent,
+        width=width,
+        height=height,
     )
-    if font is None or not lines:
-        return
-
-    line_gap = max(7, int(round(scale * 0.013)))
-    text_heights = [_pil_text_size(draw, line, font)[1] for line in lines]
-    text_widths = [_pil_text_size(draw, line, font)[0] for line in lines]
-    text_w = max(text_widths) if text_widths else 0
-    text_h = sum(text_heights) + line_gap * max(0, len(lines) - 1)
-    pad_x = max(34, int(round(scale * 0.040)))
-    pad_y = max(24, int(round(scale * 0.030)))
-    bubble_w = text_w + pad_x * 2
-    bubble_h = text_h + pad_y * 2
-    margin = max(18, int(round(scale * 0.022)))
-    top_band_y = max(margin, int(round(height * 0.08)))
-    second_band_y = max(margin, int(round(height * 0.20)))
-    if anchor[0] < width * 0.48:
-        primary_x0 = width * 0.34
-        secondary_x0 = width * 0.10
-    else:
-        primary_x0 = width * 0.10
-        secondary_x0 = width * 0.34
-
-    candidates = [
-        (primary_x0, top_band_y),
-        (secondary_x0, top_band_y),
-        (primary_x0, second_band_y),
-        (secondary_x0, second_band_y),
-    ]
-    chosen_x0 = margin
-    chosen_y0 = top_band_y
-    best_score = float("-inf")
-    for cand_x0, cand_y0 in candidates:
-        x0 = max(margin, min(width - bubble_w - margin, int(cand_x0)))
-        y0 = max(margin, min(height - bubble_h - margin, int(cand_y0)))
-        x1 = x0 + bubble_w
-        y1 = y0 + bubble_h
-        bubble_center_x = (x0 + x1) / 2.0
-        bubble_center_y = (y0 + y1) / 2.0
-        distance = float(np.hypot(bubble_center_x - anchor[0], bubble_center_y - anchor[1]))
-        top_bonus = 26.0 if y0 <= second_band_y + 4 else 8.0
-        side_bonus = 12.0 if ((anchor[0] < width * 0.5 and x0 > width * 0.28) or (anchor[0] >= width * 0.5 and x0 < width * 0.28)) else 0.0
-        edge_penalty = abs(bubble_center_x - width * 0.5) * 0.012
-        score = top_bonus + side_bonus - distance * 0.016 - edge_penalty
-        if score > best_score:
-            best_score = score
-            chosen_x0 = x0
-            chosen_y0 = y0
-
-    x0 = int(chosen_x0)
-    y0 = int(chosen_y0)
-    x1 = int(x0 + bubble_w)
-    y1 = int(y0 + bubble_h)
-    radius = max(22, int(round(scale * 0.028)))
-    tail_base_y = y1 if anchor[1] >= y1 else y0
-    tail_direction = 1 if tail_base_y == y1 else -1
-    tail_base_x = int(max(x0 + radius, min(x1 - radius, anchor[0] * 0.82 + ((x0 + x1) / 2.0) * 0.18)))
-    tail_half_w = max(14, int(round(scale * 0.020)))
-    tail_tip = (
-        int(anchor[0]),
-        int(anchor[1]),
-    )
-    tail_left = (tail_base_x - tail_half_w, tail_base_y)
-    tail_right = (tail_base_x + tail_half_w, tail_base_y)
-    tail_mid = (
-        tail_base_x,
-        tail_base_y + tail_direction * max(10, int(round(scale * 0.020))),
-    )
-
-    draw.rounded_rectangle(
-        (x0, y0, x1, y1),
-        radius=radius,
-        fill=(18, 18, 18, 230),
-        outline=(255, 255, 255, 38),
-        width=max(2, int(round(scale * 0.0035))),
-    )
-    draw.polygon(
-        [tail_left, tail_mid, tail_tip, tail_mid, tail_right],
-        fill=(18, 18, 18, 225),
-        outline=(255, 255, 255, 38),
-    )
-    accent_w = max(5, int(round(bubble_w * 0.028)))
-    draw.rounded_rectangle(
-        (x0 + 6, y0 + 6, x0 + 6 + accent_w, y1 - 6),
-        radius=max(6, accent_w * 2),
-        fill=_bgr_to_rgb(accent, 255),
-    )
-
-    text_x = x0 + pad_x + accent_w + max(8, int(round(scale * 0.010)))
-    current_y = y0 + pad_y
-    for idx, line in enumerate(lines):
-        draw.text(
-            (text_x, current_y),
-            line,
-            font=font,
-            fill=(255, 255, 255, 255),
+    inner_pad_x = max(16, int(round(card_w * 0.070))) + rail_offset
+    inner_pad_y = max(14, int(round(card_h * 0.12)))
+    content_width = max(40, card_x1 - card_x0 - inner_pad_x * 2)
+    content_height = max(36, card_y1 - card_y0 - inner_pad_y * 2)
+    headline_base = max(30, int(round(card_h * 0.24)))
+    headline_min = max(22, int(round(card_h * 0.17)))
+    headline_font = None
+    headline_lines: List[str] = []
+    line_gap = max(5, int(round(card_h * 0.045)))
+    current_headline_base = headline_base
+    for _ in range(10):
+        headline_font, headline_lines = _fit_pil_wrapped_text(
+            draw,
+            message,
+            font_file=BODY_FONT_FILE,
+            base_size=current_headline_base,
+            min_size=headline_min,
+            max_width=content_width,
+            max_lines=4,
         )
-        current_y += text_heights[idx] + line_gap
+        total_h = 0
+        if headline_font is not None and headline_lines:
+            total_h = sum(_pil_text_size(draw, line, headline_font)[1] for line in headline_lines)
+            total_h += line_gap * max(0, len(headline_lines) - 1)
+        if total_h <= content_height:
+            break
+        current_headline_base = max(headline_min, current_headline_base - 2)
+    current_y = card_y0 + inner_pad_y
+    for line in headline_lines:
+        if headline_font is None:
+            break
+        draw.text(
+            (card_x0 + inner_pad_x, current_y),
+            line,
+            font=headline_font,
+            fill=_bgr_to_rgb(THEME_TEXT_PRIMARY),
+        )
+        _, line_h = _pil_text_size(draw, line, headline_font)
+        current_y += line_h + line_gap
+    scale = min(width, height)
+    line_x = card_x0 + int(round((card_x1 - card_x0) * 0.44))
+    line_y0 = card_y1 + max(8, int(round(scale * 0.012)))
+    line_y1 = line_y0 + max(22, int(round(scale * 0.044)))
+    draw.line(
+        (line_x, line_y0, line_x, line_y1),
+        fill=(255, 255, 255, 168),
+        width=max(2, int(round(scale * 0.004))),
+    )
+    draw.line(
+        (line_x, line_y1, anchor[0], anchor[1]),
+        fill=(255, 255, 255, 150),
+        width=max(2, int(round(scale * 0.004))),
+    )
     _commit_frame_draw_context(frame, image, overlay)
 def _draw_top_risk_panel(
     frame: np.ndarray,
@@ -164,14 +124,46 @@ def _draw_top_risk_panel(
     accent: Tuple[int, int, int],
     anchor: Optional[Tuple[int, int]] = None,
 ) -> None:
-    if anchor is None:
+    if Image is None or ImageDraw is None:
         return
-    bubble_text = _bubble_copy(title=title, headline=headline, body=body)
-    if not bubble_text:
+    if not any(str(part or "").strip() for part in (title, headline, body)):
         return
-    _draw_pointer_bubble(
-        frame,
-        anchor=anchor,
-        text=bubble_text,
+    width = frame.shape[1]
+    height = frame.shape[0]
+    image, overlay, draw = _frame_draw_context(frame)
+    card_x0 = int(round(width * 0.05))
+    card_y0 = int(round(height * 0.05))
+    card_x1 = int(round(width * 0.58))
+    card_y1 = card_y0 + int(round(height * 0.20))
+    _draw_themed_story_card(
+        draw,
+        x0=card_x0,
+        y0=card_y0,
+        x1=card_x1,
+        y1=card_y1,
+        title=str(title or ""),
+        headline=str(headline or ""),
+        body=str(body or ""),
         accent=accent,
+        width=width,
+        height=height,
+        title_scale_boost=1.0,
+        headline_scale_boost=1.08,
+        body_scale_boost=1.0,
     )
+    if anchor is not None:
+        scale = min(width, height)
+        line_x = card_x0 + int(round((card_x1 - card_x0) * 0.44))
+        line_y0 = card_y1 + max(8, int(round(scale * 0.012)))
+        line_y1 = line_y0 + max(22, int(round(scale * 0.044)))
+        draw.line(
+            (line_x, line_y0, line_x, line_y1),
+            fill=(255, 255, 255, 168),
+            width=max(2, int(round(scale * 0.004))),
+        )
+        draw.line(
+            (line_x, line_y1, anchor[0], anchor[1]),
+            fill=(255, 255, 255, 150),
+            width=max(2, int(round(scale * 0.004))),
+        )
+    _commit_frame_draw_context(frame, image, overlay)
