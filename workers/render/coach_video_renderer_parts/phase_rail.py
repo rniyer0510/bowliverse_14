@@ -29,11 +29,11 @@ def _draw_phase_rail(
     height = frame.shape[0]
     rail_x0 = int(round(width * 0.05))
     rail_x1 = int(round(width * 0.95))
-    rail_y0 = int(round(height * 0.89))
-    rail_h = int(round(height * 0.058))
+    rail_y0 = int(round(height * 0.885))
+    rail_h = int(round(height * 0.066))
     gap = int(round(width * 0.012))
     segment_w = max(30, int((rail_x1 - rail_x0 - gap * (len(PHASES) - 1)) / len(PHASES)))
-    font_size = max(18, int(round(min(width, height) * 0.038)))
+    font_size = max(22, int(round(min(width, height) * 0.046)))
     font = _load_theme_font(LABEL_FONT_FILE, font_size)
     measure_draw = None
     if font is not None and Image is not None and ImageDraw is not None:

@@ -40,11 +40,11 @@ def _render_pause_sequence(*, writer: Any, frame: np.ndarray, tracks: Dict[int, 
     hotspot_hold = int(sequence_plan.get("hotspot") or 0)
     proof_bubble_text = _proof_bubble_text_for_phase(phase_key=pause_key, risk_id=str((hotspot_payload or {}).get("risk_id") or ""), proof_step=proof_step, risk_by_id=risk_by_id)
     if proof_bubble_text:
-        proof_hold = max(proof_hold, _reading_hold_frames(text=proof_bubble_text, fps=fps, minimum_seconds=2.30, max_seconds=3.60))
+        proof_hold = max(proof_hold, _reading_hold_frames(text=proof_bubble_text, fps=fps, minimum_seconds=3.00, max_seconds=4.80))
     if leakage_payload:
-        leakage_hold = max(leakage_hold, _reading_hold_frames(text=str((leakage_payload or {}).get("bubble") or ""), fps=fps, minimum_seconds=1.90, max_seconds=2.80))
+        leakage_hold = max(leakage_hold, _reading_hold_frames(text=str((leakage_payload or {}).get("bubble") or ""), fps=fps, minimum_seconds=2.50, max_seconds=3.90))
     if leakage_payload and hotspot_payload:
-        body_pay_hold = max(body_pay_hold, _reading_hold_frames(text="Body pays here.", fps=fps, minimum_seconds=1.80, max_seconds=2.45))
+        body_pay_hold = max(body_pay_hold, _reading_hold_frames(text="Body pays here.", fps=fps, minimum_seconds=2.30, max_seconds=3.40))
     previous_stage_frame: Optional[np.ndarray] = None
     proof_frames = [paused_frame.copy() for _ in range(proof_hold)]
     added_frames, previous_stage_frame = _write_stage_frames(
@@ -75,8 +75,8 @@ def _render_pause_sequence(*, writer: Any, frame: np.ndarray, tracks: Dict[int, 
             _reading_hold_frames(
                 text="Load / fault point",
                 fps=fps,
-                minimum_seconds=1.60,
-                max_seconds=2.10,
+                minimum_seconds=2.00,
+                max_seconds=2.80,
             ),
         )
     if leakage_payload and hotspot_payload and body_pay_hold > 0:

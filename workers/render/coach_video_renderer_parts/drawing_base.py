@@ -91,15 +91,15 @@ def _draw_skeleton_legend(
     width = frame.shape[1]
     height = frame.shape[0]
     scale = min(width, height)
-    font = _load_theme_font(LABEL_FONT_FILE, max(15, int(round(scale * 0.032))))
+    font = _load_theme_font(LABEL_FONT_FILE, max(18, int(round(scale * 0.038))))
     if font is None:
         return
     image, overlay, draw = _frame_draw_context(frame)
     rows = [("Skeleton", SKELETON_COLOR), ("Load / fault point", HOTSPOT_RING)]
-    row_gap = max(7, int(round(scale * 0.012)))
-    dot_r = max(6, int(round(scale * 0.012)))
-    pad_x = max(14, int(round(scale * 0.028)))
-    pad_y = max(10, int(round(scale * 0.020)))
+    row_gap = max(8, int(round(scale * 0.014)))
+    dot_r = max(7, int(round(scale * 0.014)))
+    pad_x = max(16, int(round(scale * 0.032)))
+    pad_y = max(12, int(round(scale * 0.024)))
     text_sizes = [_pil_text_size(draw, label, font) for label, _ in rows]
     max_text_w = max(size[0] for size in text_sizes)
     row_h = max(size[1] for size in text_sizes)

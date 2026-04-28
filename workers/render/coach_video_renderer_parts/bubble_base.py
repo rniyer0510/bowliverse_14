@@ -52,21 +52,21 @@ def _draw_pointer_bubble(
         draw,
         message,
         font_file=BODY_FONT_FILE,
-        base_size=max(32, int(round(scale * 0.050))),
-        min_size=max(26, int(round(scale * 0.040))),
-        max_width=max(240, int(round(width * 0.62))),
+        base_size=max(42, int(round(scale * 0.068))),
+        min_size=max(34, int(round(scale * 0.056))),
+        max_width=max(280, int(round(width * 0.76))),
         max_lines=2,
     )
     if font is None or not lines:
         return
 
-    line_gap = max(6, int(round(scale * 0.012)))
+    line_gap = max(7, int(round(scale * 0.013)))
     text_heights = [_pil_text_size(draw, line, font)[1] for line in lines]
     text_widths = [_pil_text_size(draw, line, font)[0] for line in lines]
     text_w = max(text_widths) if text_widths else 0
     text_h = sum(text_heights) + line_gap * max(0, len(lines) - 1)
-    pad_x = max(28, int(round(scale * 0.034)))
-    pad_y = max(20, int(round(scale * 0.025)))
+    pad_x = max(34, int(round(scale * 0.040)))
+    pad_y = max(24, int(round(scale * 0.030)))
     bubble_w = text_w + pad_x * 2
     bubble_h = text_h + pad_y * 2
     margin = max(18, int(round(scale * 0.022)))

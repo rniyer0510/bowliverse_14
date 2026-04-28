@@ -40,18 +40,18 @@ def _draw_phase_anchor_panel(
         draw,
         str(config["headline"]),
         font_file=DISPLAY_FONT_FILE,
-        base_size=max(24, int(round(scale * 0.044))),
-        min_size=max(20, int(round(scale * 0.036))),
-        max_width=max(240, int(round(width * 0.52))),
+        base_size=max(28, int(round(scale * 0.052))),
+        min_size=max(24, int(round(scale * 0.044))),
+        max_width=max(270, int(round(width * 0.60))),
         max_lines=1,
     )
     body_font, body_lines = _fit_pil_wrapped_text(
         draw,
         str(config["body"]),
         font_file=BODY_FONT_MEDIUM_FILE,
-        base_size=max(19, int(round(scale * 0.034))),
-        min_size=max(16, int(round(scale * 0.029))),
-        max_width=max(260, int(round(width * 0.58))),
+        base_size=max(22, int(round(scale * 0.042))),
+        min_size=max(19, int(round(scale * 0.036))),
+        max_width=max(290, int(round(width * 0.64))),
         max_lines=2,
     )
     if title_font is None or body_font is None or not title_lines or not body_lines:
@@ -63,8 +63,8 @@ def _draw_phase_anchor_panel(
     body_widths = [_pil_text_size(draw, line, body_font)[0] for line in body_lines]
     body_w = max(body_widths) if body_widths else 0
     body_h = sum(body_heights) + line_gap * max(0, len(body_lines) - 1)
-    pad_x = max(18, int(round(scale * 0.032)))
-    pad_y = max(14, int(round(scale * 0.024)))
+    pad_x = max(20, int(round(scale * 0.038)))
+    pad_y = max(16, int(round(scale * 0.028)))
     accent_w = 3
     panel_w = max(title_w, body_w) + pad_x * 2 + accent_w + 10
     panel_h = title_h + body_gap + body_h + pad_y * 2
