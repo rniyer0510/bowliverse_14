@@ -334,6 +334,58 @@ class WriterSessionOwnershipTests(unittest.TestCase):
         db.commit.assert_not_called()
         db.rollback.assert_not_called()
 
+    def test_write_analysis_skips_explanation_trace_when_table_is_missing(self):
+        from app.persistence import writer
+        from app.persistence.models import AnalysisExplanationTrace, Player
+
+        db = MagicMock()
+        player = SimpleNamespace(season=2026, age_group="U16")
+
+        def get_side_effect(model, key):
+            if model is Player:
+                return player
+            if model is AnalysisExplanationTrace:
+                raise AssertionError("trace lookup should be skipped when table is unavailable")
+            return None
+
+        db.get.side_effect = get_side_effect
+        result = {
+            "input": {"player_id": "11111111-1111-1111-1111-111111111111", "hand": "R"},
+            "video": {"fps": 30.0, "total_frames": 120},
+            "events": {},
+            "elbow": {},
+            "action": {},
+            "risks": [],
+            "deterministic_expert_v1": {
+                "knowledge_pack_id": "actionlab_deterministic_expert",
+                "knowledge_pack_version": "2026-04-22.v1",
+                "selection": {
+                    "diagnosis_status": "partial_match",
+                    "primary_mechanism_id": "soft_block_with_trunk_carry",
+                },
+                "archetype_v1": {"id": "soft_block_leakage_bowler"},
+            },
+        }
+
+        with patch("app.persistence.writer.inspect") as inspect_mock:
+            inspect_mock.return_value.has_table.return_value = False
+            persisted_run_id = writer.write_analysis(
+                result=result,
+                db=db,
+                run_id="22222222-2222-2222-2222-222222222222",
+                season=2026,
+                age_group="U16",
+            )
+
+        self.assertEqual(persisted_run_id, "22222222-2222-2222-2222-222222222222")
+        self.assertFalse(
+            any(
+                isinstance(call.args[0], AnalysisExplanationTrace)
+                for call in db.add.call_args_list
+            )
+        )
+        db.flush.assert_called()
+
     def test_write_analysis_rejects_existing_explanation_trace(self):
         from app.persistence import writer
         from app.persistence.models import AnalysisExplanationTrace, Player

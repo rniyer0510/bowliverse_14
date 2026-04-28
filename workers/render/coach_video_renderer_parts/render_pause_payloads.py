@@ -1,6 +1,6 @@
 from __future__ import annotations
 from .shared import *
-from .analytics import _supports_ffc_story, _risk_weight
+from .analytics import _supports_ffc_story
 from .story_logic import _story_risk_for_phase
 from .kinetic_story import _phase_leakage_payload
 from .bubble_base import _draw_top_risk_panel
@@ -31,12 +31,6 @@ def _prepare_pause_context(*, frame: np.ndarray, pose_frames: List[Dict[str, Any
         return {"paused_frame": paused_frame, "hotspot_payload": None, "leakage_payload": None, "proof_step": proof_step}
     if pause_key == "ffc" and allow_warning_hotspots and _supports_ffc_story(render_events):
         preferred_ffc_risk = _preferred_ffc_cue_risk_id(risk_by_id, report_story=report_story, events=render_events, root_cause=root_cause) or _story_risk_for_phase(report_story, phase_key="ffc", events=render_events, root_cause=root_cause)
-        if not preferred_ffc_risk:
-            story_theme = str((report_story or {}).get("theme") or "")
-            if not report_story or story_theme not in {"working_pattern", "good_base"}:
-                front_leg_weight = _risk_weight(risk_by_id.get("knee_brace_failure"))
-                foot_line_weight = _risk_weight(risk_by_id.get("foot_line_deviation"))
-                preferred_ffc_risk = "knee_brace_failure" if front_leg_weight >= foot_line_weight and front_leg_weight > 0.0 else ("foot_line_deviation" if foot_line_weight > 0.0 else None)
         if preferred_ffc_risk == "knee_brace_failure":
             _draw_front_leg_support_callout(paused_frame, tracks=tracks, frame_idx=frame_idx, hand=hand, risk=risk_by_id.get("knee_brace_failure"), proof_step=proof_step)
         elif preferred_ffc_risk == "foot_line_deviation":

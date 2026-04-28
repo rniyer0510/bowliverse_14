@@ -219,6 +219,17 @@ def _summary_symptom_text(
     report_story: Optional[Dict[str, Any]] = None,
     root_cause: Optional[Dict[str, Any]] = None,
 ) -> str:
+    root_cause_status = str((root_cause or {}).get("status") or "").strip().lower()
+    if root_cause_status == "no_clear_problem":
+        return "Action stays connected through landing and release."
+    if root_cause_status == "not_interpretable":
+        return "This clip does not show the chain clearly enough to call one issue yet."
+    story_theme = str((report_story or {}).get("theme") or "").strip().lower()
+    if story_theme in {"working_pattern", "good_base"}:
+        label = str(((report_story.get("watch_focus") or {}).get("label")) or "").strip()
+        if label:
+            return f"Keep watching {label}"
+        return "Action has a usable base, but one part still needs watching."
     root_cause_guidance = ((root_cause or {}).get("renderer_guidance") or {})
     root_cause_simple_text = str(root_cause_guidance.get("simple_symptom_text") or "").strip()
     if root_cause_simple_text:
@@ -226,14 +237,6 @@ def _summary_symptom_text(
     root_cause_text = str(root_cause_guidance.get("symptom_text") or "").strip()
     if root_cause_text:
         return root_cause_text
-    root_cause_status = str((root_cause or {}).get("status") or "").strip().lower()
-    if root_cause_status == "no_clear_problem":
-        return "Action stays connected through landing and release."
-    if isinstance(report_story, dict) and str(report_story.get("theme") or "") in {"working_pattern", "good_base"}:
-        label = str(((report_story.get("watch_focus") or {}).get("label")) or "").strip()
-        if label:
-            return f"Keep watching {label}"
-        return "Action has a usable base, but one part still needs watching."
     release_risk_id = _release_hotspot_risk_id(
         risk_by_id,
         events=events,
@@ -268,6 +271,8 @@ def _summary_symptom_title(
     root_cause_status = str((root_cause or {}).get("status") or "").strip().lower()
     if root_cause_status == "no_clear_problem":
         return "What Is Working"
+    if root_cause_status == "not_interpretable":
+        return "Need Clearer Evidence"
     if (
         isinstance(report_story, dict)
         and str(report_story.get("theme") or "") in {"working_pattern", "good_base"}
@@ -284,6 +289,14 @@ def _summary_load_watch_text(
     report_story: Optional[Dict[str, Any]] = None,
     root_cause: Optional[Dict[str, Any]] = None,
 ) -> str:
+    root_cause_status = str((root_cause or {}).get("status") or "").strip().lower()
+    if root_cause_status == "no_clear_problem":
+        return "No one area is taking too much load."
+    if root_cause_status == "not_interpretable":
+        return "Need a clearer release view before calling where load is building."
+    story_theme = str((report_story or {}).get("theme") or "").strip().lower()
+    if story_theme in {"working_pattern", "good_base"}:
+        return "No one area is taking too much load."
     root_cause_guidance = ((root_cause or {}).get("renderer_guidance") or {})
     root_cause_simple_text = str(root_cause_guidance.get("simple_load_watch_text") or "").strip()
     if root_cause_simple_text:
@@ -291,9 +304,6 @@ def _summary_load_watch_text(
     root_cause_text = str(root_cause_guidance.get("load_watch_text") or "").strip()
     if root_cause_text:
         return root_cause_text
-    root_cause_status = str((root_cause or {}).get("status") or "").strip().lower()
-    if root_cause_status == "no_clear_problem":
-        return "No one area is taking too much load."
     primary_risk_id = _story_risk_for_phase(
         report_story,
         phase_key="ffc",
@@ -317,10 +327,16 @@ def _summary_load_watch_text(
 
 def _summary_load_watch_title(
     *,
+    report_story: Optional[Dict[str, Any]] = None,
     root_cause: Optional[Dict[str, Any]] = None,
 ) -> str:
     root_cause_status = str((root_cause or {}).get("status") or "").strip().lower()
     if root_cause_status == "no_clear_problem":
+        return "Load Stays Shared"
+    if root_cause_status == "not_interpretable":
+        return "Load Not Clear Yet"
+    story_theme = str((report_story or {}).get("theme") or "").strip().lower()
+    if story_theme in {"working_pattern", "good_base"}:
         return "Load Stays Shared"
     return "Works Harder Here"
 

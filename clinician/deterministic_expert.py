@@ -1957,7 +1957,7 @@ class DeterministicExpertSystem:
             kinetic_chain_status=kinetic_chain_status,
             mechanism_explanation=mechanism_explanation,
         )
-        if diagnosis_status == "no_match" and kinetic_chain_status.get("id") == "connected":
+        if kinetic_chain_status.get("id") == "connected":
             visible_symptom = None
             phase_findings = []
             primary_break_point = {
@@ -1983,7 +1983,7 @@ class DeterministicExpertSystem:
             primary=primary,
             contributors=supporting_contributors,
         )
-        if diagnosis_status == "no_match" and kinetic_chain_status.get("id") == "connected":
+        if kinetic_chain_status.get("id") == "connected":
             what_is_not_ok = []
         compensations = self._compensation_patterns(symptoms)
 
@@ -2003,7 +2003,7 @@ class DeterministicExpertSystem:
                 if isinstance(item, dict)
             ],
         }
-        if diagnosis_status == "no_match" and kinetic_chain_status.get("id") == "connected":
+        if kinetic_chain_status.get("id") == "connected":
             holdback["top_candidates"] = []
 
         easy_explanation = self._build_easy_explanation(
@@ -3565,7 +3565,7 @@ class DeterministicExpertSystem:
                 "renderer_guidance": None,
             }
 
-        if diagnosis_status == "no_match" and str(kinetic_chain_status.get("id") or "") == "connected":
+        if str(kinetic_chain_status.get("id") or "") == "connected":
             return {
                 "status": "no_clear_problem",
                 "mechanism_id": None,
@@ -3880,7 +3880,12 @@ class DeterministicExpertSystem:
                 else:
                     status_id = "workable_but_leaking"
             elif diagnosis_status == "ambiguous_match":
-                status_id = "workable_but_leaking"
+                if overall_band == "acceptable":
+                    status_id = "connected"
+                elif release_cost >= 0.62 and release_gap <= 0.45:
+                    status_id = "effective_but_expensive"
+                else:
+                    status_id = "workable_but_leaking"
             elif break_phase_id == "transfer_and_block":
                 status_id = "breaking_at_transfer"
             elif break_phase_id in {"whip_and_release", "UAH", "RELEASE"}:

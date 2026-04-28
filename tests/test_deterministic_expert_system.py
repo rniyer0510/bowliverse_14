@@ -472,6 +472,53 @@ class DeterministicExpertSystemTests(unittest.TestCase):
             "The action stays connected through landing and release.",
         )
 
+    def test_ambiguous_match_with_acceptable_chain_is_treated_as_connected(self):
+        kinetic_chain_status = self.engine._kinetic_chain_status(
+            metrics={
+                "dissipation_burden_score": {"value": 0.28},
+                "release_timing_stability": {"value": 0.74},
+            },
+            diagnosis_status="ambiguous_match",
+            primary_break_point={"phase_id": "transfer_and_block", "title": "Front foot landing"},
+            capture_quality={"status": "USABLE"},
+            acceptance_summary={"overall_band": "acceptable"},
+        )
+
+        self.assertEqual(kinetic_chain_status["id"], "connected")
+
+        root_cause = self.engine._root_cause(
+            diagnosis_status="ambiguous_match",
+            capture_quality={"status": "USABLE"},
+            primary={},
+            visible_symptom={"summary": "Front leg gets soft at landing."},
+            contributors=[],
+            primary_break_point={"phase_id": "transfer_and_block", "title": "Front foot landing"},
+            kinetic_chain_status=kinetic_chain_status,
+            mechanism_explanation={},
+        )
+
+        self.assertEqual(root_cause["status"], "no_clear_problem")
+        self.assertIsNone(root_cause["renderer_guidance"])
+
+    def test_connected_chain_suppresses_pathology_story_even_if_mechanism_exists(self):
+        root_cause = self.engine._root_cause(
+            diagnosis_status="match",
+            capture_quality={"status": "USABLE"},
+            primary={
+                "id": "soft_block_with_trunk_carry",
+                "title": "Soft block with trunk carry",
+                "summary": "Mechanism text that should not override a connected chain.",
+            },
+            visible_symptom={"summary": "Front leg gets soft at landing."},
+            contributors=[],
+            primary_break_point={"phase_id": "transfer_and_block", "title": "Front foot landing"},
+            kinetic_chain_status={"id": "connected"},
+            mechanism_explanation={},
+        )
+
+        self.assertEqual(root_cause["status"], "no_clear_problem")
+        self.assertIsNone(root_cause["renderer_guidance"])
+
     def test_player_surface_filters_coach_only_diagnosis_detail(self):
         payload = self.engine.build(
             events={"event_chain": {"quality": 0.84}},

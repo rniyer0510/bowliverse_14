@@ -43,8 +43,8 @@ def _hotspot_search_window(
     stop: int,
 ) -> range:
     if phase_key == "ffc":
-        lo = max(start, anchor_frame - 4)
-        hi = min(stop - 1, anchor_frame + 4)
+        lo = max(start, anchor_frame - 2)
+        hi = min(stop - 1, anchor_frame + 1)
     elif phase_key == "release":
         lo = max(start, anchor_frame - 3)
         hi = min(stop - 1, anchor_frame + 2)
@@ -90,6 +90,8 @@ def _select_hotspot_frame_idx(
             + len(regions) * 0.05
             - abs(int(candidate) - int(anchor_frame)) * 0.04
         )
+        if phase_key == "ffc" and int(candidate) > int(anchor_frame):
+            score -= float(int(candidate) - int(anchor_frame)) * 0.14
         if score > best_score:
             best_score = score
             best_frame = int(candidate)

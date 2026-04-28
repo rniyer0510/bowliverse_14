@@ -20,17 +20,17 @@ def _draw_end_summary_legacy(
     root_cause: Optional[Dict[str, Any]] = None,
 ) -> None:
     root_cause_status = str((root_cause or {}).get("status") or "").strip().lower()
-    blurred = cv2.GaussianBlur(frame, (0, 0), sigmaX=10, sigmaY=10)
-    cv2.addWeighted(blurred, 0.74, frame, 0.26, 0.0, frame)
+    blurred = cv2.GaussianBlur(frame, (0, 0), sigmaX=4, sigmaY=4)
+    cv2.addWeighted(blurred, 0.16, frame, 0.84, 0.0, frame)
     overlay = frame.copy()
     cv2.rectangle(overlay, (0, 0), (frame.shape[1], frame.shape[0]), (18, 22, 28), -1)
-    cv2.addWeighted(overlay, 0.24, frame, 0.76, 0.0, frame)
+    cv2.addWeighted(overlay, 0.10, frame, 0.90, 0.0, frame)
 
     width = frame.shape[1]
     height = frame.shape[0]
     top_y = int(round(height * 0.045))
-    top_h = int(round(height * 0.16))
-    top_gap = int(round(height * 0.020))
+    top_h = int(round(height * 0.18))
+    top_gap = int(round(height * 0.018))
     top_w = int(round(width * 0.92))
     left_x = int(round(width * 0.04))
     _apply_bottom_scrim(
@@ -55,19 +55,23 @@ def _draw_end_summary_legacy(
         report_story=report_story,
         root_cause=root_cause,
     )
-    load_watch_title = _summary_load_watch_title(root_cause=root_cause)
-    for idx, (title, body, accent) in enumerate(
+    load_watch_title = _summary_load_watch_title(
+        report_story=report_story,
+        root_cause=root_cause,
+    )
+    current_top_y = top_y
+    for title, body, accent in (
         (
             (symptom_title, symptom_text, (92, 220, 255)),
             (load_watch_title, load_watch_text, (0, 132, 255)),
         )
     ):
         x0 = left_x
-        y0 = top_y + idx * (top_h + top_gap)
+        y0 = current_top_y
         x1 = min(width - 18, x0 + top_w)
         y1 = y0 + top_h
         headline, support = _story_headline_and_support(str(body or ""))
-        _draw_story_overlay_card(
+        final_y1 = _draw_story_overlay_card(
             frame,
             x0=x0,
             y0=y0,
@@ -81,9 +85,10 @@ def _draw_end_summary_legacy(
             headline_scale_boost=1.30,
             body_scale_boost=1.24,
         )
+        current_top_y = int(final_y1) + top_gap
 
     if root_cause_status != "not_interpretable":
-        bottom_y = int(round(height * 0.73))
+        bottom_y = max(int(round(height * 0.73)), current_top_y + int(round(height * 0.03)))
         telemetry = _summary_telemetry_layout(width, height)
         stat_h = int(telemetry["stat_h"])
         gap = int(telemetry["gap"])

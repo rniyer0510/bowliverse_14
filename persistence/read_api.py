@@ -20,6 +20,7 @@ from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel, Field
 from typing import Any, Dict, List, Optional
 
+from sqlalchemy import inspect
 from sqlalchemy.orm import Session
 
 from app.clinician.knowledge_pack import load_knowledge_pack
@@ -44,6 +45,7 @@ from app.persistence.models import (
 from app.common.auth import get_current_account
 
 router = APIRouter()
+_TRACE_TABLE_NAME = "analysis_explanation_trace"
 
 ACTION_CHANGE_BASELINE_WINDOW = 4
 ACTION_CHANGE_MIN_BASELINE_RUNS = 2
@@ -111,6 +113,14 @@ ACTION_CHANGE_RISK_IDS = (
     "lateral_trunk_lean",
     "foot_line_deviation",
 )
+
+
+def _analysis_explanation_trace_available(db: Session) -> bool:
+    try:
+        bind = db.get_bind()
+        return bool(bind is not None and inspect(bind).has_table(_TRACE_TABLE_NAME))
+    except Exception:
+        return False
 
 
 def _extract_scorecard(result_json: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
@@ -1642,7 +1652,7 @@ def list_analysis_runs(
         raw_rows = db.query(AnalysisResultRaw).filter(AnalysisResultRaw.run_id.in_(run_ids)).all()
         raw_by_run_id = {row.run_id: row for row in raw_rows}
     trace_by_run_id: Dict[Any, AnalysisExplanationTrace] = {}
-    if run_ids:
+    if run_ids and _analysis_explanation_trace_available(db):
         trace_rows = (
             db.query(AnalysisExplanationTrace)
             .filter(AnalysisExplanationTrace.run_id.in_(run_ids))
@@ -1757,7 +1767,11 @@ def get_analysis_run(
         raise HTTPException(status_code=403, detail="Access denied")
 
     raw = db.query(AnalysisResultRaw).filter_by(run_id=run_id).first()
-    trace = db.query(AnalysisExplanationTrace).filter_by(run_id=run_id).first()
+    trace = (
+        db.query(AnalysisExplanationTrace).filter_by(run_id=run_id).first()
+        if _analysis_explanation_trace_available(db)
+        else None
+    )
     recent_runs = (
         db.query(AnalysisRun)
         .filter_by(player_id=run.player_id)

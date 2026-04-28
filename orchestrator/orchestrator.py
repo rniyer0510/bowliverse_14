@@ -530,6 +530,50 @@ def _walkthrough_render_window(
     return start, end
 
 
+def _deterministic_render_story_context(
+    deterministic_expert: Optional[Dict[str, Any]],
+) -> Optional[Dict[str, Any]]:
+    deterministic_expert = deterministic_expert or {}
+    coach_diagnosis = (deterministic_expert.get("coach_diagnosis_v1") or {})
+    root_cause = (coach_diagnosis.get("root_cause") or {})
+    chain_status = (coach_diagnosis.get("kinetic_chain_status") or {})
+
+    if not coach_diagnosis:
+        return None
+
+    root_cause_status = str(root_cause.get("status") or "").strip().lower()
+    chain_status_id = str(chain_status.get("id") or "").strip().lower()
+    if root_cause_status == "no_clear_problem" or chain_status_id == "connected":
+        return {
+            "theme": "working_pattern",
+            "hero_risk_id": None,
+            "watch_focus": {},
+        }
+
+    renderer_guidance = (root_cause.get("renderer_guidance") or {})
+    hero_risk_id = ""
+    phase_targets = renderer_guidance.get("phase_targets") or {}
+    if isinstance(phase_targets, dict):
+        for phase_key in ("ffc", "release"):
+            phase_target = phase_targets.get(phase_key) or {}
+            hero_risk_id = str(phase_target.get("risk_id") or "").strip()
+            if hero_risk_id:
+                break
+    if not hero_risk_id:
+        anchor_risk_ids = renderer_guidance.get("anchor_risk_ids") or {}
+        if isinstance(anchor_risk_ids, dict):
+            for phase_key in ("ffc", "release"):
+                hero_risk_id = str(anchor_risk_ids.get(phase_key) or "").strip()
+                if hero_risk_id:
+                    break
+
+    return {
+        "theme": "problem_pattern",
+        "hero_risk_id": hero_risk_id or None,
+        "watch_focus": {},
+    }
+
+
 def _build_walkthrough_render(
     *,
     run_id: str,
@@ -1047,7 +1091,7 @@ def analyze(
             risks=risks,
             estimated_release_speed=estimated_release_speed,
             kinetic_chain=deterministic_expert.get("kinetic_chain_v1"),
-            report_story=(clinician or {}).get("report_story_v1"),
+            report_story=_deterministic_render_story_context(deterministic_expert),
             root_cause=((deterministic_expert.get("coach_diagnosis_v1") or {}).get("root_cause")),
         )
 

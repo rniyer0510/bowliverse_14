@@ -39,15 +39,15 @@ def _should_render_warning_hotspots(
     report_story: Optional[Dict[str, Any]],
     root_cause: Optional[Dict[str, Any]],
 ) -> bool:
-    renderer_guidance = ((root_cause or {}).get("renderer_guidance") or {})
-    if "warning_hotspots_allowed" in renderer_guidance:
-        return bool(renderer_guidance.get("warning_hotspots_allowed"))
     root_cause_status = str((root_cause or {}).get("status") or "").strip().lower()
     if root_cause_status == "no_clear_problem":
         return False
     story_theme = str((report_story or {}).get("theme") or "").strip().lower()
     if story_theme in {"working_pattern", "good_base"}:
         return False
+    renderer_guidance = ((root_cause or {}).get("renderer_guidance") or {})
+    if "warning_hotspots_allowed" in renderer_guidance:
+        return bool(renderer_guidance.get("warning_hotspots_allowed"))
     return True
 def _root_cause_phase_target(
     root_cause: Optional[Dict[str, Any]],

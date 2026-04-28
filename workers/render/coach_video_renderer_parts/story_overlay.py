@@ -17,11 +17,11 @@ def _draw_story_overlay_card(
     title_scale_boost: float = 1.0,
     headline_scale_boost: float = 1.0,
     body_scale_boost: float = 1.0,
-) -> None:
+) -> int:
     if Image is None or ImageDraw is None:
-        return
+        return y1
     image, overlay, draw = _frame_draw_context(frame)
-    _draw_themed_story_card(
+    final_y1 = _draw_themed_story_card(
         draw,
         x0=x0,
         y0=y0,
@@ -38,3 +38,4 @@ def _draw_story_overlay_card(
         body_scale_boost=body_scale_boost,
     )
     _commit_frame_draw_context(frame, image, overlay)
+    return int(final_y1)

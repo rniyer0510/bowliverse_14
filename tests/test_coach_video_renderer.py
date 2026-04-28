@@ -334,7 +334,8 @@ class CoachVideoRendererTest(unittest.TestCase):
         )
 
         self.assertNotEqual(selected, 2)
-        self.assertIn(selected, {1, 3, 4})
+        self.assertIn(selected, {1, 3})
+        self.assertLessEqual(selected, 3)
 
     def test_draw_load_watch_phase_accepts_all_hotspot_stages(self):
         pose_frames = [_pose_frame(i, shift=0.0) for i in range(5)]
@@ -482,11 +483,142 @@ class CoachVideoRendererTest(unittest.TestCase):
                 root_cause={"status": "no_clear_problem"},
             )
         )
+        self.assertFalse(
+            _should_render_warning_hotspots(
+                report_story={"theme": "working_pattern"},
+                root_cause={
+                    "status": "clear",
+                    "renderer_guidance": {"warning_hotspots_allowed": True},
+                },
+            )
+        )
         self.assertTrue(
             _should_render_warning_hotspots(
                 report_story={"theme": "problem_pattern"},
                 root_cause={"status": "clear"},
             )
+        )
+
+    def test_prepare_pause_context_does_not_force_ffc_risk_from_raw_weights(self):
+        frame = np.zeros((120, 160, 3), dtype=np.uint8)
+        pose_frames = [_pose_frame(i, shift=0.0) for i in range(5)]
+        tracks = coach_video_renderer._build_smoothed_tracks(
+            pose_frames,
+            width=160,
+            height=120,
+            fps=24.0,
+        )
+
+        context = coach_video_renderer._prepare_pause_context(
+            frame=frame,
+            pose_frames=pose_frames,
+            tracks=tracks,
+            frame_idx=2,
+            pause_key="ffc",
+            hand="R",
+            risk_by_id={
+                "knee_brace_failure": {
+                    "risk_id": "knee_brace_failure",
+                    "signal_strength": 0.9,
+                    "confidence": 0.9,
+                },
+                "foot_line_deviation": {
+                    "risk_id": "foot_line_deviation",
+                    "signal_strength": 0.8,
+                    "confidence": 0.8,
+                },
+            },
+            render_events={
+                "ffc": {"frame": 2, "confidence": 0.8, "method": "release_backward_chain_grounding"},
+                "event_chain": {"quality": 0.7},
+            },
+            report_story={"theme": "problem_pattern"},
+            root_cause={"status": "holdback", "renderer_guidance": {}},
+            kinetic_chain=None,
+        )
+
+        self.assertIsNone(context["hotspot_payload"])
+        self.assertIsNone(context["leakage_payload"])
+
+    def test_positive_story_summary_text_ignores_issue_fallback_copy(self):
+        root_cause = {
+            "status": "clear",
+            "renderer_guidance": {
+                "simple_symptom_text": "Front leg gets soft at landing.",
+                "simple_load_watch_text": "This is where the body works harder.",
+            },
+        }
+        report_story = {
+            "theme": "working_pattern",
+            "watch_focus": {"label": "action shape"},
+        }
+
+        self.assertEqual(
+            _summary_symptom_text(
+                {},
+                report_story=report_story,
+                root_cause=root_cause,
+            ),
+            "Keep watching action shape",
+        )
+        self.assertEqual(
+            _summary_load_watch_text(
+                {},
+                report_story=report_story,
+                root_cause=root_cause,
+            ),
+            "No one area is taking too much load.",
+        )
+        self.assertEqual(
+            _summary_load_watch_title(
+                report_story=report_story,
+                root_cause=root_cause,
+            ),
+            "Load Stays Shared",
+        )
+
+    def test_uninterpretable_summary_text_stays_evidence_limited(self):
+        root_cause = {
+            "status": "not_interpretable",
+            "renderer_guidance": {
+                "simple_symptom_text": "Front leg gets soft at landing.",
+                "simple_load_watch_text": "This is where the body works harder.",
+            },
+        }
+
+        self.assertEqual(
+            _summary_symptom_title(root_cause=root_cause),
+            "Need Clearer Evidence",
+        )
+        self.assertEqual(
+            _summary_symptom_text(
+                {
+                    "knee_brace_failure": {
+                        "risk_id": "knee_brace_failure",
+                        "signal_strength": 0.9,
+                        "confidence": 0.9,
+                    }
+                },
+                root_cause=root_cause,
+            ),
+            "This clip does not show the chain clearly enough to call one issue yet.",
+        )
+        self.assertEqual(
+            _summary_load_watch_title(root_cause=root_cause),
+            "Load Not Clear Yet",
+        )
+        self.assertEqual(
+            _summary_load_watch_text(
+                {
+                    "knee_brace_failure": {
+                        "risk_id": "knee_brace_failure",
+                        "signal_strength": 0.9,
+                        "confidence": 0.9,
+                    }
+                },
+                root_cause=root_cause,
+            ),
+            "Need a clearer release view before calling where load is building.",
         )
 
     def test_root_cause_phase_target_blocks_report_story_fallback(self):

@@ -1,7 +1,7 @@
 from __future__ import annotations
 from .shared import *
 from .geometry_helpers import _draw_partial_polyline
-from .bubble_base import _draw_pointer_bubble
+from .hotspot_draw import _draw_hotspot_compact_label
 from .transfer_core import _transfer_leak_geometry
 
 def _body_pay_region_priority(risk_id: str) -> List[str]:
@@ -127,9 +127,15 @@ def _draw_body_pay_phase(
     alpha = 0.25 + max(0.0, min(1.0, float(progress))) * 0.30
     cv2.addWeighted(overlay, alpha, frame, 1.0 - alpha, 0.0, frame)
     if progress >= 0.42:
-        _draw_pointer_bubble(
+        direction = (
+            float(pay_center[0] - anchor[0]),
+            float(pay_center[1] - anchor[1]),
+        )
+        _draw_hotspot_compact_label(
             frame,
-            anchor=pay_center,
-            text="Body pays here.",
-            accent=FLOW_PAY_CORE,
+            center=(int(pay_center[0]), int(pay_center[1])),
+            direction=direction,
+            label=str(region.get("label") or "Body pay"),
+            scale=scale,
+            occupied_rects=[],
         )

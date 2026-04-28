@@ -20,7 +20,7 @@ def _draw_themed_story_card(
     title_scale_boost: float = 1.0,
     headline_scale_boost: float = 1.0,
     body_scale_boost: float = 1.0,
-) -> None:
+) -> int:
     card_w = max(1, x1 - x0)
     text_size = _phase_label_font_size(min(width, height))
     title_size = text_size
@@ -132,3 +132,4 @@ def _draw_themed_story_card(
         )
         _, line_h = _pil_text_size(draw, line, body_font)
         current_y += line_h + line_gap
+    return y1
