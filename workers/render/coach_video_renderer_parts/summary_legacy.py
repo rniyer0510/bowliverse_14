@@ -149,4 +149,13 @@ def _draw_end_summary(
     report_story: Optional[Dict[str, Any]] = None,
     root_cause: Optional[Dict[str, Any]] = None,
 ) -> None:
-    return
+    _draw_end_summary_legacy(
+        frame,
+        risk_by_id=risk_by_id,
+        events=events,
+        action=action,
+        speed=speed,
+        elbow=elbow,
+        report_story=report_story,
+        root_cause=root_cause,
+    )

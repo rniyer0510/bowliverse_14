@@ -1,7 +1,7 @@
 from __future__ import annotations
 from .shared import *
 from .drawing_base import _overlay_panel
-from .font_utils import _load_theme_font, _pil_text_size
+from .font_utils import _load_theme_font, _pil_text_size, _phase_label_font_size
 from .pil_context import _bgr_to_rgb, _frame_draw_context, _commit_frame_draw_context
 from .timeline_events import _phase_cut_points
 
@@ -33,7 +33,7 @@ def _draw_phase_rail(
     rail_h = int(round(height * 0.066))
     gap = int(round(width * 0.012))
     segment_w = max(30, int((rail_x1 - rail_x0 - gap * (len(PHASES) - 1)) / len(PHASES)))
-    font_size = max(22, int(round(min(width, height) * 0.046)))
+    font_size = _phase_label_font_size(min(width, height))
     font = _load_theme_font(LABEL_FONT_FILE, font_size)
     measure_draw = None
     if font is not None and Image is not None and ImageDraw is not None:

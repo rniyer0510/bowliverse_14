@@ -1,6 +1,6 @@
 from __future__ import annotations
 from .shared import *
-from .font_utils import _fit_pil_wrapped_text, _pil_text_size
+from .font_utils import _fit_pil_wrapped_text, _pil_text_size, _phase_label_font_size
 from .pil_context import _bgr_to_rgb, _frame_draw_context, _commit_frame_draw_context
 from .themed_story import _draw_themed_story_card
 from .themed_card_shell import _draw_themed_card_shell
@@ -16,6 +16,24 @@ def _bubble_copy(
         if resolved:
             return resolved
     return ""
+
+def _compact_pointer_copy(text: str) -> str:
+    cleaned = " ".join(str(text or "").replace(".", " ").replace(",", " ").split())
+    if not cleaned:
+        return ""
+    words = cleaned.split(" ")
+    if len(words) <= 4:
+        return cleaned
+    drop_words = {
+        "a", "an", "and", "at", "for", "from", "here", "into", "of", "the",
+        "then", "through", "to",
+    }
+    reduced = [word for word in words if word.lower() not in drop_words]
+    if 1 <= len(reduced) <= 4:
+        return " ".join(reduced)
+    if len(reduced) > 4:
+        return " ".join(reduced[:4])
+    return " ".join(words[:4])
 def _reading_hold_frames(
     *,
     text: str,
@@ -32,6 +50,10 @@ def _reading_hold_frames(
         min(float(max_seconds), 0.92 + words * 0.31),
     )
     return max(1, int(round(max(1.0, float(fps)) * reading_seconds)))
+
+def _explanation_top_y(height: int) -> int:
+    return max(92, int(round(height * 0.145)))
+
 def _draw_pointer_bubble(
     frame: np.ndarray,
     *,
@@ -39,18 +61,38 @@ def _draw_pointer_bubble(
     text: str,
     accent: Tuple[int, int, int],
 ) -> None:
-    message = " ".join(str(text or "").split())
+    message = _compact_pointer_copy(text)
     if not message or Image is None or ImageDraw is None:
         return
     width = frame.shape[1]
     height = frame.shape[0]
     image, overlay, draw = _frame_draw_context(frame)
     card_x0 = int(round(width * 0.05))
-    card_y0 = int(round(height * 0.05))
-    card_x1 = int(round(width * 0.61))
-    card_y1 = card_y0 + int(round(height * 0.21))
+    card_y0 = _explanation_top_y(height)
+    card_x1 = int(round(width * 0.74))
+    card_y1 = card_y0 + int(round(height * 0.14))
     card_w = max(1, card_x1 - card_x0)
-    card_h = max(1, card_y1 - card_y0)
+    scale = min(width, height)
+    headline_base = _phase_label_font_size(scale)
+    rail_probe = max(3, int(round(card_w * 0.020))) + max(3, int(round(scale * 0.006)))
+    inner_pad_x = max(16, int(round(card_w * 0.070))) + rail_probe
+    content_width = max(40, card_x1 - card_x0 - inner_pad_x * 2)
+    headline_font, headline_lines = _fit_pil_wrapped_text(
+        draw,
+        message,
+        font_file=BODY_FONT_FILE,
+        base_size=headline_base,
+        min_size=headline_base,
+        max_width=content_width,
+        max_lines=2,
+    )
+    line_gap = max(5, int(round(headline_base * 0.30)))
+    inner_pad_y = max(12, int(round(headline_base * 0.65)))
+    total_h = 0
+    if headline_font is not None and headline_lines:
+        total_h = sum(_pil_text_size(draw, line, headline_font)[1] for line in headline_lines)
+        total_h += line_gap * max(0, len(headline_lines) - 1)
+    card_y1 = max(card_y1, card_y0 + inner_pad_y * 2 + total_h)
     rail_offset = _draw_themed_card_shell(
         draw,
         x0=card_x0,
@@ -62,32 +104,6 @@ def _draw_pointer_bubble(
         height=height,
     )
     inner_pad_x = max(16, int(round(card_w * 0.070))) + rail_offset
-    inner_pad_y = max(14, int(round(card_h * 0.12)))
-    content_width = max(40, card_x1 - card_x0 - inner_pad_x * 2)
-    content_height = max(36, card_y1 - card_y0 - inner_pad_y * 2)
-    headline_base = max(30, int(round(card_h * 0.24)))
-    headline_min = max(22, int(round(card_h * 0.17)))
-    headline_font = None
-    headline_lines: List[str] = []
-    line_gap = max(5, int(round(card_h * 0.045)))
-    current_headline_base = headline_base
-    for _ in range(10):
-        headline_font, headline_lines = _fit_pil_wrapped_text(
-            draw,
-            message,
-            font_file=BODY_FONT_FILE,
-            base_size=current_headline_base,
-            min_size=headline_min,
-            max_width=content_width,
-            max_lines=4,
-        )
-        total_h = 0
-        if headline_font is not None and headline_lines:
-            total_h = sum(_pil_text_size(draw, line, headline_font)[1] for line in headline_lines)
-            total_h += line_gap * max(0, len(headline_lines) - 1)
-        if total_h <= content_height:
-            break
-        current_headline_base = max(headline_min, current_headline_base - 2)
     current_y = card_y0 + inner_pad_y
     for line in headline_lines:
         if headline_font is None:
@@ -100,7 +116,6 @@ def _draw_pointer_bubble(
         )
         _, line_h = _pil_text_size(draw, line, headline_font)
         current_y += line_h + line_gap
-    scale = min(width, height)
     line_x = card_x0 + int(round((card_x1 - card_x0) * 0.44))
     line_y0 = card_y1 + max(8, int(round(scale * 0.012)))
     line_y1 = line_y0 + max(22, int(round(scale * 0.044)))
@@ -132,9 +147,9 @@ def _draw_top_risk_panel(
     height = frame.shape[0]
     image, overlay, draw = _frame_draw_context(frame)
     card_x0 = int(round(width * 0.05))
-    card_y0 = int(round(height * 0.05))
-    card_x1 = int(round(width * 0.58))
-    card_y1 = card_y0 + int(round(height * 0.20))
+    card_y0 = _explanation_top_y(height)
+    card_x1 = int(round(width * 0.74))
+    card_y1 = card_y0 + int(round(height * 0.16))
     _draw_themed_story_card(
         draw,
         x0=card_x0,

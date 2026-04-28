@@ -19,6 +19,13 @@ def _theme_font_dirs() -> List[Path]:
             home / "Documents" / "New project" / "assets" / "fonts",
         ]
     )
+    module_dir = Path(__file__).parent
+    candidates.extend(
+        [
+            module_dir / "fonts",
+            module_dir.parent / "fonts",
+        ]
+    )
     deduped: List[Path] = []
     seen: set[str] = set()
     for path in candidates:
@@ -37,7 +44,14 @@ def _load_theme_font(font_file: str, size: int) -> Any:
     cached = _THEME_FONT_CACHE.get(cache_key)
     if cached is not None:
         return cached
-    for font_dir in _theme_font_dirs():
+    font_dirs = _theme_font_dirs()
+    logger.info(
+        "[font_utils] dirs=%s file=%s size=%s",
+        [str(path) for path in font_dirs],
+        font_file,
+        safe_size,
+    )
+    for font_dir in font_dirs:
         font_path = font_dir / font_file
         if not font_path.exists():
             continue
@@ -51,11 +65,21 @@ def _load_theme_font(font_file: str, size: int) -> Any:
         fallback = ImageFont.load_default()
     except Exception:
         fallback = None
+    logger.warning(
+        "[font_utils] fallback font file=%s size=%s dirs=%s",
+        font_file,
+        safe_size,
+        [str(path) for path in font_dirs],
+    )
     _THEME_FONT_CACHE[cache_key] = fallback
     return fallback
 def _pil_text_size(draw: Any, text: str, font: Any) -> Tuple[int, int]:
     bbox = draw.textbbox((0, 0), str(text or ""), font=font)
     return max(0, int(bbox[2] - bbox[0])), max(0, int(bbox[3] - bbox[1]))
+def _phase_label_font_size(scale: int) -> int:
+    return max(22, int(round(max(1, int(scale)) * 0.046)))
+def _legend_font_size(scale: int) -> int:
+    return max(18, int(round(max(1, int(scale)) * 0.038)))
 def _wrap_pil_text(
     draw: Any,
     text: str,

@@ -37,16 +37,14 @@ def _draw_themed_telemetry_pill(
         (dot_cx - dot_r, dot_cy - dot_r, dot_cx + dot_r, dot_cy + dot_r),
         fill=_bgr_to_rgb(accent, 255),
     )
-    title_font = _load_theme_font(
-        LABEL_FONT_FILE,
-        max(13, int(round(card_h * 0.18 * title_scale_boost))),
-    )
+    title_size = max(11, int(round(card_h * 0.15 * title_scale_boost)))
+    title_font = _load_theme_font(LABEL_FONT_FILE, title_size)
     value_font, value_lines = _fit_pil_wrapped_text(
         draw,
         str(value or ""),
         font_file=BODY_FONT_FILE,
-        base_size=max(22, int(round(card_h * 0.34 * value_scale_boost))),
-        min_size=max(16, int(round(card_h * 0.24 * value_scale_boost))),
+        base_size=max(18, int(round(card_h * 0.28 * value_scale_boost))),
+        min_size=max(12, int(round(card_h * 0.18 * value_scale_boost))),
         max_width=max(28, card_w - inner_pad_x * 2),
         max_lines=1,
     )
