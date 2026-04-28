@@ -94,10 +94,10 @@ SKELETON_EDGES: Tuple[Tuple[int, int], ...] = (
 )
 TRACKED_JOINTS = tuple(sorted({idx for edge in SKELETON_EDGES for idx in edge}))
 PHASES: Tuple[Dict[str, str], ...] = (
-    {"key": "approach", "title": "Approach", "subtitle": "Building into the crease"},
-    {"key": "bfc", "title": "Back Foot Contact", "subtitle": "Back foot lands"},
-    {"key": "ffc", "title": "Front Foot Contact", "subtitle": "Front foot lands and supports the action"},
-    {"key": "release", "title": "Release", "subtitle": "Ball comes out"},
+    {"key": "approach", "title": "Approach", "short_title": "Approach", "subtitle": "Building into the crease"},
+    {"key": "bfc", "title": "Back Foot Contact", "short_title": "Back foot", "subtitle": "Back foot lands"},
+    {"key": "ffc", "title": "Front Foot Contact", "short_title": "Front foot", "subtitle": "Front foot lands and supports the action"},
+    {"key": "release", "title": "Release", "short_title": "Release", "subtitle": "Ball comes out"},
 )
 RISK_TITLE_BY_ID: Dict[str, str] = {
     "knee_brace_failure": "Front-Leg Support",
@@ -135,5 +135,7 @@ DISPLAY_FONT_FILE = "BarlowSemiCondensed-SemiBold.ttf"
 LABEL_FONT_FILE = "BarlowSemiCondensed-Medium.ttf"
 BODY_FONT_FILE = "Inter-SemiBold.ttf"
 BODY_FONT_MEDIUM_FILE = "Inter-Medium.ttf"
+LEGEND_DURATION_SECONDS = 2.5
+LEGEND_FADE_SECONDS = 0.5
 
 __all__ = [name for name in globals() if name != "__builtins__"]

@@ -125,31 +125,17 @@ def _draw_pointer_bubble(
         tail_base_y + tail_direction * max(10, int(round(scale * 0.020))),
     )
 
-    shadow_shift = max(3, int(round(scale * 0.005)))
-    draw.rounded_rectangle(
-        (x0 + shadow_shift, y0 + shadow_shift, x1 + shadow_shift, y1 + shadow_shift),
-        radius=radius,
-        fill=(0, 0, 0, 86),
-    )
-    draw.polygon(
-        [
-            (tail_left[0] + shadow_shift, tail_left[1] + shadow_shift),
-            (tail_right[0] + shadow_shift, tail_right[1] + shadow_shift),
-            (tail_tip[0] + shadow_shift, tail_tip[1] + shadow_shift),
-        ],
-        fill=(0, 0, 0, 86),
-    )
     draw.rounded_rectangle(
         (x0, y0, x1, y1),
         radius=radius,
-        fill=(255, 255, 255, 252),
-        outline=(18, 18, 18, 255),
+        fill=(18, 18, 18, 230),
+        outline=(255, 255, 255, 38),
         width=max(2, int(round(scale * 0.0035))),
     )
     draw.polygon(
         [tail_left, tail_mid, tail_tip, tail_mid, tail_right],
-        fill=(255, 255, 255, 247),
-        outline=(18, 18, 18, 255),
+        fill=(18, 18, 18, 225),
+        outline=(255, 255, 255, 38),
     )
     accent_w = max(5, int(round(bubble_w * 0.028)))
     draw.rounded_rectangle(
@@ -165,7 +151,7 @@ def _draw_pointer_bubble(
             (text_x, current_y),
             line,
             font=font,
-            fill=(14, 14, 14, 255),
+            fill=(255, 255, 255, 255),
         )
         current_y += text_heights[idx] + line_gap
     _commit_frame_draw_context(frame, image, overlay)

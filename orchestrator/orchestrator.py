@@ -96,8 +96,8 @@ clinician_engine: Optional[ClinicianInterpreter] = None
 deterministic_expert_engine: Optional[DeterministicExpertSystem] = None
 RENDERS_DIR = RENDER_DIR
 
-WALKTHROUGH_PAUSE_SECONDS = 3.0
-WALKTHROUGH_SLOW_MOTION_FACTOR = 3.0
+WALKTHROUGH_PAUSE_SECONDS = 3.5
+WALKTHROUGH_SLOW_MOTION_FACTOR = 5.0
 WALKTHROUGH_END_SUMMARY_SECONDS = 2.5
 WALKTHROUGH_RENDERER_VERSION = "coach_video_renderer_v2_2026_04_24"
 

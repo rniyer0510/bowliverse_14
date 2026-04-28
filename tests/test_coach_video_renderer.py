@@ -8,6 +8,8 @@ import numpy as np
 
 from app.workers.render import coach_video_renderer
 from app.workers.render.coach_video_renderer import (
+    _draw_phase_anchor_panel,
+    _draw_phase_overlay,
     _draw_body_pay_phase,
     _format_action_label,
     _draw_load_watch_phase,
@@ -27,6 +29,9 @@ from app.workers.render.coach_video_renderer import (
     render_skeleton_video,
     _render_timeline_events,
     _summary_issue_lines,
+)
+from app.workers.render.coach_video_renderer_parts.drawing_base import (
+    _draw_skeleton_legend,
 )
 from app.workers.render.render_load_watch import (
     _load_hotspot_regions,
@@ -74,6 +79,43 @@ def _pose_frame(frame_idx: int, shift: float):
 
 
 class CoachVideoRendererTest(unittest.TestCase):
+    def test_phase_overlay_preserves_bottom_rail_surface(self):
+        frame = np.zeros((200, 160, 3), dtype=np.uint8)
+
+        _draw_phase_overlay(
+            frame,
+            frame_idx=2,
+            start=0,
+            stop=10,
+            events={
+                "bfc": {"frame": 2},
+                "ffc": {"frame": 5},
+                "release": {"frame": 8},
+            },
+        )
+
+        rail_slice = frame[170:198, 8:152]
+        self.assertGreater(int(rail_slice.sum()), 0)
+
+    def test_phase_anchor_panel_draws_visible_fallback_copy(self):
+        frame = np.zeros((200, 160, 3), dtype=np.uint8)
+
+        _draw_phase_anchor_panel(frame, phase_key="ffc")
+
+        self.assertGreater(int(frame.sum()), 0)
+
+    def test_skeleton_legend_draws_intro_overlay(self):
+        frame = np.zeros((200, 160, 3), dtype=np.uint8)
+
+        _draw_skeleton_legend(
+            frame,
+            fps=30.0,
+            frame_idx=0,
+            legend_end_frame=75,
+        )
+
+        self.assertGreater(int(frame.sum()), 0)
+
     def test_pause_hold_plan_gives_hotspots_extra_read_time(self):
         normal_cue, normal_hotspot = _pause_hold_plan(
             pause_frames=10,
@@ -506,7 +548,8 @@ class CoachVideoRendererTest(unittest.TestCase):
             )
 
             self.assertTrue(result["available"])
-            self.assertEqual(result["frames_rendered"], 11)
+            self.assertEqual(result["slow_motion_factor"], 5.0)
+            self.assertEqual(result["frames_rendered"], 17)
             self.assertEqual(result["style"], "skeleton_phase_v1")
             self.assertTrue(os.path.exists(output_path))
             self.assertGreater(os.path.getsize(output_path), 0)
@@ -550,7 +593,8 @@ class CoachVideoRendererTest(unittest.TestCase):
             self.assertTrue(result["available"])
             self.assertEqual(result["pause_seconds"], 1.0)
             self.assertEqual(result["end_frame"], 4)
-            self.assertEqual(result["frames_rendered"], 41)
+            self.assertEqual(result["slow_motion_factor"], 5.0)
+            self.assertEqual(result["frames_rendered"], 47)
 
     def test_render_skeleton_video_uses_clean_raw_frame_for_end_summary(self):
         with tempfile.TemporaryDirectory() as tmpdir:

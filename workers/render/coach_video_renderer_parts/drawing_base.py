@@ -1,5 +1,7 @@
 from __future__ import annotations
 from .shared import *
+from .font_utils import _load_theme_font, _pil_text_size
+from .pil_context import _bgr_to_rgb, _frame_draw_context, _commit_frame_draw_context
 from .tracks import *
 
 def _draw_joint(frame: np.ndarray, point: Tuple[int, int], scale: int) -> None:
@@ -69,3 +71,66 @@ def _apply_bottom_scrim(
         + overlay.astype(np.float32) * alpha_mask[..., None]
     )
     frame[:, :] = np.clip(blended, 0, 255).astype(np.uint8)
+
+
+def _draw_skeleton_legend(
+    frame: np.ndarray,
+    *,
+    fps: float,
+    frame_idx: int,
+    legend_end_frame: int,
+) -> None:
+    if Image is None or ImageDraw is None or frame_idx >= legend_end_frame:
+        return
+    fade_frames = max(1, int(round(max(1.0, fps) * LEGEND_FADE_SECONDS)))
+    fade_start = max(0, legend_end_frame - fade_frames)
+    alpha_scale = 1.0
+    if frame_idx >= fade_start:
+        remaining = max(0, legend_end_frame - frame_idx)
+        alpha_scale = max(0.0, min(1.0, float(remaining) / float(fade_frames)))
+    width = frame.shape[1]
+    height = frame.shape[0]
+    scale = min(width, height)
+    font = _load_theme_font(LABEL_FONT_FILE, max(12, int(round(scale * 0.026))))
+    if font is None:
+        return
+    image, overlay, draw = _frame_draw_context(frame)
+    rows = [("Skeleton", SKELETON_COLOR), ("Load / fault point", HOTSPOT_RING)]
+    row_gap = max(6, int(round(scale * 0.010)))
+    dot_r = max(5, int(round(scale * 0.010)))
+    pad_x = max(12, int(round(scale * 0.024)))
+    pad_y = max(8, int(round(scale * 0.016)))
+    text_sizes = [_pil_text_size(draw, label, font) for label, _ in rows]
+    max_text_w = max(size[0] for size in text_sizes)
+    row_h = max(size[1] for size in text_sizes)
+    panel_w = max_text_w + pad_x * 2 + dot_r * 2 + 12
+    panel_h = pad_y * 2 + len(rows) * row_h + (len(rows) - 1) * row_gap
+    x0 = 10
+    y0 = 10
+    x1 = min(width - 10, x0 + panel_w)
+    y1 = min(height - 10, y0 + panel_h)
+    fill_alpha = int(round(199 * alpha_scale))
+    outline_alpha = int(round(44 * alpha_scale))
+    text_alpha = int(round(255 * alpha_scale))
+    draw.rounded_rectangle(
+        (x0, y0, x1, y1),
+        radius=max(8, int(round(scale * 0.016))),
+        fill=(PANEL_BG[2], PANEL_BG[1], PANEL_BG[0], fill_alpha),
+        outline=(255, 255, 255, outline_alpha),
+    )
+    current_y = y0 + pad_y
+    for idx, (label, color) in enumerate(rows):
+        dot_x = x0 + pad_x + dot_r
+        dot_y = current_y + row_h // 2
+        draw.ellipse(
+            (dot_x - dot_r, dot_y - dot_r, dot_x + dot_r, dot_y + dot_r),
+            fill=_bgr_to_rgb(color, text_alpha),
+        )
+        draw.text(
+            (dot_x + dot_r + 8, current_y),
+            label,
+            font=font,
+            fill=(255, 255, 255, text_alpha),
+        )
+        current_y += row_h + (row_gap if idx < len(rows) - 1 else 0)
+    _commit_frame_draw_context(frame, image, overlay)

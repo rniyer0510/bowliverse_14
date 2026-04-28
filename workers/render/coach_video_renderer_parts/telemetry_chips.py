@@ -4,6 +4,43 @@ from .shared import *
 from .analytics import _speed_display_text
 from .story_logic import _format_action_label
 from .drawing_base import _overlay_panel
+from .font_utils import _load_theme_font
+from .pil_context import _bgr_to_rgb, _frame_draw_context, _commit_frame_draw_context
+
+
+def _draw_chip_text(
+    frame: np.ndarray,
+    *,
+    x0: int,
+    y0: int,
+    card_w: int,
+    card_h: int,
+    title: str,
+    value: str,
+    accent: Tuple[int, int, int],
+) -> None:
+    if Image is None or ImageDraw is None:
+        return
+    width = frame.shape[1]
+    height = frame.shape[0]
+    title_font = _load_theme_font(LABEL_FONT_FILE, max(13, int(round(min(width, height) * 0.027))))
+    value_font = _load_theme_font(BODY_FONT_FILE, max(18, int(round(min(width, height) * 0.038))))
+    if title_font is None or value_font is None:
+        return
+    image, overlay, draw = _frame_draw_context(frame)
+    draw.text(
+        (x0 + 16, y0 + int(card_h * 0.16)),
+        title,
+        font=title_font,
+        fill=_bgr_to_rgb(accent, 255),
+    )
+    draw.text(
+        (x0 + 16, y0 + int(card_h * 0.47)),
+        value,
+        font=value_font,
+        fill=_bgr_to_rgb(TEXT_COLOR, 255),
+    )
+    _commit_frame_draw_context(frame, image, overlay)
 
 
 def _draw_speed_chip(
@@ -26,8 +63,7 @@ def _draw_speed_chip(
     y0 = int(round(height * 0.05))
     y1 = y0 + card_h
     _overlay_panel(frame, x0=x0, y0=y0, x1=x1, y1=y1, fill_color=PANEL_BG, edge_color=accent, alpha=0.84)
-    cv2.putText(frame, title, (x0 + 16, y0 + int(card_h * 0.34)), cv2.FONT_HERSHEY_SIMPLEX, max(0.40, min(width, height) / 1500.0), accent, 1, cv2.LINE_AA)
-    cv2.putText(frame, display, (x0 + 16, y0 + int(card_h * 0.72)), cv2.FONT_HERSHEY_SIMPLEX, max(0.58, min(width, height) / 1100.0), TEXT_COLOR, 2, cv2.LINE_AA)
+    _draw_chip_text(frame, x0=x0, y0=y0, card_w=card_w, card_h=card_h, title=title, value=display, accent=accent)
 
 
 def _draw_action_chip(
@@ -50,8 +86,7 @@ def _draw_action_chip(
     y0 = int(round(height * 0.05)) + (card_h + int(round(height * 0.015)) if below_speed else 0)
     y1 = y0 + card_h
     _overlay_panel(frame, x0=x0, y0=y0, x1=x1, y1=y1, fill_color=PANEL_BG, edge_color=accent, alpha=0.84)
-    cv2.putText(frame, title, (x0 + 16, y0 + int(card_h * 0.34)), cv2.FONT_HERSHEY_SIMPLEX, max(0.40, min(width, height) / 1500.0), accent, 1, cv2.LINE_AA)
-    cv2.putText(frame, label, (x0 + 16, y0 + int(card_h * 0.72)), cv2.FONT_HERSHEY_SIMPLEX, max(0.56, min(width, height) / 1120.0), TEXT_COLOR, 2, cv2.LINE_AA)
+    _draw_chip_text(frame, x0=x0, y0=y0, card_w=card_w, card_h=card_h, title=title, value=label, accent=accent)
 
 
 def _draw_legality_chip(
@@ -79,5 +114,4 @@ def _draw_legality_chip(
     y0 = int(round(height * 0.05)) + stack_index * (card_h + int(round(height * 0.015)))
     y1 = y0 + card_h
     _overlay_panel(frame, x0=x0, y0=y0, x1=x1, y1=y1, fill_color=PANEL_BG, edge_color=accent, alpha=0.84)
-    cv2.putText(frame, title, (x0 + 16, y0 + int(card_h * 0.34)), cv2.FONT_HERSHEY_SIMPLEX, max(0.40, min(width, height) / 1500.0), accent, 1, cv2.LINE_AA)
-    cv2.putText(frame, value, (x0 + 16, y0 + int(card_h * 0.72)), cv2.FONT_HERSHEY_SIMPLEX, max(0.64, min(width, height) / 980.0), TEXT_COLOR, 2, cv2.LINE_AA)
+    _draw_chip_text(frame, x0=x0, y0=y0, card_w=card_w, card_h=card_h, title=title, value=value, accent=accent)

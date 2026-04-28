@@ -1,6 +1,8 @@
 from __future__ import annotations
 from .shared import *
 from .drawing_base import _overlay_panel
+from .font_utils import _load_theme_font, _pil_text_size
+from .pil_context import _bgr_to_rgb, _frame_draw_context, _commit_frame_draw_context
 
 def _draw_hotspot_marker(
     frame: np.ndarray,
@@ -56,11 +58,16 @@ def _draw_hotspot_compact_label(
         return None
     width = frame.shape[1]
     height = frame.shape[0]
-    font_scale = max(0.28, scale / 1820.0)
-    thickness = 1
-    (text_w, text_h), baseline = cv2.getTextSize(label, TEXT_FONT, font_scale, thickness)
-    pad_x = max(7, scale // 80)
-    pad_y = max(4, scale // 100)
+    if Image is None or ImageDraw is None:
+        return None
+    font = _load_theme_font(LABEL_FONT_FILE, max(14, int(round(scale * 0.030))))
+    if font is None:
+        return None
+    measure_image = Image.new("RGBA", (1, 1), (0, 0, 0, 0))
+    measure_draw = ImageDraw.Draw(measure_image)
+    text_w, text_h = _pil_text_size(measure_draw, label, font)
+    pad_x = max(10, scale // 70)
+    pad_y = max(6, scale // 90)
     dx, dy = direction
     candidates = [
         (center[0] + int(scale * 0.10), center[1] - int(scale * 0.05)),
@@ -77,9 +84,9 @@ def _draw_hotspot_compact_label(
         cand_x0 = int(cand_x0)
         cand_y0 = int(cand_y0_base - text_h // 2 - pad_y)
         cand_x0 = max(12, min(width - text_w - pad_x * 2 - 12, cand_x0))
-        cand_y0 = max(12, min(height - text_h - baseline - pad_y * 2 - 12, cand_y0))
+        cand_y0 = max(12, min(height - text_h - pad_y * 2 - 12, cand_y0))
         x_center = cand_x0 + (text_w + pad_x * 2) / 2.0
-        y_center = cand_y0 + (text_h + baseline + pad_y * 2) / 2.0
+        y_center = cand_y0 + (text_h + pad_y * 2) / 2.0
         vec_x = x_center - center[0]
         vec_y = y_center - center[1]
         dist_score = min(1.0, float(np.hypot(vec_x, vec_y)) / max(1.0, scale * 0.16))
@@ -96,7 +103,7 @@ def _draw_hotspot_compact_label(
             cand_x0,
             cand_y0,
             cand_x0 + text_w + pad_x * 2,
-            cand_y0 + text_h + baseline + pad_y * 2,
+            cand_y0 + text_h + pad_y * 2,
         )
         for other_x0, other_y0, other_x1, other_y1 in occupied_rects:
             if not (
@@ -112,7 +119,7 @@ def _draw_hotspot_compact_label(
             best = (cand_x0, cand_y0)
     x0, y0 = best if best is not None else (12, 12)
     x1 = x0 + text_w + pad_x * 2
-    y1 = y0 + text_h + baseline + pad_y * 2
+    y1 = y0 + text_h + pad_y * 2
     _overlay_panel(
         frame,
         x0=x0,
@@ -123,14 +130,12 @@ def _draw_hotspot_compact_label(
         edge_color=HOTSPOT_RING,
         alpha=0.72,
     )
-    cv2.putText(
-        frame,
+    image, overlay, draw = _frame_draw_context(frame)
+    draw.text(
+        (x0 + pad_x, y0 + pad_y),
         label,
-        (x0 + pad_x, y0 + pad_y + text_h),
-        TEXT_FONT,
-        font_scale,
-        TEXT_COLOR,
-        thickness,
-        cv2.LINE_AA,
+        font=font,
+        fill=_bgr_to_rgb(TEXT_COLOR, 255),
     )
+    _commit_frame_draw_context(frame, image, overlay)
     return (x0, y0, x1, y1)

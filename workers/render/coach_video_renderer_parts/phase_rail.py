@@ -1,6 +1,8 @@
 from __future__ import annotations
 from .shared import *
 from .drawing_base import _overlay_panel
+from .font_utils import _load_theme_font, _pil_text_size
+from .pil_context import _bgr_to_rgb, _frame_draw_context, _commit_frame_draw_context
 from .timeline_events import _phase_cut_points
 
 def _phase_index_for_frame(
@@ -31,6 +33,12 @@ def _draw_phase_rail(
     rail_h = int(round(height * 0.05))
     gap = int(round(width * 0.012))
     segment_w = max(30, int((rail_x1 - rail_x0 - gap * (len(PHASES) - 1)) / len(PHASES)))
+    font_size = max(14, int(round(min(width, height) * 0.030)))
+    font = _load_theme_font(LABEL_FONT_FILE, font_size)
+    measure_draw = None
+    if font is not None and Image is not None and ImageDraw is not None:
+        measure_draw = ImageDraw.Draw(Image.new("RGBA", (1, 1), (0, 0, 0, 0)))
+    text_instructions: List[Tuple[str, int, int, int, int, bool]] = []
 
     for idx, phase in enumerate(PHASES):
         seg_x0 = rail_x0 + idx * (segment_w + gap)
@@ -48,37 +56,43 @@ def _draw_phase_rail(
             edge_color=edge,
             alpha=0.88 if active else 0.72,
         )
-        label = str(phase.get("title") or "")
-        if label:
-            font_scale = max(0.34, min(width, height) / 1700.0)
-            thickness = 1
-            (text_w, text_h), baseline = cv2.getTextSize(
-                label,
-                TEXT_FONT,
-                font_scale,
-                thickness,
-            )
-            text_x = seg_x0 + max(8, int(round((segment_w - text_w) / 2.0)))
-            text_y = rail_y0 + max(
-                text_h + 4,
-                int(round((rail_h + text_h) / 2.0)),
-            )
-            text_color = (8, 8, 8) if active else MUTED_TEXT
-            cv2.putText(
-                frame,
-                label,
-                (text_x, text_y - baseline),
-                TEXT_FONT,
-                font_scale,
-                text_color,
-                thickness,
-                cv2.LINE_AA,
-            )
+        label = str(phase.get("short_title") or phase.get("title") or "")
+        if not label or measure_draw is None or font is None:
+            continue
+        text_w, text_h = _pil_text_size(measure_draw, label, font)
+        text_x = seg_x0 + max(8, int(round((segment_w - text_w) / 2.0)))
+        text_y = rail_y0 + max(4, int(round((rail_h - text_h) / 2.0)))
+        text_instructions.append((label, text_x, text_y, text_w, text_h, active))
 
     tracker_x = rail_x0 + int(round((rail_x1 - rail_x0) * max(0.0, min(1.0, progress))))
     tracker_y0 = rail_y0 - int(round(height * 0.012))
     tracker_y1 = rail_y0 + rail_h + int(round(height * 0.012))
     cv2.line(frame, (tracker_x, tracker_y0), (tracker_x, tracker_y1), ACTIVE_EDGE, 2, cv2.LINE_AA)
+
+    if not text_instructions or font is None or Image is None or ImageDraw is None:
+        return
+    image, overlay, draw = _frame_draw_context(frame)
+    for label, text_x, text_y, text_w, text_h, active in text_instructions:
+        if active:
+            pill_pad_x = 6
+            pill_pad_y = 3
+            draw.rounded_rectangle(
+                (
+                    text_x - pill_pad_x,
+                    text_y - pill_pad_y,
+                    text_x + text_w + pill_pad_x,
+                    text_y + text_h + pill_pad_y,
+                ),
+                radius=4,
+                fill=(0, 0, 0, 166),
+            )
+        draw.text(
+            (text_x, text_y),
+            label,
+            font=font,
+            fill=(255, 255, 255, 255) if active else _bgr_to_rgb(MUTED_TEXT, 255),
+        )
+    _commit_frame_draw_context(frame, image, overlay)
 def _draw_phase_overlay(
     frame: np.ndarray,
     *,

@@ -3,7 +3,7 @@ from .shared import *
 from .analytics import _risk_lookup, _safe_int
 from .render_output import _make_output_path, _intermediate_render_path, _finalize_render_video
 from .tracks import _build_smoothed_tracks
-from .drawing_base import _draw_skeleton
+from .drawing_base import _draw_skeleton, _draw_skeleton_legend
 from .timeline_events import _should_draw_skeleton_frame, _render_timeline_events
 from .phase_rail import _draw_phase_overlay
 from .pause_logic import _pause_anchor_frames
@@ -12,7 +12,7 @@ from .render_pause_sequence import _render_pause_sequence
 from .summary_legacy import _draw_end_summary
 
 
-def render_skeleton_video(*, video_path: str, pose_frames: List[Dict[str, Any]], events: Optional[Dict[str, Any]] = None, hand: Optional[str] = None, action: Optional[Dict[str, Any]] = None, elbow: Optional[Dict[str, Any]] = None, risks: Optional[List[Dict[str, Any]]] = None, estimated_release_speed: Optional[Dict[str, Any]] = None, kinetic_chain: Optional[Dict[str, Any]] = None, report_story: Optional[Dict[str, Any]] = None, root_cause: Optional[Dict[str, Any]] = None, output_path: Optional[str] = None, start_frame: int = 0, end_frame: Optional[int] = None, pause_seconds: float = 3.0, slow_motion_factor: float = 3.0, end_summary_seconds: float = 2.5) -> Dict[str, Any]:
+def render_skeleton_video(*, video_path: str, pose_frames: List[Dict[str, Any]], events: Optional[Dict[str, Any]] = None, hand: Optional[str] = None, action: Optional[Dict[str, Any]] = None, elbow: Optional[Dict[str, Any]] = None, risks: Optional[List[Dict[str, Any]]] = None, estimated_release_speed: Optional[Dict[str, Any]] = None, kinetic_chain: Optional[Dict[str, Any]] = None, report_story: Optional[Dict[str, Any]] = None, root_cause: Optional[Dict[str, Any]] = None, output_path: Optional[str] = None, start_frame: int = 0, end_frame: Optional[int] = None, pause_seconds: float = 3.5, slow_motion_factor: float = 5.0, end_summary_seconds: float = 2.5) -> Dict[str, Any]:
     if not video_path or not os.path.exists(video_path):
         return {"available": False, "reason": "missing_video_path"}
     if not pose_frames:
@@ -48,6 +48,7 @@ def render_skeleton_video(*, video_path: str, pose_frames: List[Dict[str, Any]],
         slow_motion_extra_frames = max(0, int(round(float(slow_motion_factor or 1.0))) - 1)
         slow_motion_start = ffc_frame if ffc_frame is not None and release_frame is not None and start <= ffc_frame <= release_frame < stop else None
         slow_motion_end = release_frame if slow_motion_start is not None else None
+        legend_end_frame = min(stop, start + int(round(float(fps) * LEGEND_DURATION_SECONDS)))
         risk_by_id = _risk_lookup(risks)
         cap.set(cv2.CAP_PROP_POS_FRAMES, start)
         frame_idx = start
@@ -61,6 +62,8 @@ def render_skeleton_video(*, video_path: str, pose_frames: List[Dict[str, Any]],
             if _should_draw_skeleton_frame(pose_frames=pose_frames, frame_idx=frame_idx, events=render_events, fps=fps):
                 _draw_skeleton(frame, tracks, frame_idx)
             _draw_phase_overlay(frame, frame_idx=frame_idx, start=start, stop=stop, events=render_events)
+            if frame_idx < legend_end_frame:
+                _draw_skeleton_legend(frame, fps=fps, frame_idx=frame_idx, legend_end_frame=legend_end_frame)
             final_summary_frame = raw_frame
             writer.write(frame)
             frames_rendered += 1
