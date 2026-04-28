@@ -8,9 +8,13 @@ import numpy as np
 
 from app.workers.render import coach_video_renderer
 from app.workers.render.coach_video_renderer import (
+    _draw_body_pay_phase,
     _format_action_label,
     _draw_load_watch_phase,
+    _phase_leakage_payload,
     _pause_hold_plan,
+    _pause_sequence_plan,
+    _reading_hold_frames,
     _preferred_hotspot_region_key,
     _root_cause_proof_step,
     _story_headline_and_support,
@@ -84,6 +88,29 @@ class CoachVideoRendererTest(unittest.TestCase):
         self.assertLess(hotspot_cue, normal_cue)
         self.assertGreater(hotspot_hold, 5)
         self.assertGreater(hotspot_cue + hotspot_hold, normal_cue)
+
+    def test_pause_sequence_plan_reserves_body_pay_after_break(self):
+        sequence = _pause_sequence_plan(
+            pause_frames=10,
+            has_hotspot=True,
+            has_leakage=True,
+        )
+
+        self.assertGreater(sequence["proof"], 0)
+        self.assertGreater(sequence["leak"], 0)
+        self.assertGreater(sequence["pay"], 0)
+        self.assertGreater(sequence["hotspot"], 0)
+        self.assertEqual(sum(sequence.values()), sum(_pause_hold_plan(pause_frames=10, has_hotspot=True)))
+
+    def test_reading_hold_frames_gives_short_bubbles_real_read_time(self):
+        hold_frames = _reading_hold_frames(
+            text="Energy leaks here.",
+            fps=24.0,
+            minimum_seconds=1.55,
+            max_seconds=2.6,
+        )
+
+        self.assertGreaterEqual(hold_frames, 37)
 
     def test_top_risk_panel_metrics_keep_headline_dominant_and_body_secondary(self):
         metrics = _top_risk_panel_metrics(1080, 1920)
@@ -235,6 +262,103 @@ class CoachVideoRendererTest(unittest.TestCase):
                 stage=stage,
             )
 
+    def test_draw_body_pay_phase_accepts_curated_pay_path(self):
+        pose_frames = [_pose_frame(i, shift=0.0) for i in range(5)]
+        tracks = coach_video_renderer._build_smoothed_tracks(
+            pose_frames,
+            width=160,
+            height=120,
+            fps=24.0,
+        )
+        frame = np.zeros((120, 160, 3), dtype=np.uint8)
+        _draw_body_pay_phase(
+            frame,
+            tracks=tracks,
+            frame_idx=2,
+            hand="R",
+            risk_id="knee_brace_failure",
+            risk_by_id={
+                "knee_brace_failure": {
+                    "risk_id": "knee_brace_failure",
+                    "signal_strength": 0.9,
+                    "confidence": 0.9,
+                },
+                "foot_line_deviation": {
+                    "risk_id": "foot_line_deviation",
+                    "signal_strength": 0.4,
+                    "confidence": 0.7,
+                },
+                "front_foot_braking_shock": {
+                    "risk_id": "front_foot_braking_shock",
+                    "signal_strength": 0.5,
+                    "confidence": 0.8,
+                },
+            },
+            region_priority=["groin", "shin", "knee"],
+            progress=0.75,
+        )
+
+    def test_phase_leakage_payload_requires_strong_ffc_evidence(self):
+        payload = _phase_leakage_payload(
+            kinetic_chain={
+                "pace_translation": {
+                    "transfer_efficiency": 0.44,
+                    "leakage_before_block": 0.40,
+                    "leakage_at_block": 0.61,
+                    "pace_leakage": [{"stage": "front_foot_block", "severity": 0.61}],
+                }
+            },
+            phase_key="ffc",
+            risk_id="knee_brace_failure",
+            events={
+                "ffc": {"frame": 42, "confidence": 0.20, "method": "ultimate_fallback"},
+                "event_chain": {"quality": 0.10},
+            },
+        )
+
+        self.assertIsNone(payload)
+
+    def test_phase_leakage_payload_builds_ffc_transfer_leak_story(self):
+        payload = _phase_leakage_payload(
+            kinetic_chain={
+                "pace_translation": {
+                    "transfer_efficiency": 0.47,
+                    "leakage_before_block": 0.38,
+                    "leakage_at_block": 0.58,
+                    "pace_leakage": [{"stage": "front_foot_block", "severity": 0.58}],
+                }
+            },
+            phase_key="ffc",
+            risk_id="knee_brace_failure",
+            events={
+                "ffc": {"frame": 42, "confidence": 0.61, "method": "release_backward_chain_grounding"},
+                "event_chain": {"quality": 0.44},
+            },
+        )
+
+        self.assertIsNotNone(payload)
+        self.assertEqual(payload["title"], "Transfer leak")
+        self.assertIn("landing leg", payload["headline"].lower())
+
+    def test_phase_leakage_payload_builds_release_chain_leak_story(self):
+        payload = _phase_leakage_payload(
+            kinetic_chain={
+                "pace_translation": {
+                    "transfer_efficiency": 0.49,
+                    "leakage_before_block": 0.42,
+                    "leakage_at_block": 0.51,
+                    "late_arm_chase": 0.62,
+                    "dissipation_burden": 0.55,
+                }
+            },
+            phase_key="release",
+            risk_id="hip_shoulder_mismatch",
+            events={"release": {"frame": 65, "confidence": 0.72}},
+        )
+
+        self.assertIsNotNone(payload)
+        self.assertIn("hips and shoulders", payload["headline"].lower())
+
     def test_preferred_hotspot_region_key_uses_curated_region_by_risk(self):
         self.assertEqual(_preferred_hotspot_region_key("knee_brace_failure"), "knee")
         self.assertEqual(_preferred_hotspot_region_key("lateral_trunk_lean"), "side_trunk")
@@ -327,9 +451,9 @@ class CoachVideoRendererTest(unittest.TestCase):
 
             pose_frames = [_pose_frame(i, shift=0.01 * i) for i in range(8)]
             with mock.patch.object(
-                coach_video_renderer,
+                coach_video_renderer.render_video,
                 "_build_smoothed_tracks",
-                wraps=coach_video_renderer._build_smoothed_tracks,
+                wraps=coach_video_renderer.render_video._build_smoothed_tracks,
             ) as build_tracks:
                 result = render_skeleton_video(
                     video_path=video_path,
@@ -457,15 +581,15 @@ class CoachVideoRendererTest(unittest.TestCase):
                 captured_summary_inputs.append(frame.copy())
 
             with mock.patch.object(
-                coach_video_renderer,
+                coach_video_renderer.render_video,
                 "_draw_skeleton",
                 side_effect=fake_draw_skeleton,
             ), mock.patch.object(
-                coach_video_renderer,
+                coach_video_renderer.render_video,
                 "_draw_phase_overlay",
                 side_effect=fake_draw_phase_overlay,
             ), mock.patch.object(
-                coach_video_renderer,
+                coach_video_renderer.render_video,
                 "_draw_end_summary",
                 side_effect=capture_summary,
             ):
@@ -506,9 +630,9 @@ class CoachVideoRendererTest(unittest.TestCase):
 
             pose_frames = [_pose_frame(i, shift=0.01 * i) for i in range(5)]
             with mock.patch.object(
-                coach_video_renderer,
+                coach_video_renderer.render_pause_sequence,
                 "_draw_load_watch_phase",
-                wraps=coach_video_renderer._draw_load_watch_phase,
+                wraps=coach_video_renderer.render_pause_sequence._draw_load_watch_phase,
             ) as draw_phase:
                 result = render_skeleton_video(
                     video_path=video_path,
@@ -554,9 +678,9 @@ class CoachVideoRendererTest(unittest.TestCase):
 
             pose_frames = [_pose_frame(i, shift=0.01 * i) for i in range(10)]
             with mock.patch.object(
-                coach_video_renderer,
+                coach_video_renderer.render_video,
                 "_draw_skeleton",
-                wraps=coach_video_renderer._draw_skeleton,
+                wraps=coach_video_renderer.render_video._draw_skeleton,
             ) as draw_skeleton:
                 result = render_skeleton_video(
                     video_path=video_path,
@@ -592,7 +716,7 @@ class CoachVideoRendererTest(unittest.TestCase):
 
             pose_frames = [_pose_frame(i, shift=0.01 * i) for i in range(5)]
             with mock.patch(
-                "app.workers.render.coach_video_renderer.shutil.which",
+                "app.workers.render.coach_video_renderer_parts.render_output.shutil.which",
                 return_value=None,
             ):
                 result = render_skeleton_video(
