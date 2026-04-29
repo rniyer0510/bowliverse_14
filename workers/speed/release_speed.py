@@ -652,6 +652,152 @@ def _apply_low_confidence_neighbor_recovery(
     return recovered
 
 
+def _apply_clean_salvage_promotion(
+    result: Dict[str, Any],
+    *,
+    events: Dict[str, Any],
+) -> Dict[str, Any]:
+    if not result.get("available"):
+        return result
+    if not str(result.get("method") or "").endswith("_salvage"):
+        return result
+    if str(result.get("reason") or "") == "recovered_implausible_saturation":
+        return result
+
+    chain = (events or {}).get("event_chain") or {}
+    ordered = bool(chain.get("ordered"))
+    chain_quality = float(chain.get("quality") or 0.0)
+    release_confidence = float(((events or {}).get("release") or {}).get("confidence") or 0.0)
+    debug = dict(result.get("debug") or {})
+
+    shoulder_body_ratio = float(debug.get("shoulder_body_ratio") or 0.0)
+    pelvis_body_ratio = float(debug.get("pelvis_body_ratio") or 0.0)
+    wrist_arm_ratio = float(debug.get("wrist_arm_ratio") or 0.0)
+    elbow_velocity = float(debug.get("elbow_extension_velocity_deg_per_sec") or 0.0)
+    overall_wrist_visibility = float(debug.get("overall_wrist_visibility") or 0.0)
+    saturated = bool(debug.get("saturated"))
+
+    if (
+        not ordered
+        or chain_quality < 0.30
+        or release_confidence < 0.55
+        or overall_wrist_visibility < 0.30
+        or shoulder_body_ratio > 0.40
+        or pelvis_body_ratio < 0.55
+        or wrist_arm_ratio < 8.0
+        or elbow_velocity < 120.0
+        or elbow_velocity > 260.0
+        or saturated
+    ):
+        return result
+
+    shoulder_term = max(0.0, min(1.0, (0.40 - shoulder_body_ratio) / 0.15))
+    pelvis_term = max(0.0, min(1.0, (pelvis_body_ratio - 0.55) / 0.20))
+    wrist_vis_term = max(0.0, min(1.0, (overall_wrist_visibility - 0.30) / 0.20))
+    wrist_ratio_term = max(0.0, min(1.0, (wrist_arm_ratio - 8.0) / 4.0))
+    release_term = max(0.0, min(1.0, (release_confidence - 0.55) / 0.20))
+    chain_term = max(0.0, min(1.0, (chain_quality - 0.30) / 0.20))
+
+    uplift = 1.0 + (
+        0.18 * shoulder_term
+        + 0.14 * pelvis_term
+        + 0.12 * wrist_vis_term
+        + 0.10 * wrist_ratio_term
+        + 0.08 * release_term
+        + 0.08 * chain_term
+    )
+    value_kph = min(145, int(round(int(result.get("value_kph") or 0) * uplift)))
+
+    debug["clean_salvage_promotion"] = round(uplift, 3)
+    return {
+        **result,
+        "value_kph": value_kph,
+        "display": f"~{value_kph} km/h",
+        "display_policy": "show",
+        "debug": debug,
+    }
+
+
+def _apply_small_subject_compensation(
+    result: Dict[str, Any],
+    *,
+    events: Dict[str, Any],
+) -> Dict[str, Any]:
+    if not result.get("available"):
+        return result
+
+    debug = dict(result.get("debug") or {})
+    reason = str(result.get("reason") or "")
+    body_height_ratio = float(debug.get("body_height_ratio") or 0.0)
+    body_height_px = float(debug.get("body_height_px") or 0.0)
+    overall_wrist_visibility = float(debug.get("overall_wrist_visibility") or 0.0)
+    shoulder_body_ratio = float(debug.get("shoulder_body_ratio") or 0.0)
+    pelvis_body_ratio = float(debug.get("pelvis_body_ratio") or 0.0)
+    saturated = bool(debug.get("saturated"))
+
+    chain = (events or {}).get("event_chain") or {}
+    ordered = bool(chain.get("ordered"))
+    chain_quality = float(chain.get("quality") or 0.0)
+
+    if (
+        reason != "recovered_implausible_saturation"
+        or not ordered
+        or chain_quality < 0.35
+        or body_height_ratio <= 0.0
+        or body_height_ratio > 0.26
+        or body_height_px > 240.0
+        or overall_wrist_visibility > 0.16
+        or shoulder_body_ratio > 0.65
+        or pelvis_body_ratio < 0.35
+        or saturated
+    ):
+        return result
+
+    ratio_term = max(0.0, min(1.0, (0.26 - body_height_ratio) / 0.08))
+    wrist_vis_term = max(0.0, min(1.0, (0.16 - overall_wrist_visibility) / 0.10))
+    chain_term = max(0.0, min(1.0, (chain_quality - 0.35) / 0.15))
+    uplift = 1.0 + (
+        0.05 * ratio_term
+        + 0.03 * wrist_vis_term
+        + 0.02 * chain_term
+    )
+    value_kph = min(145, int(round(int(result.get("value_kph") or 0) * uplift)))
+
+    debug["small_subject_compensation"] = round(uplift, 3)
+    return {
+        **result,
+        "value_kph": value_kph,
+        "display": f"~{value_kph} km/h",
+        "debug": debug,
+    }
+
+
+def _is_implausible_saturated_estimate(result: Dict[str, Any]) -> bool:
+    if not result.get("available"):
+        return False
+    debug = result.get("debug") or {}
+    if not bool(debug.get("saturated")):
+        return False
+    if int(result.get("value_kph") or 0) < 145:
+        return False
+
+    confidence = float(result.get("confidence") or 0.0)
+    elbow_velocity = float(debug.get("elbow_extension_velocity_deg_per_sec") or 0.0)
+    shoulder_body_ratio = float(debug.get("shoulder_body_ratio") or 0.0)
+    overall_wrist_visibility = float(debug.get("overall_wrist_visibility") or 0.0)
+    release_confidence = float(debug.get("release_confidence") or 0.0)
+
+    return (
+        confidence <= 0.55
+        and release_confidence <= 0.60
+        and (
+            elbow_velocity >= 320.0
+            or shoulder_body_ratio >= 0.80
+            or overall_wrist_visibility <= 0.25
+        )
+    )
+
+
 def estimate_release_speed(
     *,
     pose_frames: List[Dict[str, Any]],
@@ -714,6 +860,35 @@ def estimate_release_speed(
                     )
                 )
             primary = _apply_low_confidence_neighbor_recovery(primary, neighbor_results)
+        if _is_implausible_saturated_estimate(primary):
+            recovery = _estimate_release_speed_pass(
+                pose_frames=pose_frames,
+                video=video,
+                hand=hand,
+                release_frame=release_frame,
+                ball_weight_oz=ball_weight_oz,
+                window_before=5,
+                window_after=5,
+                scale_before=10,
+                scale_after=10,
+                sigma_scale=0.05,
+                max_arm_cv=0.30,
+                max_wrist_cv=1.10,
+                salvage_mode=True,
+                release_confidence=release_confidence,
+            )
+            if recovery.get("available") and not bool((recovery.get("debug") or {}).get("saturated")):
+                recovery["reason"] = "recovered_implausible_saturation"
+                recovery_debug = recovery.setdefault("debug", {})
+                recovery_debug["primary_failure_reason"] = "implausible_saturated_estimate"
+                return _apply_small_subject_compensation(recovery, events=events)
+            debug = dict(primary.get("debug") or {})
+            debug["primary_failure_reason"] = "implausible_saturated_estimate"
+            return {
+                **_unavailable_result(ball_weight_oz),
+                "reason": "implausible_saturated_estimate",
+                "debug": debug,
+            }
         return primary
 
     if primary.get("reason") not in {"unstable_arm_scale", "unstable_release_window"}:
@@ -739,7 +914,7 @@ def estimate_release_speed(
         salvage["reason"] = f"recovered_{primary.get('reason')}"
         salvage_debug = salvage.setdefault("debug", {})
         salvage_debug["primary_failure_reason"] = primary.get("reason")
-        return salvage
+        return _apply_clean_salvage_promotion(salvage, events=events)
 
     if salvage.get("reason") in {
         "release_too_close_to_clip_start",
@@ -754,4 +929,5 @@ def estimate_release_speed(
             },
         }
 
-    return salvage if salvage.get("reason") != primary.get("reason") else primary
+    result = salvage if salvage.get("reason") != primary.get("reason") else primary
+    return _apply_clean_salvage_promotion(result, events=events) if result.get("available") else result
