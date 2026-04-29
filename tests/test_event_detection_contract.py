@@ -4,6 +4,7 @@ import numpy as np
 from app.workers.events.ffc_bfc import detect_ffc_bfc
 from app.workers.events.release_uah import detect_release_uah, _nb_elbow_peak_is_plausible
 from app.workers.events.signal_cache import build_signal_cache
+from app.workers.events.event_confidence import annotate_detection_contract
 
 
 def _landmark(x, y, visibility=0.99):
@@ -85,6 +86,18 @@ def _frame_chaotic_feet(idx: int):
 
 
 class EventDetectionContractTest(unittest.TestCase):
+    def test_annotate_detection_contract_preserves_detected_truth_fields(self):
+        annotated = annotate_detection_contract(
+            {
+                "ffc": {"frame": 12, "confidence": 0.67, "method": "release_backward_chain_grounding"},
+                "event_chain": {"ordered": True, "quality": 0.61},
+            }
+        )
+
+        self.assertEqual(annotated["ffc"]["detected_frame"], 12)
+        self.assertEqual(annotated["ffc"]["detection_confidence"], 0.67)
+        self.assertEqual(annotated["event_chain"]["detection_quality"], 0.61)
+
     def test_signal_cache_exposes_shared_kinematic_signals(self):
         pose_frames = [_frame(i) for i in range(40)]
 
@@ -155,6 +168,9 @@ class EventDetectionContractTest(unittest.TestCase):
         self.assertIn("window", events["release"])
         self.assertEqual(events["release"]["method"], "multi_signal_consensus")
         self.assertIn("signals_used", events["release"])
+        self.assertEqual(events["release"]["detected_frame"], events["release"]["frame"])
+        self.assertEqual(events["release"]["detection_confidence"], events["release"]["confidence"])
+        self.assertEqual(events["uah"]["detected_frame"], events["uah"]["frame"])
         self.assertTrue(
             any(item.get("used") for item in events["release"]["signals_used"])
         )
@@ -181,6 +197,9 @@ class EventDetectionContractTest(unittest.TestCase):
         self.assertIn("detection_context", result)
         self.assertIn("candidates", result["ffc"])
         self.assertTrue(result["ffc"]["candidates"])
+        self.assertEqual(result["ffc"]["detected_frame"], result["ffc"]["frame"])
+        self.assertEqual(result["ffc"]["detection_confidence"], result["ffc"]["confidence"])
+        self.assertEqual(result["bfc"]["detected_frame"], result["bfc"]["frame"])
         self.assertLessEqual(result["bfc"]["frame"], result["ffc"]["frame"])
         self.assertLessEqual(result["ffc"]["frame"], release_events["release"]["frame"])
         self.assertEqual(result["ffc"]["method"], "release_backward_chain_grounding")

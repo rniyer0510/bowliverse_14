@@ -2,16 +2,12 @@ from __future__ import annotations
 
 from .shared import *
 from .analytics import _safe_float
-
-
-def _visibility_weight(vis: Optional[float]) -> float:
-    value = _safe_float(vis)
-    if value is None or value <= MIN_VISIBILITY_HARD:
-        return 0.0
-    if value >= FULL_VISIBILITY:
-        return 1.0
-    span = max(1e-6, FULL_VISIBILITY - MIN_VISIBILITY_HARD)
-    return max(0.0, min(1.0, (float(value) - MIN_VISIBILITY_HARD) / span))
+from .occlusion_manager import (
+    _visibility_weight,
+    _smooth_series,
+    _draw_mode_for_quality,
+    _frame_quality_from_joint_qualities,
+)
 
 
 def _point_from_landmarks(
@@ -44,56 +40,6 @@ def _landmark_visibility(
     if not isinstance(point, dict):
         return 0.0
     return float(_safe_float(point.get("visibility")) or 0.0)
-
-
-def _smooth_series(
-    values: Iterable[Optional[float]],
-    sigma: float,
-    *,
-    weights: Optional[Iterable[float]] = None,
-) -> Optional[np.ndarray]:
-    value_list = list(values)
-    if not value_list:
-        return None
-    valid = np.array([value is not None for value in value_list], dtype=bool)
-    if valid.sum() < 3:
-        return None
-    idx = np.arange(len(value_list), dtype=float)
-    raw = np.full(len(value_list), np.nan, dtype=float)
-    raw[valid] = [float(value) for value in value_list if value is not None]
-    interp = raw.copy()
-    interp[~valid] = np.interp(idx[~valid], idx[valid], raw[valid])
-
-    if weights is not None:
-        weight_arr = np.asarray(list(weights), dtype=float)
-        if weight_arr.shape[0] != len(value_list):
-            raise ValueError("weights length must match values length")
-        weight_arr = np.clip(weight_arr, 0.0, 1.0)
-        source = interp.copy()
-        finite_raw = np.isfinite(raw)
-        source[finite_raw] = (
-            interp[finite_raw] * (1.0 - weight_arr[finite_raw])
-            + raw[finite_raw] * weight_arr[finite_raw]
-        )
-    else:
-        source = interp
-
-    smoothed = gaussian_filter1d(source, sigma=max(1.0, sigma))
-    return smoothed
-
-
-def _track_mode_for_quality(
-    quality: float,
-    raw_weight: float,
-    has_raw_point: bool,
-) -> Optional[str]:
-    if raw_weight >= 0.72 and has_raw_point:
-        return "solid"
-    if raw_weight > 0.0 and has_raw_point:
-        return "dashed"
-    if quality > 0.0:
-        return "placeholder"
-    return None
 
 
 def _build_smoothed_tracks(
@@ -134,7 +80,7 @@ def _build_smoothed_tracks(
         quality = np.clip(np.nan_to_num(quality, nan=0.0), 0.0, 1.0)
 
         draw_modes = [
-            _track_mode_for_quality(
+            _draw_mode_for_quality(
                 float(quality[idx]) if idx < len(quality) else 0.0,
                 float(raw_weights[idx]) if idx < len(raw_weights) else 0.0,
                 raw_points[idx] is not None,
@@ -230,14 +176,13 @@ def _track_frame_quality(
     tracks: Dict[int, Dict[str, Any]],
     frame_idx: int,
 ) -> float:
-    qualities = [
+    return _frame_quality_from_joint_qualities(
+        [
         _track_quality(tracks, joint_idx, frame_idx)
         for joint_idx in TRACKED_JOINTS
-    ]
-    finite = [quality for quality in qualities if quality > 0.0]
-    if not finite:
-        return 0.0
-    return float(sum(finite) / max(1, len(TRACKED_JOINTS)))
+        ],
+        len(TRACKED_JOINTS),
+    )
 
 
 def _frame_point(

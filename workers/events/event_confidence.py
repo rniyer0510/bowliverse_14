@@ -92,3 +92,35 @@ def chain_quality(
         "ordered": ordered,
         "quality": round(quality, 2),
     }
+
+
+def annotate_detection_contract(
+    events: Optional[Dict[str, Any]],
+) -> Dict[str, Any]:
+    payload = dict(events or {})
+    for key in ("bfc", "ffc", "uah", "release"):
+        event = payload.get(key)
+        if not isinstance(event, dict):
+            continue
+        item = dict(event)
+        frame = item.get("frame")
+        confidence = item.get("confidence")
+        if frame is not None:
+            item["detected_frame"] = int(frame)
+        if confidence is not None:
+            item["detection_confidence"] = round(
+                float(max(0.0, min(0.99, confidence))),
+                2,
+            )
+        payload[key] = item
+
+    event_chain = payload.get("event_chain")
+    if isinstance(event_chain, dict) and "quality" in event_chain:
+        event_chain_payload = dict(event_chain)
+        event_chain_payload["detection_quality"] = round(
+            float(max(0.0, min(0.99, event_chain.get("quality") or 0.0))),
+            2,
+        )
+        payload["event_chain"] = event_chain_payload
+
+    return payload

@@ -24,7 +24,7 @@ from app.workers.render.render_storage import (
 # Events
 from app.workers.events.release_uah import detect_release_uah
 from app.workers.events.ffc_bfc import detect_ffc_bfc
-from app.workers.events.event_confidence import chain_quality
+from app.workers.events.event_confidence import chain_quality, annotate_detection_contract
 
 # Elbow
 from app.workers.elbow.compute_elbow_signal import compute_elbow_signal
@@ -701,8 +701,14 @@ def _build_walkthrough_render(
         upload_result.get("reason") or "-",
     )
 
+    public_render_result = {
+        key: value
+        for key, value in render_result.items()
+        if key != "path"
+    }
+
     return {
-        **render_result,
+        **public_render_result,
         "renderer_version": WALKTHROUGH_RENDERER_VERSION,
         "artifact_type": "walkthrough_mp4",
         "storage_backend": upload_result.get("storage_backend") or "local",
@@ -988,6 +994,7 @@ def analyze(
             uah_confidence=uah_confidence,
             release_confidence=release_confidence,
         )
+        events = annotate_detection_contract(events)
 
         # ------------------------------------------------------------
         # Action Classification

@@ -5,6 +5,7 @@ from .render_output import _make_output_path, _intermediate_render_path, _finali
 from .tracks import _build_smoothed_tracks
 from .drawing_base import _draw_skeleton, _draw_skeleton_legend
 from .timeline_events import _should_draw_skeleton_frame, _render_timeline_events
+from .render_frame_resolver import attach_render_quality_metadata
 from .phase_rail import _draw_phase_overlay
 from .pause_logic import _pause_anchor_frames
 from .render_pause_payloads import _prepare_pause_context
@@ -42,6 +43,7 @@ def render_skeleton_video(*, video_path: str, pose_frames: List[Dict[str, Any]],
         tracks = _build_smoothed_tracks(pose_frames, width=width, height=height, fps=fps)
         pause_frames = max(0, int(round(float(pause_seconds or 0.0) * fps)))
         render_events = _render_timeline_events(start=start, stop=stop, events=events, fps=fps)
+        render_events = attach_render_quality_metadata(events=render_events, tracks=tracks)
         pause_anchors = _pause_anchor_frames(start=start, stop=stop, events=render_events, fps=fps)
         ffc_frame = _safe_int(((render_events or {}).get("ffc") or {}).get("frame"))
         release_frame = _safe_int(((render_events or {}).get("release") or {}).get("frame"))
@@ -59,7 +61,7 @@ def render_skeleton_video(*, video_path: str, pose_frames: List[Dict[str, Any]],
             if not ok or frame is None:
                 break
             raw_frame = frame.copy()
-            if _should_draw_skeleton_frame(pose_frames=pose_frames, frame_idx=frame_idx, events=render_events, fps=fps):
+            if _should_draw_skeleton_frame(pose_frames=pose_frames, tracks=tracks, frame_idx=frame_idx, events=render_events, fps=fps):
                 _draw_skeleton(frame, tracks, frame_idx)
             _draw_phase_overlay(frame, frame_idx=frame_idx, start=start, stop=stop, events=render_events, fps=fps)
             if frame_idx < legend_end_frame:
@@ -97,4 +99,4 @@ def render_skeleton_video(*, video_path: str, pose_frames: List[Dict[str, Any]],
         return {"available": False, "reason": "render_failed", "detail": str(exc)}
     final_path, encoding = _finalize_render_video(intermediate_path, out_path)
     logger.info("[coach_video_renderer] Rendered skeleton video path=%s frames=%s fps=%.2f", final_path, frames_rendered, fps)
-    return {"available": True, "path": final_path, "fps": round(fps, 3), "frames_rendered": frames_rendered, "width": width, "height": height, "start_frame": start, "end_frame": max(start, stop - 1), "style": "skeleton_phase_v1", "pause_seconds": round(float(pause_seconds or 0.0), 2), "slow_motion_factor": round(float(slow_motion_factor or 1.0), 2), "end_summary_seconds": round(float(end_summary_seconds or 0.0), 2), "encoding": encoding}
+    return {"available": True, "path": final_path, "fps": round(fps, 3), "frames_rendered": frames_rendered, "width": width, "height": height, "start_frame": start, "end_frame": max(start, stop - 1), "style": "skeleton_phase_v1", "pause_seconds": round(float(pause_seconds or 0.0), 2), "slow_motion_factor": round(float(slow_motion_factor or 1.0), 2), "end_summary_seconds": round(float(end_summary_seconds or 0.0), 2), "encoding": encoding, "render_events": render_events, "render_quality": (render_events or {}).get("render_quality") or {"overall": 0.0, "event_count": 0}}

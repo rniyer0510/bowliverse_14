@@ -20,7 +20,7 @@ import numpy as np
 from scipy.ndimage import gaussian_filter1d
 
 from app.common.logger import get_logger
-from app.workers.events.event_confidence import build_candidate, compact_candidates
+from app.workers.events.event_confidence import build_candidate, compact_candidates, annotate_detection_contract
 from app.workers.events.signal_cache import build_signal_cache
 from app.workers.events.timing_constants import release_uah_timing
 
@@ -707,7 +707,7 @@ def detect_release_uah(
         _dump(video_path, release_frame, "release")
         _dump(video_path, uah_frame, "uah")
 
-    return {
+    return annotate_detection_contract({
         "release": {
             "frame": int(frames[release_frame]),
             "method": release_method,
@@ -725,4 +725,4 @@ def detect_release_uah(
         },
         "delivery_window": [int(frames[search_start]), int(frames[search_end])],
         "peak": {"frame": int(frames[wrist_peak])},
-    }
+    })

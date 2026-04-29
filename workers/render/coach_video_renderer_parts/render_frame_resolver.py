@@ -6,6 +6,7 @@ from app.workers.events.timing_constants import render_timing
 
 from .analytics import _event_confidence, _safe_int
 from .shared import WEAK_PHASE_METHODS
+from .tracks import _track_frame_quality
 
 
 def _render_event_payload(
@@ -22,7 +23,6 @@ def _render_event_payload(
     payload["render_frame"] = int(render_frame)
     payload["render_method"] = str(render_method)
     payload["render_resolved"] = bool(render_resolved)
-    payload["render_confidence"] = max(0.0, float(detected_confidence))
     if detected_frame is not None:
         payload["detected_frame"] = int(detected_frame)
     if "method" in payload:
@@ -165,4 +165,38 @@ def resolve_render_timeline_events(
         render_resolved=release_resolved,
     )
 
+    return timeline
+
+
+def attach_render_quality_metadata(
+    *,
+    events: Optional[Dict[str, Any]],
+    tracks: Dict[int, Dict[str, Any]],
+) -> Dict[str, Any]:
+    timeline = dict(events or {})
+    quality_values = []
+    for key in ("bfc", "ffc", "uah", "release"):
+        event = timeline.get(key)
+        if not isinstance(event, dict):
+            continue
+        payload = dict(event)
+        render_frame = _safe_int(payload.get("render_frame"))
+        detected_frame = _safe_int(payload.get("detected_frame"))
+        if render_frame is None:
+            render_frame = _safe_int(payload.get("frame"))
+        render_quality = _track_frame_quality(tracks, render_frame) if render_frame is not None else 0.0
+        payload["render_quality"] = round(float(render_quality), 3)
+        payload["render_confidence"] = payload["render_quality"]
+        quality_values.append(float(render_quality))
+        if detected_frame is not None:
+            payload["detected_frame_quality"] = round(
+                float(_track_frame_quality(tracks, detected_frame)),
+                3,
+            )
+        timeline[key] = payload
+
+    timeline["render_quality"] = {
+        "overall": round(float(sum(quality_values) / max(1, len(quality_values))), 3) if quality_values else 0.0,
+        "event_count": len(quality_values),
+    }
     return timeline

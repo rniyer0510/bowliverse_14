@@ -156,6 +156,76 @@ class CoachVideoRendererTest(unittest.TestCase):
             coach_video_renderer._track_point(tracks, 12, 2),
         )
 
+    def test_render_skeleton_video_returns_render_event_quality_metadata(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            video_path = os.path.join(tmpdir, "input.mp4")
+            output_path = os.path.join(tmpdir, "output.mp4")
+
+            writer = cv2.VideoWriter(
+                video_path,
+                cv2.VideoWriter_fourcc(*"mp4v"),
+                24.0,
+                (160, 120),
+            )
+            self.assertTrue(writer.isOpened())
+            for _ in range(5):
+                writer.write(np.zeros((120, 160, 3), dtype=np.uint8))
+            writer.release()
+
+            pose_frames = [_pose_frame(i, shift=0.0) for i in range(5)]
+            result = render_skeleton_video(
+                video_path=video_path,
+                pose_frames=pose_frames,
+                events={
+                    "bfc": {"frame": 1, "confidence": 0.8, "method": "simple_grounded_bfc"},
+                    "ffc": {"frame": 2, "confidence": 0.8, "method": "release_backward_chain_grounding"},
+                    "release": {"frame": 4, "confidence": 0.8, "method": "multi_signal_consensus"},
+                },
+                output_path=output_path,
+                pause_seconds=0.0,
+                end_summary_seconds=0.0,
+            )
+
+            self.assertTrue(result["available"])
+            self.assertIn("render_events", result)
+            self.assertIn("render_quality", result)
+            self.assertIn("ffc", result["render_events"])
+            self.assertIn("render_quality", result["render_events"]["ffc"])
+            self.assertEqual(
+                result["render_events"]["ffc"]["render_confidence"],
+                result["render_events"]["ffc"]["render_quality"],
+            )
+            self.assertIn("detected_frame", result["render_events"]["ffc"])
+
+    def test_skeleton_frame_gate_uses_track_quality_for_occluded_frame(self):
+        pose_frames = [_pose_frame(i, shift=0.0) for i in range(5)]
+        for joint_idx in (11, 12, 13, 14, 15, 16, 23, 24, 25, 26, 27, 28):
+            pose_frames[2]["landmarks"][joint_idx]["visibility"] = 0.0
+        tracks = coach_video_renderer._build_smoothed_tracks(
+            pose_frames,
+            width=160,
+            height=120,
+            fps=24.0,
+        )
+
+        self.assertFalse(
+            coach_video_renderer._should_draw_skeleton_frame(
+                pose_frames=pose_frames,
+                frame_idx=2,
+                events={"release": {"frame": 4}},
+                fps=24.0,
+            )
+        )
+        self.assertTrue(
+            coach_video_renderer._should_draw_skeleton_frame(
+                pose_frames=pose_frames,
+                tracks=tracks,
+                frame_idx=2,
+                events={"release": {"frame": 4}},
+                fps=24.0,
+            )
+        )
+
     def test_tracked_joint_quality_uses_soft_visibility_weighting(self):
         pose_frames = [_pose_frame(i, shift=0.0) for i in range(3)]
         for joint_idx in (11, 12, 13, 14):

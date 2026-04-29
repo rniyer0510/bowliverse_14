@@ -199,6 +199,7 @@ class WalkthroughRenderRouteTest(unittest.TestCase):
                 )
 
             self.assertTrue(result["available"])
+            self.assertNotIn("path", result)
             self.assertEqual(result["relative_url"], "/renders/run-1_walkthrough.mp4")
             self.assertEqual(
                 result["url"],

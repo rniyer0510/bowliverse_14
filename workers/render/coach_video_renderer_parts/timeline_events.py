@@ -58,11 +58,12 @@ def _safe_landmark_value(landmarks: List[Dict[str, Any]], idx: int, key: str) ->
 def _should_draw_skeleton_frame(
     *,
     pose_frames: List[Dict[str, Any]],
+    tracks: Optional[Dict[int, Dict[str, Any]]] = None,
     frame_idx: int,
     events: Optional[Dict[str, Any]],
     fps: float,
 ) -> bool:
-    quality = _tracked_joint_quality(pose_frames, frame_idx)
+    quality = _track_frame_quality(tracks or {}, frame_idx) if tracks is not None else _tracked_joint_quality(pose_frames, frame_idx)
     if quality < MIN_TRACK_QUALITY:
         return False
     release_frame = _safe_int(((events or {}).get("release") or {}).get("frame"))

@@ -15,7 +15,7 @@ import math
 import numpy as np
 
 from app.common.logger import get_logger
-from app.workers.events.event_confidence import build_candidate, chain_quality, compact_candidates
+from app.workers.events.event_confidence import build_candidate, chain_quality, compact_candidates, annotate_detection_contract
 from app.workers.events.signal_cache import build_signal_cache
 from app.workers.events.timing_constants import foot_contact_timing
 
@@ -553,6 +553,10 @@ def _detection_context(
     }
 
 
+def _annotated_result(payload: Dict[str, Dict]) -> Dict[str, Dict]:
+    return annotate_detection_contract(payload)
+
+
 def _ffc_search_start(
     *,
     win_start: int,
@@ -785,10 +789,10 @@ def detect_ffc_bfc(
 
     if win_end <= win_start + 2:
         logger.warning("[FFC/BFC] Degenerate window")
-        return {
+        return _annotated_result({
             "ffc": {"frame": win_start, "confidence": 0.15, "method": "degenerate_window"},
             "detection_context": detection_context,
-        }
+        })
 
     cache = build_signal_cache(
         pose_frames=pose_frames,
@@ -807,10 +811,10 @@ def detect_ffc_bfc(
 
     if valid_pelvis_count < max(hold, 6):
         logger.warning("[FFC/BFC] Insufficient valid pelvis landmarks")
-        return {
+        return _annotated_result({
             "ffc": {"frame": win_start, "confidence": 0.10, "method": "insufficient_landmarks"},
             "detection_context": detection_context,
-        }
+        })
 
     v_lin = _moving_average(
         np.nan_to_num(cache["pelvis_linear_speed"], nan=0.0),
@@ -864,11 +868,11 @@ def detect_ffc_bfc(
         ffc = pelvis_on
         bfc = _clamp(ffc - max(3, hold), win_start, ffc)
         logger.info(f"[FFC/BFC][RESULT] CHOSEN_FFC_FRAME={ffc}")
-        return {
+        return _annotated_result({
             "ffc": {"frame": int(ffc), "confidence": 0.20, "method": "no_foot_data_fallback"},
             "bfc": {"frame": int(bfc), "confidence": 0.20, "method": "no_foot_data_fallback"},
             "detection_context": detection_context,
-        }
+        })
 
     # Search backward from release for the latest plausible landing frame.
     # Kinetic-chain timing localizes the neighborhood; grounding heuristics
@@ -951,7 +955,7 @@ def detect_ffc_bfc(
                     ffc_confidence=0.22,
                 )
                 logger.info(f"[FFC/BFC][RESULT] CHOSEN_FFC_FRAME={ffc}")
-                return {
+                return _annotated_result({
                     "ffc": {
                         "frame": int(ffc),
                         "confidence": 0.22,
@@ -966,7 +970,7 @@ def detect_ffc_bfc(
                     },
                     "event_chain": chain,
                     "detection_context": detection_context,
-                }
+                })
 
         # 2) Ultimate fallback: 3/4 into pelvis->release window (must obey win_end fence)
         ffc = pelvis_on + int(0.75 * (win_end - pelvis_on))
@@ -1007,7 +1011,7 @@ def detect_ffc_bfc(
             ffc_confidence=0.15,
         )
         logger.info(f"[FFC/BFC][RESULT] CHOSEN_FFC_FRAME={ffc}")
-        return {
+        return _annotated_result({
             "ffc": {
                 "frame": int(ffc),
                 "confidence": 0.15,
@@ -1018,7 +1022,7 @@ def detect_ffc_bfc(
             "bfc": {"frame": int(bfc), "confidence": 0.15, "method": "ultimate_fallback"},
             "event_chain": chain,
             "detection_context": detection_context,
-        }
+        })
 
     # ------------------------------------------------------------
     # Result
@@ -1072,7 +1076,7 @@ def detect_ffc_bfc(
         ffc_confidence=ffc_confidence,
     )
 
-    return {
+    return _annotated_result({
         "ffc": {
             "frame": int(ffc),
             "confidence": ffc_confidence,
@@ -1083,4 +1087,4 @@ def detect_ffc_bfc(
         "bfc": {"frame": int(bfc), "confidence": bfc_confidence, "method": bfc_method},
         "event_chain": chain,
         "detection_context": detection_context,
-    }
+    })
