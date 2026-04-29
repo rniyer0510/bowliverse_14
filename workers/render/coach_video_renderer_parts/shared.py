@@ -142,4 +142,21 @@ BODY_FONT_MEDIUM_FILE = "Inter-Medium.ttf"
 LEGEND_DURATION_SECONDS = 2.5
 LEGEND_FADE_SECONDS = 0.5
 
+
+def _safe_int(value: Any) -> Optional[int]:
+    try:
+        return int(value)
+    except Exception:
+        return None
+
+
+def _safe_point(value: Any) -> Optional[Tuple[int, int]]:
+    if not isinstance(value, (tuple, list)) or len(value) != 2:
+        return None
+    x = _safe_int(value[0])
+    y = _safe_int(value[1])
+    if x is None or y is None:
+        return None
+    return (x, y)
+
 __all__ = [name for name in globals() if name != "__builtins__"]

@@ -54,6 +54,7 @@ def release_uah_timing(fps: float, n_frames: int) -> Dict[str, float]:
         "uah_max_before_release": frames_for_ms(fps_value, 400.0, min_frames=4),
         "uah_min_before_release": frames_for_ms(fps_value, 30.0, min_frames=1),
         "wrist_cross_slack": frames_for_ms(fps_value, 40.0, min_frames=1),
+        "geometric_refine_half": frames_for_ms(fps_value, 50.0, min_frames=2),
         "post_release_rel": 0.10,
     }
 
@@ -70,6 +71,10 @@ def foot_contact_timing(fps: float) -> Dict[str, int | float]:
         "min_ffc_release_band": frames_for_ms(fps_value, 160.0, min_frames=4),
         "pre_pelvis_lead": frames_for_ms(fps_value, 450.0, min_frames=4),
         "recent_support_band": frames_for_ms(fps_value, 220.0, min_frames=3),
+        "ffc_local_pre_band": frames_for_ms(fps_value, 120.0, min_frames=3),
+        "ffc_local_post_band": frames_for_ms(fps_value, 80.0, min_frames=2),
+        "bfc_min_ffc_gap": frames_for_ms(fps_value, 20.0, min_frames=1),
+        "bfc_max_ffc_gap": frames_for_ms(fps_value, 180.0, min_frames=3),
         "edge_override_gap": frames_for_ms(fps_value, 160.0, min_frames=3),
     }
 

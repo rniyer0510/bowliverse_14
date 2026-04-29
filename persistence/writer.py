@@ -1,4 +1,5 @@
 import uuid
+from datetime import date, datetime
 from typing import Any, Dict, Optional
 
 from sqlalchemy import inspect
@@ -74,6 +75,34 @@ def _analysis_explanation_trace_available(db: Session) -> bool:
             exc,
         )
         return False
+
+
+def _json_safe(value: Any) -> Any:
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, uuid.UUID):
+        return str(value)
+    if isinstance(value, (datetime, date)):
+        return value.isoformat()
+    if isinstance(value, dict):
+        return {str(key): _json_safe(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(item) for item in value]
+    if isinstance(value, set):
+        return [_json_safe(item) for item in value]
+    item_method = getattr(value, "item", None)
+    if callable(item_method):
+        try:
+            return _json_safe(item_method())
+        except Exception:
+            pass
+    tolist_method = getattr(value, "tolist", None)
+    if callable(tolist_method):
+        try:
+            return _json_safe(tolist_method())
+        except Exception:
+            pass
+    return str(value)
 
 
 def _deterministic_summary(result: Dict[str, Any]) -> Dict[str, Optional[str]]:
@@ -383,16 +412,17 @@ def write_analysis(result: dict, db: Optional[Session] = None, **kwargs) -> str:
         # --------------------------------------------------------
         if isinstance(result, dict):
             result.setdefault("run_id", str(run_id))
+        result_json = _json_safe(result)
 
         db.add(
             AnalysisResultRaw(
                 run_id=run_id,
-                result_json=result,
+                result_json=result_json,
             )
         )
 
         if _analysis_explanation_trace_available(db):
-            explanation_trace = _deterministic_trace(result)
+            explanation_trace = _json_safe(_deterministic_trace(result))
             existing_trace = db.get(AnalysisExplanationTrace, run_id)
             if existing_trace is not None:
                 raise ValueError(f"Explanation trace already exists for run_id={run_id}")
