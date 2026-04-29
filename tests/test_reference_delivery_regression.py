@@ -96,10 +96,10 @@ class ReferenceDeliveryRegressionTest(unittest.TestCase):
             hand="R",
         )
 
-        self.assertEqual(release_events["release"]["frame"], 12)
-        self.assertEqual(release_events["uah"]["frame"], 11)
-        self.assertEqual(foot_events["ffc"]["frame"], 7)
-        self.assertEqual(foot_events["bfc"]["frame"], 6)
+        self.assertEqual(release_events["release"]["frame"], 24)
+        self.assertEqual(release_events["uah"]["frame"], 21)
+        self.assertEqual(foot_events["ffc"]["frame"], 17)
+        self.assertEqual(foot_events["bfc"]["frame"], 16)
         self.assertTrue((foot_events.get("event_chain") or {}).get("ordered"))
 
         self.assertEqual(elbow["verdict"], "LEGAL")

@@ -132,6 +132,45 @@ class CoachVideoRendererTest(unittest.TestCase):
 
         self.assertGreater(int(frame.sum()), 0)
 
+    def test_smoothed_tracks_assign_draw_modes_for_soft_and_missing_visibility(self):
+        pose_frames = [_pose_frame(i, shift=0.0) for i in range(5)]
+        pose_frames[2]["landmarks"][11]["visibility"] = 0.45
+        pose_frames[2]["landmarks"][12]["visibility"] = 0.0
+
+        tracks = coach_video_renderer._build_smoothed_tracks(
+            pose_frames,
+            width=160,
+            height=120,
+            fps=24.0,
+        )
+
+        self.assertEqual(
+            coach_video_renderer._track_draw_mode(tracks, 11, 2),
+            "dashed",
+        )
+        self.assertEqual(
+            coach_video_renderer._track_draw_mode(tracks, 12, 2),
+            "placeholder",
+        )
+        self.assertIsNotNone(
+            coach_video_renderer._track_point(tracks, 12, 2),
+        )
+
+    def test_tracked_joint_quality_uses_soft_visibility_weighting(self):
+        pose_frames = [_pose_frame(i, shift=0.0) for i in range(3)]
+        for joint_idx in (11, 12, 13, 14):
+            pose_frames[1]["landmarks"][joint_idx]["visibility"] = 0.45
+        for joint_idx in (23, 24):
+            pose_frames[1]["landmarks"][joint_idx]["visibility"] = 0.0
+
+        quality = coach_video_renderer._tracked_joint_quality(
+            pose_frames,
+            frame_idx=1,
+        )
+
+        self.assertGreater(quality, 0.0)
+        self.assertLess(quality, 1.0)
+
     def test_pause_hold_plan_gives_hotspots_extra_read_time(self):
         normal_cue, normal_hotspot = _pause_hold_plan(
             pause_frames=10,
@@ -350,11 +389,15 @@ class CoachVideoRendererTest(unittest.TestCase):
             },
         )
 
-        self.assertEqual((render_events["bfc"] or {}).get("method"), "render_phase_fallback")
-        self.assertEqual((render_events["ffc"] or {}).get("method"), "render_phase_fallback")
+        self.assertEqual((render_events["bfc"] or {}).get("method"), "ultimate_fallback")
+        self.assertEqual((render_events["bfc"] or {}).get("render_method"), "phase_band_fallback")
+        self.assertEqual((render_events["bfc"] or {}).get("detected_frame"), 488)
+        self.assertEqual((render_events["ffc"] or {}).get("method"), "ultimate_fallback")
+        self.assertEqual((render_events["ffc"] or {}).get("render_method"), "phase_band_fallback")
+        self.assertEqual((render_events["ffc"] or {}).get("detected_frame"), 490)
         self.assertLess(int((render_events["bfc"] or {}).get("frame")), int((render_events["ffc"] or {}).get("frame")))
         self.assertLess(int((render_events["ffc"] or {}).get("frame")), 492)
-        self.assertGreaterEqual(int((render_events["ffc"] or {}).get("frame")), 460)
+        self.assertGreaterEqual(int((render_events["ffc"] or {}).get("frame")), 487)
 
     def test_render_timeline_events_preserves_ordered_bfc_even_if_low_confidence(self):
         render_events = _render_timeline_events(
@@ -369,6 +412,8 @@ class CoachVideoRendererTest(unittest.TestCase):
 
         self.assertEqual((render_events["bfc"] or {}).get("frame"), 133)
         self.assertEqual((render_events["bfc"] or {}).get("method"), "simple_grounded_bfc")
+        self.assertEqual((render_events["bfc"] or {}).get("render_method"), "detected_frame")
+        self.assertEqual((render_events["bfc"] or {}).get("detected_frame"), 133)
         self.assertEqual((render_events["ffc"] or {}).get("frame"), 134)
 
     def test_render_timeline_events_falls_back_when_bfc_is_not_before_ffc(self):
@@ -382,22 +427,23 @@ class CoachVideoRendererTest(unittest.TestCase):
             },
         )
 
-        self.assertEqual((render_events["bfc"] or {}).get("method"), "render_phase_fallback")
+        self.assertEqual((render_events["bfc"] or {}).get("method"), "simple_grounded_bfc")
+        self.assertEqual((render_events["bfc"] or {}).get("render_method"), "phase_band_fallback")
+        self.assertEqual((render_events["bfc"] or {}).get("detected_frame"), 136)
         self.assertLess(int((render_events["bfc"] or {}).get("frame")), 134)
 
-    def test_preferred_ffc_cue_risk_id_allows_render_phase_fallback_story(self):
+    def test_preferred_ffc_cue_risk_id_rejects_render_only_ffc_story(self):
         risk_by_id = {
             "knee_brace_failure": {"risk_id": "knee_brace_failure", "signal_strength": 0.8, "confidence": 0.8},
             "foot_line_deviation": {"risk_id": "foot_line_deviation", "signal_strength": 0.3, "confidence": 0.7},
         }
         events = {
-            "ffc": {"frame": 468, "confidence": 0.40, "method": "render_phase_fallback"},
+            "ffc": {"frame": 468, "confidence": 0.40, "method": "ultimate_fallback", "render_method": "phase_band_fallback"},
             "event_chain": {"quality": 0.05},
         }
 
-        self.assertEqual(
+        self.assertIsNone(
             _preferred_ffc_cue_risk_id(risk_by_id, report_story=None, events=events),
-            "knee_brace_failure",
         )
 
     def test_select_hotspot_frame_idx_prefers_visible_leg_stack_near_anchor(self):
@@ -905,7 +951,7 @@ class CoachVideoRendererTest(unittest.TestCase):
             def fake_draw_skeleton(frame, tracks, frame_idx):
                 frame[:, :] = (255, 0, 255)
 
-            def fake_draw_phase_overlay(frame, *, frame_idx, start, stop, events):
+            def fake_draw_phase_overlay(frame, *, frame_idx, start, stop, events, fps=30.0):
                 frame[0:10, 0:10] = (0, 255, 255)
 
             def capture_summary(frame, **kwargs):

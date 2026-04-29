@@ -41,8 +41,8 @@ def render_skeleton_video(*, video_path: str, pose_frames: List[Dict[str, Any]],
     try:
         tracks = _build_smoothed_tracks(pose_frames, width=width, height=height, fps=fps)
         pause_frames = max(0, int(round(float(pause_seconds or 0.0) * fps)))
-        render_events = _render_timeline_events(start=start, stop=stop, events=events)
-        pause_anchors = _pause_anchor_frames(start=start, stop=stop, events=render_events)
+        render_events = _render_timeline_events(start=start, stop=stop, events=events, fps=fps)
+        pause_anchors = _pause_anchor_frames(start=start, stop=stop, events=render_events, fps=fps)
         ffc_frame = _safe_int(((render_events or {}).get("ffc") or {}).get("frame"))
         release_frame = _safe_int(((render_events or {}).get("release") or {}).get("frame"))
         slow_motion_extra_frames = max(0, int(round(float(slow_motion_factor or 1.0))) - 1)
@@ -61,7 +61,7 @@ def render_skeleton_video(*, video_path: str, pose_frames: List[Dict[str, Any]],
             raw_frame = frame.copy()
             if _should_draw_skeleton_frame(pose_frames=pose_frames, frame_idx=frame_idx, events=render_events, fps=fps):
                 _draw_skeleton(frame, tracks, frame_idx)
-            _draw_phase_overlay(frame, frame_idx=frame_idx, start=start, stop=stop, events=render_events)
+            _draw_phase_overlay(frame, frame_idx=frame_idx, start=start, stop=stop, events=render_events, fps=fps)
             if frame_idx < legend_end_frame:
                 _draw_skeleton_legend(frame, fps=fps, frame_idx=frame_idx, legend_end_frame=legend_end_frame)
             final_summary_frame = raw_frame

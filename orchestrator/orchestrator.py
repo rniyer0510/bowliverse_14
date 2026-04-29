@@ -505,6 +505,51 @@ def _gate_speed_estimate(
     return estimated_release_speed
 
 
+def _reconcile_anchor_order(
+    *,
+    events: Dict[str, Any],
+    fps: float,
+) -> Dict[str, Any]:
+    """
+    Resolve tiny anchor-order inversions after all event detectors have run.
+
+    On noisy or behind-camera clips, UAH and FFC can land within a frame or two
+    of each other. If UAH is only slightly earlier than FFC, snap it forward to
+    the FFC instant instead of letting the whole chain go unordered.
+    """
+    try:
+        fps_f = max(1.0, float(fps or 30.0))
+    except Exception:
+        fps_f = 30.0
+
+    tol = max(1, int(round(0.04 * fps_f)))  # about 40 ms
+    uah = events.get("uah") or {}
+    ffc = events.get("ffc") or {}
+    uah_frame = uah.get("frame")
+    ffc_frame = ffc.get("frame")
+
+    if uah_frame is None or ffc_frame is None:
+        return events
+
+    try:
+        uah_i = int(uah_frame)
+        ffc_i = int(ffc_frame)
+    except Exception:
+        return events
+
+    if uah_i < ffc_i and (ffc_i - uah_i) <= tol:
+        reconciled = dict(uah)
+        reconciled["frame"] = ffc_i
+        reconciled["method"] = f"{uah.get('method') or 'uah'}_ffc_reconciled"
+        reconciled["confidence"] = round(
+            max(0.0, float(uah.get("confidence") or 0.0) - 0.05),
+            2,
+        )
+        events["uah"] = reconciled
+
+    return events
+
+
 def _walkthrough_render_window(
     *,
     events: dict,
@@ -901,6 +946,7 @@ def analyze(
             pose_frames=pose_frames,
             hand=hand,
             fps=fps_val,
+            delivery_window=video.get("coarse_delivery_window"),
         )
 
         # ------------------------------------------------------------
@@ -919,6 +965,11 @@ def analyze(
             )
             if foot_events:
                 events.update(foot_events)
+
+        events = _reconcile_anchor_order(
+            events=events,
+            fps=fps_val,
+        )
 
         bfc_frame = (events.get("bfc") or {}).get("frame")
         ffc_frame = (events.get("ffc") or {}).get("frame")

@@ -1,7 +1,9 @@
 import unittest
+import numpy as np
 
 from app.workers.events.ffc_bfc import detect_ffc_bfc
 from app.workers.events.release_uah import detect_release_uah, _nb_elbow_peak_is_plausible
+from app.workers.events.signal_cache import build_signal_cache
 
 
 def _landmark(x, y, visibility=0.99):
@@ -83,6 +85,33 @@ def _frame_chaotic_feet(idx: int):
 
 
 class EventDetectionContractTest(unittest.TestCase):
+    def test_signal_cache_exposes_shared_kinematic_signals(self):
+        pose_frames = [_frame(i) for i in range(40)]
+
+        cache = build_signal_cache(
+            pose_frames=pose_frames,
+            hand="R",
+            fps=60.0,
+        )
+
+        for key in (
+            "pelvis_centre_xy",
+            "pelvis_forward_velocity",
+            "pelvis_angular_velocity",
+            "pelvis_jerk",
+            "hip_line_angular_velocity",
+            "shoulder_angular_velocity",
+            "bowling_elbow_y",
+            "nb_elbow_y",
+            "wrist_forward_velocity",
+        ):
+            self.assertIn(key, cache)
+
+        self.assertEqual(cache["pelvis_centre_xy"].shape[0], len(pose_frames))
+        self.assertEqual(len(cache["wrist_forward_velocity"]), len(pose_frames))
+        self.assertTrue(np.isfinite(cache["pelvis_forward_velocity"]).any())
+        self.assertTrue(np.isfinite(cache["shoulder_angular_velocity"]).any())
+
     def test_early_non_bowling_elbow_peak_is_not_treated_as_plausible_release_anchor(self):
         self.assertFalse(
             _nb_elbow_peak_is_plausible(
@@ -124,6 +153,11 @@ class EventDetectionContractTest(unittest.TestCase):
         self.assertIn("candidates", events["release"])
         self.assertTrue(events["release"]["candidates"])
         self.assertIn("window", events["release"])
+        self.assertEqual(events["release"]["method"], "multi_signal_consensus")
+        self.assertIn("signals_used", events["release"])
+        self.assertTrue(
+            any(item.get("used") for item in events["release"]["signals_used"])
+        )
         self.assertLessEqual(events["uah"]["frame"], events["release"]["frame"])
 
     def test_ffc_bfc_obeys_release_window(self):
@@ -144,12 +178,24 @@ class EventDetectionContractTest(unittest.TestCase):
 
         self.assertIn("ffc", result)
         self.assertIn("bfc", result)
+        self.assertIn("detection_context", result)
         self.assertIn("candidates", result["ffc"])
         self.assertTrue(result["ffc"]["candidates"])
         self.assertLessEqual(result["bfc"]["frame"], result["ffc"]["frame"])
         self.assertLessEqual(result["ffc"]["frame"], release_events["release"]["frame"])
         self.assertEqual(result["ffc"]["method"], "release_backward_chain_grounding")
-        self.assertIn(result["bfc"]["method"], {"simple_grounded_bfc", "context_pre_ffc", "no_ground_confirmed"})
+        self.assertIn(
+            result["bfc"]["method"],
+            {
+                "simple_grounded_bfc",
+                "simple_grounded_bfc_front_contact_corrected",
+                "back_foot_support_edge",
+                "back_foot_support_edge_front_contact_corrected",
+                "context_pre_ffc",
+                "no_ground_confirmed",
+            },
+        )
+        self.assertFalse(result["detection_context"]["fps_was_defaulted"])
 
     def test_ffc_bfc_returns_empty_for_too_few_frames(self):
         result = detect_ffc_bfc(
@@ -236,6 +282,25 @@ class EventDetectionContractTest(unittest.TestCase):
         self.assertLessEqual(result["bfc"]["frame"], result["ffc"]["frame"])
         self.assertLessEqual(result["ffc"]["frame"], release_events["release"]["frame"])
         self.assertGreater(result["ffc"]["confidence"], 0.0)
+
+    def test_ffc_bfc_reports_defaulted_fps_in_detection_context(self):
+        pose_frames = [_frame(i) for i in range(40)]
+        release_events = detect_release_uah(
+            pose_frames=pose_frames,
+            hand="R",
+            fps=60.0,
+        )
+
+        result = detect_ffc_bfc(
+            pose_frames=pose_frames,
+            hand="R",
+            release_frame=release_events["release"]["frame"],
+            delivery_window=tuple(release_events["delivery_window"]),
+            fps=None,
+        )
+
+        self.assertTrue(result["detection_context"]["fps_was_defaulted"])
+        self.assertIn("window_was_clipped", result["detection_context"])
 
     def test_single_foot_fallback_prefers_latest_plausible_frame(self):
         pose_frames = [_frame(i) for i in range(40)]

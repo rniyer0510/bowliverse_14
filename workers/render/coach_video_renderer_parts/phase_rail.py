@@ -116,8 +116,9 @@ def _draw_phase_overlay(
     start: int,
     stop: int,
     events: Optional[Dict[str, Any]],
+    fps: float = 30.0,
 ) -> None:
-    cp1, cp2, cp3 = _phase_cut_points(start=start, stop=stop, events=events)
+    cp1, cp2, cp3 = _phase_cut_points(start=start, stop=stop, events=events, fps=fps)
     phase_idx = _phase_index_for_frame(frame_idx, cp1=cp1, cp2=cp2, cp3=cp3)
     progress = 0.0 if stop <= start else float(frame_idx - start) / float(max(1, stop - start - 1))
     _draw_phase_rail(frame, phase_idx=phase_idx, progress=progress)

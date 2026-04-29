@@ -3,6 +3,7 @@ import unittest
 import numpy as np
 
 from app.workers.events.ffc_bfc import (
+    _ffc_search_start,
     _pick_bfc_backward_from_ffc,
     _pick_ffc_backward_from_release,
     _sanitize_bfc_frame,
@@ -10,6 +11,18 @@ from app.workers.events.ffc_bfc import (
 
 
 class FfcBfcRegressionTest(unittest.TestCase):
+    def test_ffc_search_start_keeps_pre_pelvis_lead_band_when_pelvis_on_is_late(self):
+        start = _ffc_search_start(
+            win_start=141,
+            win_end=166,
+            pelvis_on=159,
+            fps=29.89,
+            hold=3,
+        )
+
+        self.assertLess(start, 159)
+        self.assertEqual(start, 146)
+
     def test_ffc_search_can_reach_valid_contact_before_late_pelvis_on(self):
         n = 24
         hold = 3
@@ -136,6 +149,96 @@ class FfcBfcRegressionTest(unittest.TestCase):
         self.assertEqual(method, "simple_grounded_bfc")
         self.assertEqual(frame, 10)
         self.assertEqual(confidence, 0.0)
+
+    def test_bfc_prefers_recent_support_edge_when_close_to_support_block(self):
+        n = 40
+        hold = 3
+        win_start = 0
+        win_end = 30
+        ffc = 18
+        dt = 1.0 / 30.0
+
+        y_back_ank = np.array(
+            [
+                0.72,
+                0.72,
+                0.72,
+                0.72,
+                0.72,
+                0.72,
+                0.72,
+                0.72,
+                0.72,
+                0.72,
+                0.72,
+                0.72,
+                0.74,
+                0.82,
+                0.91,
+                0.92,
+                0.92,
+                0.91,
+                0.82,
+                0.78,
+            ]
+            + [0.78] * (n - 20),
+            dtype=float,
+        )
+        y_back_toe = y_back_ank + 0.03
+        y_front_ank = np.array(
+            [
+                0.72,
+                0.72,
+                0.72,
+                0.72,
+                0.72,
+                0.72,
+                0.72,
+                0.72,
+                0.72,
+                0.72,
+                0.72,
+                0.72,
+                0.73,
+                0.75,
+                0.78,
+                0.83,
+                0.89,
+                0.92,
+                0.93,
+                0.93,
+            ]
+            + [0.93] * (n - 20),
+            dtype=float,
+        )
+        y_front_toe = y_front_ank + 0.03
+        pelvis_jerk = np.zeros(n, dtype=float)
+        pelvis_jerk[14] = 2.0
+        pelvis_jerk[15] = 1.8
+
+        frame, confidence, method = _pick_bfc_backward_from_ffc(
+            ffc=ffc,
+            front_side="left",
+            hold=hold,
+            win_start=win_start,
+            win_end=win_end,
+            dt=dt,
+            fps=30.0,
+            y_LA=y_front_ank,
+            y_RA=y_back_ank,
+            y_LFI=y_front_toe,
+            y_RFI=y_back_toe,
+            vis_LA=np.full(n, 0.99, dtype=float),
+            vis_RA=np.full(n, 0.99, dtype=float),
+            vis_LFI=np.full(n, 0.99, dtype=float),
+            vis_RFI=np.full(n, 0.99, dtype=float),
+            approach_speed=np.linspace(0.2, 1.0, n, dtype=float),
+            pelvis_jerk=pelvis_jerk,
+        )
+
+        self.assertEqual(method, "back_foot_support_edge")
+        self.assertEqual(frame, 13)
+        self.assertGreater(confidence, 0.0)
 
     def test_bfc_correction_rejects_frame_when_front_foot_is_already_grounded(self):
         n = 30
@@ -355,9 +458,9 @@ class FfcBfcRegressionTest(unittest.TestCase):
             approach_speed=np.linspace(0.2, 1.0, n, dtype=float),
         )
 
-        self.assertEqual(method, "simple_grounded_bfc")
+        self.assertEqual(method, "back_foot_support_edge")
         self.assertEqual(frame, 9)
-        self.assertEqual(confidence, 0.0)
+        self.assertGreater(confidence, 0.0)
 
 
 if __name__ == "__main__":
