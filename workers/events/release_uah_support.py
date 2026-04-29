@@ -251,7 +251,7 @@ def build_release_candidates(
         ("nb_elbow_peak", signals["nb_elbow_y"], "peak_min"),
         ("shoulder_ang_vel_peak", signals["shoulder_ang_vel"], "peak_max"),
         ("wrist_fwd_peak", signals["wrist_fwd_vel"], "peak_max"),
-        ("pelvis_jerk_quiet", signals["pelvis_jerk"], "peak_min"),
+        ("pelvis_jerk_peak", signals["pelvis_jerk"], "peak_max"),
     ):
         frame = _local_peak(signal, start, end, mode=mode)
         if frame is None:
@@ -284,7 +284,7 @@ def release_consensus(
         ("nb_elbow_y", signals["nb_elbow_y"], signals["nb_elbow_vis_raw"], signals["nb_elbow_vis_weight"], 0.40, "peak_min"),
         ("shoulder_ang_vel", signals["shoulder_ang_vel"], signals["shoulder_vis_raw"], signals["shoulder_vis_weight"], 0.25, "peak_max"),
         ("wrist_fwd_vel", signals["wrist_fwd_vel"], signals["wrist_vis_raw"], signals["wrist_vis_weight"], 0.20, "peak_max"),
-        ("pelvis_jerk", signals["pelvis_jerk"], signals["pelvis_vis_raw"], signals["pelvis_vis_weight"], 0.10, "peak_min"),
+        ("pelvis_jerk", signals["pelvis_jerk"], signals["pelvis_vis_raw"], signals["pelvis_vis_weight"], 0.10, "peak_max"),
     )
 
     for name, signal, raw_vis, weights, base_weight, mode in locators:

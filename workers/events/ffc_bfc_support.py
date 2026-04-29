@@ -67,6 +67,39 @@ def _finite_percentile(x: np.ndarray, p: float, default: float = 0.0) -> float:
     return float(np.percentile(x, p))
 
 
+def _finite_min(x: np.ndarray, default: float = 0.0) -> float:
+    x = np.asarray(x, dtype=float)
+    x = x[np.isfinite(x)]
+    if x.size == 0:
+        return float(default)
+    return float(np.min(x))
+
+
+def _finite_max(x: np.ndarray, default: float = 0.0) -> float:
+    x = np.asarray(x, dtype=float)
+    x = x[np.isfinite(x)]
+    if x.size == 0:
+        return float(default)
+    return float(np.max(x))
+
+
+def _support_position(value: float, history: np.ndarray) -> float:
+    """
+    Map the current foot height into the local airborne->grounded span.
+
+    0.0 means the foot still looks airborne in this neighborhood.
+    1.0 means the foot is at the deepest grounded/support level seen nearby.
+
+    We intentionally avoid percentile-based settled thresholds here because
+    those drift toward the later planted frames and miss the actual contact
+    edge on clean deliveries.
+    """
+    lo = _finite_min(history, default=value)
+    hi = _finite_max(history, default=value)
+    span = max(hi - lo, 1e-6)
+    return max(0.0, min(1.0, (float(value) - lo) / span))
+
+
 def _vis(lm: list, idx: int) -> float:
     try:
         if idx >= len(lm) or lm[idx] is None:
@@ -135,12 +168,16 @@ def _foot_ground_score(
     if not np.any(np.isfinite(hist_a)) or not np.any(np.isfinite(hist_t)):
         return 0
 
-    low_a = robust_percentile(hist_a, 85)
-    low_t = robust_percentile(hist_t, 85)
-    near_low = (np.median(a_seg) >= low_a - 0.01) and (np.median(t_seg) >= low_t - 0.01)
+    med_a = float(np.median(a_seg))
+    med_t = float(np.median(t_seg))
+    support_a = _support_position(med_a, hist_a)
+    support_t = _support_position(med_t, hist_t)
+    support_ready = support_a >= 0.72 and support_t >= 0.72
+    if not support_ready:
+        return 0
 
-    rng_a = max(robust_percentile(hist_a, 90) - robust_percentile(hist_a, 10), 1e-6)
-    rng_t = max(robust_percentile(hist_t, 90) - robust_percentile(hist_t, 10), 1e-6)
+    rng_a = max(_finite_max(hist_a, med_a) - _finite_min(hist_a, med_a), 1e-6)
+    rng_t = max(_finite_max(hist_t, med_t) - _finite_min(hist_t, med_t), 1e-6)
 
     dy_a = np.diff(a_seg) / max(dt, 1e-6)
     dy_t = np.diff(t_seg) / max(dt, 1e-6)
@@ -150,8 +187,7 @@ def _foot_ground_score(
 
     jit_ok = (_robust_mad(a_seg) <= 0.15 * rng_a) and (_robust_mad(t_seg) <= 0.15 * rng_t)
 
-    score = 0
-    score += 1 if near_low else 0
+    score = 1
     score += 1 if v_ok else 0
     score += 1 if jit_ok else 0
     return score
@@ -219,12 +255,9 @@ def _ffc_rank_score(
     stability: float,
 ) -> float:
     chain_anchor = min(max(pelvis_on, search_start), win_end)
-    pre_span = max(1, chain_anchor - search_start)
-    post_span = max(1, win_end - chain_anchor)
-    if frame < chain_anchor:
-        anchor_bias = -0.45 * ((chain_anchor - frame) / float(pre_span))
-    else:
-        anchor_bias = 0.10 * ((frame - chain_anchor) / float(post_span))
+    anchor_span = max(1, max(chain_anchor - search_start, win_end - chain_anchor))
+    proximity = max(0.0, 1.0 - (abs(frame - chain_anchor) / float(anchor_span)))
+    anchor_bias = 0.08 * proximity
     return (
         (0.40 * float(front_score))
         + (0.10 * float(back_support))
@@ -261,6 +294,35 @@ def _ground_window_strength(
             dt,
         )
     return strength
+
+
+def _has_recent_support_transition(
+    y_ank: np.ndarray,
+    y_toe: np.ndarray,
+    *,
+    frame: int,
+    hold: int,
+    win_start: int,
+    win_end: int,
+    dt: float,
+    lookback: int,
+) -> bool:
+    """
+    True when the current support frame is locally preceded by an ungrounded
+    state. This keeps a long-planted foot from masquerading as the contact
+    frame just because it still looks stably grounded near release.
+    """
+    if frame <= win_start:
+        return False
+    start = max(win_start, frame - max(1, lookback))
+    saw_support = False
+    for idx in range(frame, start - 1, -1):
+        score = _foot_ground_score(y_ank, y_toe, idx, hold, win_start, win_end, dt)
+        if score >= 2:
+            saw_support = True
+            continue
+        return saw_support
+    return False
 
 
 def _speed_scale(
@@ -309,7 +371,10 @@ def _contact_edge_strength(
     if frame + 1 + hold < len(y_ank):
         next_score = _foot_ground_score(y_ank, y_toe, frame + 1, hold, win_start, win_end, dt)
 
-    edge_ground = 1.0 if prev_score < 2 else max(0.0, min(1.0, (current_score - prev_score) / 3.0))
+    if frame - 1 < win_start:
+        edge_ground = 0.0
+    else:
+        edge_ground = 1.0 if prev_score < 2 else max(0.0, min(1.0, (current_score - prev_score) / 3.0))
 
     pre_start = max(win_start, frame - hold)
     pre_ank = y_ank[pre_start : frame + 1]
@@ -358,61 +423,32 @@ def _refine_to_established_support(
     pelvis_jerk: Optional[np.ndarray] = None,
     max_forward: Optional[int] = None,
 ) -> int:
-    """
-    Convert an initial contact-edge frame into the first clearly established
-    support frame in the same grounded block.
-
-    This keeps the detector aligned with a coach-visible landing frame instead
-    of a just-barely-touching edge when the foot is still settling down.
-    """
     grounded = _foot_ground_score(y_ank, y_toe, frame, hold, win_start, win_end, dt)
     if grounded < 2:
         return int(frame)
 
-    start_edge = _contact_edge_strength(
-        y_ank,
-        y_toe,
-        frame=frame,
-        hold=hold,
-        win_start=win_start,
-        win_end=win_end,
-        dt=dt,
-        pelvis_jerk=pelvis_jerk,
-    )
-    if start_edge < 0.45:
-        return int(frame)
-
-    radius = max(1, hold // 2)
-    max_step = max(1, int(max_forward or hold))
-    limit = min(int(win_end), int(frame) + max_step)
-    for idx in range(int(frame) + 1, limit + 1):
+    # Walk backward through the release-side support block and return the
+    # first supported frame in that local block. This matches the step-wise
+    # ActionLab process: start near release, then walk backward until the foot
+    # is no longer supported, instead of drifting forward to a later settled
+    # frame.
+    block_start = int(frame)
+    gap_budget = 1
+    gap_count = 0
+    idx = int(frame) - 1
+    while idx >= int(win_start):
         score = _foot_ground_score(y_ank, y_toe, idx, hold, win_start, win_end, dt)
-        if score < 2:
+        if score >= 2:
+            block_start = idx
+            gap_count = 0
+            idx -= 1
+            continue
+        gap_count += 1
+        if gap_count > gap_budget:
             break
-        edge = _contact_edge_strength(
-            y_ank,
-            y_toe,
-            frame=idx,
-            hold=hold,
-            win_start=win_start,
-            win_end=win_end,
-            dt=dt,
-            pelvis_jerk=pelvis_jerk,
-        )
-        stability = _ground_window_strength(
-            y_ank,
-            y_toe,
-            frame=idx,
-            hold=hold,
-            win_start=win_start,
-            win_end=win_end,
-            dt=dt,
-            radius=radius,
-        )
-        if edge <= max(0.22, start_edge * 0.55) and stability >= 3.0:
-            return int(idx)
+        idx -= 1
 
-    return int(frame)
+    return int(block_start)
 
 
 def _pick_local_contact_frame(
@@ -454,6 +490,32 @@ def _pick_local_contact_frame(
     return local[0]
 
 
+def _latest_contact_block(
+    ranked: List[Tuple[float, int, str, Dict]],
+    *,
+    gap_allowance: int,
+) -> List[Tuple[float, int, str, Dict]]:
+    """
+    Split candidate frames into local contact neighborhoods and keep the latest
+    one nearest release. This prevents an earlier unrelated contact block from
+    outranking the true release-side landing block on pure edge score alone.
+    """
+    ranked = sorted(list(ranked or []), key=lambda item: item[1])
+    if not ranked:
+        return []
+
+    blocks: List[List[Tuple[float, int, str, Dict]]] = []
+    current: List[Tuple[float, int, str, Dict]] = [ranked[0]]
+    for item in ranked[1:]:
+        if (item[1] - current[-1][1]) <= max(1, gap_allowance):
+            current.append(item)
+        else:
+            blocks.append(current)
+            current = [item]
+    blocks.append(current)
+    return blocks[-1]
+
+
 def pick_ffc_backward_from_release(
     *,
     search_start: int,
@@ -476,6 +538,7 @@ def pick_ffc_backward_from_release(
     ranked: List[Tuple[float, int, str, Dict]] = []
     radius = max(1, hold // 2)
     edge_only_threshold = 0.55
+    transition_lookback = max(hold * 3, 6)
 
     for i in range(win_end, search_start - 1, -1):
         left_score = _foot_ground_score(y_LA, y_LFI, i, hold, win_start, win_end, dt)
@@ -510,8 +573,37 @@ def pick_ffc_backward_from_release(
             pelvis_jerk=pelvis_jerk,
         )
 
-        left_front_ok = left_grounded and (right_grounded or right_recent or left_edge >= edge_only_threshold)
-        right_front_ok = right_grounded and (left_grounded or left_recent or right_edge >= edge_only_threshold)
+        left_transition = _has_recent_support_transition(
+            y_LA,
+            y_LFI,
+            frame=i,
+            hold=hold,
+            win_start=win_start,
+            win_end=win_end,
+            dt=dt,
+            lookback=transition_lookback,
+        )
+        right_transition = _has_recent_support_transition(
+            y_RA,
+            y_RFI,
+            frame=i,
+            hold=hold,
+            win_start=win_start,
+            win_end=win_end,
+            dt=dt,
+            lookback=transition_lookback,
+        )
+
+        left_front_ok = (
+            left_grounded
+            and (right_grounded or right_recent or left_edge >= edge_only_threshold)
+            and (left_edge >= 0.25 or left_transition)
+        )
+        right_front_ok = (
+            right_grounded
+            and (left_grounded or left_recent or right_edge >= edge_only_threshold)
+            and (right_edge >= 0.25 or right_transition)
+        )
 
         if left_front_ok:
             left_stability = _ground_window_strength(
@@ -604,13 +696,14 @@ def pick_ffc_backward_from_release(
     if ranked:
         ranked.sort(key=lambda item: (item[0], item[1]), reverse=True)
         best_score = ranked[0][0]
-        close_ranked = [item for item in ranked if (best_score - item[0]) <= 0.18]
+        latest_gap = max(hold, 2)
         if preferred_front_side in {"left", "right"}:
             preferred = [
                 item for item in ranked
                 if item[2] == preferred_front_side and (best_score - item[0]) <= 0.65
             ]
             if preferred:
+                preferred = _latest_contact_block(preferred, gap_allowance=latest_gap)
                 max_edge = max(
                     float((item[3] or {}).get("contact_edge_strength") or 0.0)
                     for item in preferred
@@ -653,7 +746,7 @@ def pick_ffc_backward_from_release(
                     float(candidate.get("confidence") or 0.62),
                 )
         _, frame, front_side, candidate = _pick_local_contact_frame(
-            close_ranked,
+            _latest_contact_block(ranked, gap_allowance=latest_gap),
             fps=fps,
             hold=hold,
         )
@@ -778,7 +871,7 @@ def pick_bfc_backward_from_ffc(
                 dt=dt,
                 pelvis_jerk=pelvis_jerk,
             )
-            if edge_strength < 0.30:
+            if edge_strength < 0.25:
                 continue
             support_after = 0.0
             valid_after = 0

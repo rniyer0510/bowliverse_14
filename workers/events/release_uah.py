@@ -14,7 +14,6 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 import os
 
-import cv2
 import numpy as np
 
 from app.common.logger import get_logger
@@ -63,6 +62,11 @@ def _nb_elbow_peak_is_plausible(
 
 def _dump(video_path: Optional[str], idx: Optional[int], tag: str) -> None:
     if not DEBUG or not video_path or idx is None or idx < 0:
+        return
+    try:
+        import cv2  # local debug dependency only
+    except Exception:
+        logger.warning("[Release/UAH] Debug frame dump skipped because cv2 is unavailable")
         return
     os.makedirs(DEBUG_DIR, exist_ok=True)
     cap = cv2.VideoCapture(video_path)
