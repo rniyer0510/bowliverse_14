@@ -423,27 +423,35 @@ def write_analysis(result: dict, db: Optional[Session] = None, **kwargs) -> str:
 
         if _analysis_explanation_trace_available(db):
             explanation_trace = _json_safe(_deterministic_trace(result))
-            existing_trace = db.get(AnalysisExplanationTrace, run_id)
-            if existing_trace is not None:
-                raise ValueError(f"Explanation trace already exists for run_id={run_id}")
-            db.add(
-                AnalysisExplanationTrace(
-                    run_id=run_id,
-                    knowledge_pack_id=explanation_trace["knowledge_pack_id"],
-                    knowledge_pack_version=explanation_trace["knowledge_pack_version"],
-                    diagnosis_status=explanation_trace["diagnosis_status"],
-                    primary_mechanism_id=explanation_trace["primary_mechanism_id"],
-                    matched_symptom_ids=explanation_trace["matched_symptom_ids"],
-                    candidate_mechanisms=explanation_trace["candidate_mechanisms"],
-                    supporting_evidence=explanation_trace["supporting_evidence"],
-                    contradictions_triggered=explanation_trace["contradictions_triggered"],
-                    selected_trajectory_ids=explanation_trace["selected_trajectory_ids"],
-                    selected_prescription_ids=explanation_trace["selected_prescription_ids"],
-                    selected_render_story_ids=explanation_trace["selected_render_story_ids"],
-                    selected_history_binding_ids=explanation_trace["selected_history_binding_ids"],
-                    explanation_trace_json=explanation_trace["explanation_trace_json"],
+            try:
+                with db.begin_nested():
+                    existing_trace = db.get(AnalysisExplanationTrace, run_id)
+                    if existing_trace is not None:
+                        raise ValueError(f"Explanation trace already exists for run_id={run_id}")
+                    db.add(
+                        AnalysisExplanationTrace(
+                            run_id=run_id,
+                            knowledge_pack_id=explanation_trace["knowledge_pack_id"],
+                            knowledge_pack_version=explanation_trace["knowledge_pack_version"],
+                            diagnosis_status=explanation_trace["diagnosis_status"],
+                            primary_mechanism_id=explanation_trace["primary_mechanism_id"],
+                            matched_symptom_ids=explanation_trace["matched_symptom_ids"],
+                            candidate_mechanisms=explanation_trace["candidate_mechanisms"],
+                            supporting_evidence=explanation_trace["supporting_evidence"],
+                            contradictions_triggered=explanation_trace["contradictions_triggered"],
+                            selected_trajectory_ids=explanation_trace["selected_trajectory_ids"],
+                            selected_prescription_ids=explanation_trace["selected_prescription_ids"],
+                            selected_render_story_ids=explanation_trace["selected_render_story_ids"],
+                            selected_history_binding_ids=explanation_trace["selected_history_binding_ids"],
+                            explanation_trace_json=explanation_trace["explanation_trace_json"],
+                        )
+                    )
+                    db.flush()
+            except Exception as exc:
+                logger.warning(
+                    "[persistence] skipping explanation trace persistence because trace write failed: %s",
+                    exc,
                 )
-            )
         else:
             logger.warning(
                 "[persistence] skipping explanation trace persistence because table %s is unavailable",

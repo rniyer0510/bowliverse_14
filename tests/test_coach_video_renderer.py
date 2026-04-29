@@ -999,6 +999,46 @@ class CoachVideoRendererTest(unittest.TestCase):
             self.assertEqual(result["slow_motion_factor"], 5.0)
             self.assertEqual(result["frames_rendered"], 47)
 
+    def test_render_skeleton_video_adapts_pause_and_summary_holds_for_small_high_fps_clip(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            video_path = os.path.join(tmpdir, "input.mp4")
+            output_path = os.path.join(tmpdir, "output.mp4")
+
+            writer = cv2.VideoWriter(
+                video_path,
+                cv2.VideoWriter_fourcc(*"mp4v"),
+                60.0,
+                (160, 120),
+            )
+            self.assertTrue(writer.isOpened())
+            for _ in range(8):
+                writer.write(np.zeros((120, 160, 3), dtype=np.uint8))
+            writer.release()
+
+            pose_frames = [_pose_frame(i, shift=0.002 * i) for i in range(8)]
+            with mock.patch.object(
+                coach_video_renderer.render_video,
+                "_subject_height_ratio",
+                return_value=0.35,
+            ):
+                result = render_skeleton_video(
+                    video_path=video_path,
+                    pose_frames=pose_frames,
+                    events={
+                        "bfc": {"frame": 1},
+                        "ffc": {"frame": 3},
+                        "release": {"frame": 6},
+                    },
+                    output_path=output_path,
+                    pause_seconds=5.0,
+                    end_summary_seconds=2.5,
+                )
+
+            self.assertTrue(result["available"])
+            self.assertLess(result["pause_seconds"], 5.0)
+            self.assertLess(result["end_summary_seconds"], 2.5)
+            self.assertEqual(result["subject_height_ratio"], 0.35)
+
     def test_render_skeleton_video_uses_clean_raw_frame_for_end_summary(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             video_path = os.path.join(tmpdir, "input.mp4")

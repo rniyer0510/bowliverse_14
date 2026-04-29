@@ -2,7 +2,7 @@ from __future__ import annotations
 from .shared import *
 from .analytics import _risk_lookup, _safe_int
 from .render_output import _make_output_path, _intermediate_render_path, _finalize_render_video
-from .tracks import _build_smoothed_tracks
+from .tracks import _build_smoothed_tracks, _track_point
 from .drawing_base import _draw_skeleton, _draw_skeleton_legend
 from .timeline_events import _should_draw_skeleton_frame, _render_timeline_events
 from .render_frame_resolver import attach_render_quality_metadata
@@ -11,6 +11,67 @@ from .pause_logic import _pause_anchor_frames
 from .render_pause_payloads import _prepare_pause_context
 from .render_pause_sequence import _render_pause_sequence
 from .summary_legacy import _draw_end_summary
+
+
+def _subject_height_ratio(
+    *,
+    tracks: Dict[int, Dict[str, Any]],
+    start: int,
+    stop: int,
+    frame_height: int,
+) -> float:
+    if frame_height <= 0 or not tracks or stop <= start:
+        return 0.0
+
+    sampled_ratios: List[float] = []
+    step = max(1, int(round((stop - start) / 18.0)))
+    sample_joints = (0, 11, 12, 23, 24, 27, 28)
+
+    for frame_idx in range(start, stop, step):
+        ys: List[int] = []
+        for joint_idx in sample_joints:
+            point = _track_point(tracks, joint_idx, frame_idx)
+            if point is None:
+                continue
+            ys.append(int(point[1]))
+        if len(ys) < 4:
+            continue
+        sampled_ratios.append(max(0.0, min(1.0, (max(ys) - min(ys)) / float(frame_height))))
+
+    if not sampled_ratios:
+        return 0.0
+    return float(np.median(sampled_ratios))
+
+
+def _adaptive_hold_seconds(
+    *,
+    base_seconds: float,
+    fps: float,
+    subject_height_ratio: float,
+    purpose: str,
+) -> float:
+    seconds = max(0.0, float(base_seconds or 0.0))
+    if seconds <= 0.0:
+        return 0.0
+
+    scale = 1.0
+    if fps >= 50.0:
+        scale *= 0.84
+    elif fps >= 35.0:
+        scale *= 0.92
+
+    if subject_height_ratio > 0.0 and subject_height_ratio < 0.42:
+        scale *= 0.78
+    elif subject_height_ratio < 0.56:
+        scale *= 0.88
+
+    if purpose == "pause":
+        minimum = 2.6
+        return round(min(seconds, max(minimum, seconds * scale)), 2)
+
+    minimum = 1.2
+    scale *= 0.82
+    return round(min(seconds, max(minimum, seconds * scale)), 2)
 
 
 def render_skeleton_video(*, video_path: str, pose_frames: List[Dict[str, Any]], events: Optional[Dict[str, Any]] = None, hand: Optional[str] = None, action: Optional[Dict[str, Any]] = None, elbow: Optional[Dict[str, Any]] = None, risks: Optional[List[Dict[str, Any]]] = None, estimated_release_speed: Optional[Dict[str, Any]] = None, kinetic_chain: Optional[Dict[str, Any]] = None, report_story: Optional[Dict[str, Any]] = None, root_cause: Optional[Dict[str, Any]] = None, output_path: Optional[str] = None, start_frame: int = 0, end_frame: Optional[int] = None, pause_seconds: float = 5.0, slow_motion_factor: float = 5.0, end_summary_seconds: float = 2.5) -> Dict[str, Any]:
@@ -41,7 +102,25 @@ def render_skeleton_video(*, video_path: str, pose_frames: List[Dict[str, Any]],
         return {"available": False, "reason": "writer_open_failed"}
     try:
         tracks = _build_smoothed_tracks(pose_frames, width=width, height=height, fps=fps)
-        pause_frames = max(0, int(round(float(pause_seconds or 0.0) * fps)))
+        subject_height_ratio = _subject_height_ratio(
+            tracks=tracks,
+            start=start,
+            stop=stop,
+            frame_height=height,
+        )
+        effective_pause_seconds = _adaptive_hold_seconds(
+            base_seconds=float(pause_seconds or 0.0),
+            fps=fps,
+            subject_height_ratio=subject_height_ratio,
+            purpose="pause",
+        )
+        effective_summary_seconds = _adaptive_hold_seconds(
+            base_seconds=float(end_summary_seconds or 0.0),
+            fps=fps,
+            subject_height_ratio=subject_height_ratio,
+            purpose="summary",
+        )
+        pause_frames = max(0, int(round(effective_pause_seconds * fps)))
         render_events = _render_timeline_events(start=start, stop=stop, events=events, fps=fps)
         render_events = attach_render_quality_metadata(events=render_events, tracks=tracks)
         pause_anchors = _pause_anchor_frames(start=start, stop=stop, events=render_events, fps=fps)
@@ -78,7 +157,7 @@ def render_skeleton_video(*, video_path: str, pose_frames: List[Dict[str, Any]],
                 pause_context = _prepare_pause_context(frame=frame, pose_frames=pose_frames, tracks=tracks, frame_idx=frame_idx, pause_key=pause_key, hand=hand, risk_by_id=risk_by_id, render_events=render_events, report_story=report_story, root_cause=root_cause, kinetic_chain=kinetic_chain)
                 frames_rendered += _render_pause_sequence(writer=writer, frame=frame, tracks=tracks, frame_idx=frame_idx, hand=hand, pause_key=pause_key, pause_frames=pause_frames, fps=fps, risk_by_id=risk_by_id, paused_frame=pause_context["paused_frame"], hotspot_payload=pause_context["hotspot_payload"], leakage_payload=pause_context["leakage_payload"], proof_step=pause_context["proof_step"], start=start, stop=stop)
             frame_idx += 1
-        summary_hold_frames = max(0, int(round(float(end_summary_seconds or 0.0) * fps)))
+        summary_hold_frames = max(0, int(round(effective_summary_seconds * fps)))
         if final_summary_frame is not None and summary_hold_frames > 0:
             summary_frame = final_summary_frame.copy()
             _draw_end_summary(summary_frame, risk_by_id=risk_by_id, events=render_events, action=action, speed=estimated_release_speed, elbow=elbow, report_story=report_story, root_cause=root_cause)
@@ -99,4 +178,4 @@ def render_skeleton_video(*, video_path: str, pose_frames: List[Dict[str, Any]],
         return {"available": False, "reason": "render_failed", "detail": str(exc)}
     final_path, encoding = _finalize_render_video(intermediate_path, out_path)
     logger.info("[coach_video_renderer] Rendered skeleton video path=%s frames=%s fps=%.2f", final_path, frames_rendered, fps)
-    return {"available": True, "path": final_path, "fps": round(fps, 3), "frames_rendered": frames_rendered, "width": width, "height": height, "start_frame": start, "end_frame": max(start, stop - 1), "style": "skeleton_phase_v1", "pause_seconds": round(float(pause_seconds or 0.0), 2), "slow_motion_factor": round(float(slow_motion_factor or 1.0), 2), "end_summary_seconds": round(float(end_summary_seconds or 0.0), 2), "encoding": encoding, "render_events": render_events, "render_quality": (render_events or {}).get("render_quality") or {"overall": 0.0, "event_count": 0}}
+    return {"available": True, "path": final_path, "fps": round(fps, 3), "frames_rendered": frames_rendered, "width": width, "height": height, "start_frame": start, "end_frame": max(start, stop - 1), "style": "skeleton_phase_v1", "pause_seconds": round(float(effective_pause_seconds or 0.0), 2), "slow_motion_factor": round(float(slow_motion_factor or 1.0), 2), "end_summary_seconds": round(float(effective_summary_seconds or 0.0), 2), "encoding": encoding, "render_events": render_events, "render_quality": (render_events or {}).get("render_quality") or {"overall": 0.0, "event_count": 0}, "subject_height_ratio": round(subject_height_ratio, 3)}
