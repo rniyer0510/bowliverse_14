@@ -24,6 +24,7 @@ class SpeedDisplayPolicyTest(unittest.TestCase):
                 "ffc": {"method": "ultimate_fallback", "confidence": 0.15},
                 "bfc": {"method": "ultimate_fallback", "confidence": 0.15},
             },
+            playback_mode={"mode": "real_time_or_high_fps"},
         )
         self.assertTrue(result["available"])
         self.assertEqual(result["display_policy"], "show_low_confidence")
@@ -38,6 +39,7 @@ class SpeedDisplayPolicyTest(unittest.TestCase):
                 "ffc": {"method": "ultimate_fallback", "confidence": 0.15},
                 "bfc": {"method": "ultimate_fallback", "confidence": 0.15},
             },
+            playback_mode={"mode": "real_time_or_high_fps"},
         )
         self.assertFalse(result["available"])
         self.assertEqual(result["display_policy"], "suppress")
@@ -52,10 +54,26 @@ class SpeedDisplayPolicyTest(unittest.TestCase):
                 "ffc": {"method": "ultimate_fallback", "confidence": 0.15},
                 "bfc": {"method": "ultimate_fallback", "confidence": 0.15},
             },
+            playback_mode={"mode": "real_time_or_high_fps"},
         )
         self.assertFalse(result["available"])
         self.assertEqual(result["display_policy"], "suppress")
         self.assertEqual(result["reason"], "low_event_chain_quality")
+
+    def test_likely_slow_motion_suppresses_speed(self):
+        result = _gate_speed_estimate(
+            estimated_release_speed=self._base_speed(),
+            event_chain={"ordered": True, "quality": 0.82},
+            events={
+                "release": {"confidence": 0.90},
+                "ffc": {"method": "release_backward_chain_grounding", "confidence": 0.90},
+                "bfc": {"method": "back_foot_support_edge", "confidence": 0.80},
+            },
+            playback_mode={"mode": "likely_slow_motion"},
+        )
+        self.assertFalse(result["available"])
+        self.assertEqual(result["display_policy"], "suppress")
+        self.assertEqual(result["reason"], "slow_motion_playback_detected")
 
 
 if __name__ == "__main__":

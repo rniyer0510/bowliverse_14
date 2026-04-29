@@ -352,6 +352,106 @@ class AnalyzePersistenceFallbackTests(unittest.TestCase):
             debug["hypotheses"]["L"]["behind_camera_non_bowling_arm_score"],
         )
 
+    def test_hand_resolution_keeps_preferred_hand_when_override_context_is_truncated(self):
+        from app.orchestrator import orchestrator
+
+        pose_frames = [{"frame": idx, "landmarks": []} for idx in range(209)]
+
+        def fake_release(*, hand, **_kwargs):
+            if hand == "R":
+                return {
+                    "release": {"frame": 0, "confidence": 0.40, "method": "multi_signal_consensus", "window": [0, 18]},
+                    "uah": {"frame": 0, "confidence": 0.20, "method": "kinetic_chain_crossover", "window": [0, 6]},
+                    "delivery_window": [0, 18],
+                }
+            return {
+                "release": {"frame": 16, "confidence": 0.56, "method": "multi_signal_consensus", "window": [0, 18]},
+                "uah": {"frame": 2, "confidence": 0.90, "method": "bowling_elbow_height_minimum", "window": [0, 6]},
+                "delivery_window": [0, 18],
+            }
+
+        def fake_feet(*, hand, **_kwargs):
+            if hand == "R":
+                return {
+                    "ffc": {"frame": 0, "confidence": 0.60, "method": "release_backward_chain_grounding", "window": [0, 14]},
+                    "bfc": {"frame": None, "confidence": 0.0, "method": "simple_grounded_bfc"},
+                }
+            return {
+                "ffc": {"frame": 13, "confidence": 0.70, "method": "release_backward_chain_grounding", "window": [0, 14]},
+                "bfc": {"frame": 12, "confidence": 0.60, "method": "back_foot_support_edge"},
+            }
+
+        def fake_cache(*, hand, **_kwargs):
+            raw = np.full(209, 0.99, dtype=float)
+            weight = np.full(209, 0.99, dtype=float)
+            nb_signal = np.full(209, 0.7, dtype=float)
+            shoulder_signal = np.zeros(209, dtype=float)
+            nb_signal[0] = 0.2
+            shoulder_signal[17] = 5.0
+            return {
+                "wrist_vis_raw": raw,
+                "wrist_vis_weight": weight,
+                "bowling_elbow_vis_raw": raw,
+                "bowling_elbow_vis_weight": weight,
+                "nb_elbow_vis_raw": raw,
+                "nb_elbow_vis_weight": weight,
+                "nb_elbow_y": nb_signal,
+                "shoulder_angular_velocity": shoulder_signal,
+            }
+
+        with patch.object(orchestrator, "detect_release_uah", side_effect=fake_release), patch.object(
+            orchestrator,
+            "detect_ffc_bfc",
+            side_effect=fake_feet,
+        ), patch.object(orchestrator, "build_signal_cache", side_effect=fake_cache):
+            resolved_hand, events, debug = orchestrator._resolve_analysis_hand(
+                pose_frames=pose_frames,
+                fps=60.0,
+                delivery_window={"release_hint": 12, "analysis_start": 0, "analysis_end": 18},
+                preferred_hand="R",
+            )
+
+        self.assertEqual(resolved_hand, "R")
+        self.assertEqual(debug["resolution_reason"], "preferred_hand_context_guard")
+        self.assertIn(
+            "pre_release_context_insufficient",
+            debug["hypotheses"]["L"]["uncertain_checks"],
+        )
+
+    def test_playback_mode_does_not_flag_long_high_fps_clip_as_slow_motion(self):
+        from app.orchestrator import orchestrator
+
+        playback = orchestrator._playback_mode_v1(
+            video={"fps": 59.94, "total_frames": 504}
+        )
+
+        self.assertEqual(playback["mode"], "real_time_or_high_fps")
+
+    def test_playback_mode_flags_long_30fps_clip_as_likely_slow_motion(self):
+        from app.orchestrator import orchestrator
+
+        playback = orchestrator._playback_mode_v1(
+            video={"fps": 30.0, "total_frames": 427}
+        )
+
+        self.assertEqual(playback["mode"], "likely_slow_motion")
+
+    def test_walkthrough_render_window_widens_for_likely_slow_motion(self):
+        from app.orchestrator import orchestrator
+
+        start, end = orchestrator._walkthrough_render_window(
+            events={
+                "bfc": {"frame": 413},
+                "ffc": {"frame": 415},
+                "release": {"frame": 423},
+            },
+            total_frames=427,
+            playback_mode={"mode": "likely_slow_motion"},
+        )
+
+        self.assertEqual(start, 317)
+        self.assertEqual(end, 427)
+
     def test_persist_analysis_result_returns_warning_after_retries_fail(self):
         from app.orchestrator import orchestrator
 

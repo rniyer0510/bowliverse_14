@@ -74,7 +74,7 @@ def _adaptive_hold_seconds(
     return round(min(seconds, max(minimum, seconds * scale)), 2)
 
 
-def render_skeleton_video(*, video_path: str, pose_frames: List[Dict[str, Any]], events: Optional[Dict[str, Any]] = None, hand: Optional[str] = None, action: Optional[Dict[str, Any]] = None, elbow: Optional[Dict[str, Any]] = None, risks: Optional[List[Dict[str, Any]]] = None, estimated_release_speed: Optional[Dict[str, Any]] = None, kinetic_chain: Optional[Dict[str, Any]] = None, report_story: Optional[Dict[str, Any]] = None, root_cause: Optional[Dict[str, Any]] = None, output_path: Optional[str] = None, start_frame: int = 0, end_frame: Optional[int] = None, pause_seconds: float = 5.0, slow_motion_factor: float = 5.0, end_summary_seconds: float = 2.5) -> Dict[str, Any]:
+def render_skeleton_video(*, video_path: str, pose_frames: List[Dict[str, Any]], events: Optional[Dict[str, Any]] = None, hand: Optional[str] = None, action: Optional[Dict[str, Any]] = None, elbow: Optional[Dict[str, Any]] = None, risks: Optional[List[Dict[str, Any]]] = None, estimated_release_speed: Optional[Dict[str, Any]] = None, kinetic_chain: Optional[Dict[str, Any]] = None, report_story: Optional[Dict[str, Any]] = None, root_cause: Optional[Dict[str, Any]] = None, output_path: Optional[str] = None, start_frame: int = 0, end_frame: Optional[int] = None, pause_seconds: float = 5.0, slow_motion_factor: float = 5.0, end_summary_seconds: float = 2.5, playback_mode: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     if not video_path or not os.path.exists(video_path):
         return {"available": False, "reason": "missing_video_path"}
     if not pose_frames:
@@ -122,7 +122,12 @@ def render_skeleton_video(*, video_path: str, pose_frames: List[Dict[str, Any]],
         )
         pause_frames = max(0, int(round(effective_pause_seconds * fps)))
         render_events = _render_timeline_events(start=start, stop=stop, events=events, fps=fps)
-        render_events = attach_render_quality_metadata(events=render_events, tracks=tracks)
+        render_events = attach_render_quality_metadata(
+            events=render_events,
+            tracks=tracks,
+            fps=fps,
+            playback_mode=playback_mode,
+        )
         pause_anchors = _pause_anchor_frames(start=start, stop=stop, events=render_events, fps=fps)
         ffc_frame = _safe_int(((render_events or {}).get("ffc") or {}).get("frame"))
         release_frame = _safe_int(((render_events or {}).get("release") or {}).get("frame"))
@@ -142,7 +147,15 @@ def render_skeleton_video(*, video_path: str, pose_frames: List[Dict[str, Any]],
             raw_frame = frame.copy()
             if _should_draw_skeleton_frame(pose_frames=pose_frames, tracks=tracks, frame_idx=frame_idx, events=render_events, fps=fps):
                 _draw_skeleton(frame, tracks, frame_idx)
-            _draw_phase_overlay(frame, frame_idx=frame_idx, start=start, stop=stop, events=render_events, fps=fps)
+            _draw_phase_overlay(
+                frame,
+                frame_idx=frame_idx,
+                start=start,
+                stop=stop,
+                events=render_events,
+                fps=fps,
+                playback_mode=playback_mode,
+            )
             if frame_idx < legend_end_frame:
                 _draw_skeleton_legend(frame, fps=fps, frame_idx=frame_idx, legend_end_frame=legend_end_frame)
             final_summary_frame = raw_frame

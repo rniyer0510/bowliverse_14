@@ -49,6 +49,9 @@ from app.workers.render.coach_video_renderer_parts.themed_story import (
 from app.workers.render.coach_video_renderer_parts.render_pause_sequence import (
     _write_stage_frames,
 )
+from app.workers.render.coach_video_renderer_parts.timeline_events import (
+    _phase_cut_points,
+)
 from app.workers.render.render_load_watch import (
     _load_hotspot_regions,
     _preferred_ffc_cue_risk_id,
@@ -197,6 +200,48 @@ class CoachVideoRendererTest(unittest.TestCase):
             )
             self.assertIn("detected_frame", result["render_events"]["ffc"])
 
+    def test_render_skeleton_video_rescues_low_quality_release_frame_for_slow_motion(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            video_path = os.path.join(tmpdir, "input.mp4")
+            output_path = os.path.join(tmpdir, "output.mp4")
+
+            writer = cv2.VideoWriter(
+                video_path,
+                cv2.VideoWriter_fourcc(*"mp4v"),
+                24.0,
+                (160, 120),
+            )
+            self.assertTrue(writer.isOpened())
+            for _ in range(6):
+                writer.write(np.zeros((120, 160, 3), dtype=np.uint8))
+            writer.release()
+
+            pose_frames = [_pose_frame(i, shift=0.0) for i in range(6)]
+            for joint_idx in (11, 12, 13, 14, 15, 16, 23, 24, 25, 26, 27, 28):
+                pose_frames[4]["landmarks"][joint_idx]["visibility"] = 0.0
+
+            result = render_skeleton_video(
+                video_path=video_path,
+                pose_frames=pose_frames,
+                events={
+                    "bfc": {"frame": 1, "confidence": 0.8, "method": "simple_grounded_bfc"},
+                    "ffc": {"frame": 2, "confidence": 0.8, "method": "release_backward_chain_grounding"},
+                    "release": {"frame": 4, "confidence": 0.8, "method": "multi_signal_consensus"},
+                },
+                output_path=output_path,
+                pause_seconds=0.0,
+                end_summary_seconds=0.0,
+                playback_mode={"mode": "likely_slow_motion"},
+            )
+
+            self.assertTrue(result["available"])
+            self.assertEqual(result["render_events"]["release"]["detected_frame"], 4)
+            self.assertLess(result["render_events"]["release"]["render_frame"], 4)
+            self.assertEqual(
+                result["render_events"]["release"]["render_method"],
+                "quality_resolved_neighbor",
+            )
+
     def test_skeleton_frame_gate_uses_track_quality_for_occluded_frame(self):
         pose_frames = [_pose_frame(i, shift=0.0) for i in range(5)]
         for joint_idx in (11, 12, 13, 14, 15, 16, 23, 24, 25, 26, 27, 28):
@@ -255,6 +300,24 @@ class CoachVideoRendererTest(unittest.TestCase):
         self.assertLess(hotspot_cue, normal_cue)
         self.assertGreater(hotspot_hold, 5)
         self.assertGreater(hotspot_cue + hotspot_hold, normal_cue)
+
+    def test_phase_cut_points_retime_slow_motion_tail_cluster(self):
+        cp1, cp2, cp3 = _phase_cut_points(
+            start=319,
+            stop=427,
+            events={
+                "bfc": {"frame": 415},
+                "ffc": {"frame": 420},
+                "uah": {"frame": 421},
+                "release": {"frame": 423},
+            },
+            fps=30.0,
+            playback_mode={"mode": "likely_slow_motion"},
+        )
+
+        self.assertLess(cp1, 415)
+        self.assertLess(cp2, 420)
+        self.assertLess(cp3, 421)
 
     def test_pause_sequence_plan_reserves_body_pay_after_break(self):
         sequence = _pause_sequence_plan(
@@ -1061,7 +1124,7 @@ class CoachVideoRendererTest(unittest.TestCase):
             def fake_draw_skeleton(frame, tracks, frame_idx):
                 frame[:, :] = (255, 0, 255)
 
-            def fake_draw_phase_overlay(frame, *, frame_idx, start, stop, events, fps=30.0):
+            def fake_draw_phase_overlay(frame, *, frame_idx, start, stop, events, fps=30.0, playback_mode=None):
                 frame[0:10, 0:10] = (0, 255, 255)
 
             def capture_summary(frame, **kwargs):

@@ -430,9 +430,22 @@ def _gate_speed_estimate(
     estimated_release_speed: dict,
     event_chain: dict,
     events: dict,
+    playback_mode: Optional[dict] = None,
 ) -> dict:
     if not estimated_release_speed.get("available"):
         return estimated_release_speed
+
+    playback_mode = playback_mode or {}
+    if str(playback_mode.get("mode") or "").strip().lower() == "likely_slow_motion":
+        return {
+            **estimated_release_speed,
+            "available": False,
+            "display_policy": "suppress",
+            "display": None,
+            "value_kph": None,
+            "confidence": 0.0,
+            "reason": "slow_motion_playback_detected",
+        }
 
     ordered = bool((event_chain or {}).get("ordered"))
     chain_quality = float((event_chain or {}).get("quality") or 0.0)
@@ -767,6 +780,22 @@ def _score_anchor_hypothesis(
         + (0.25 * nb_release_alignment)
         + (0.20 * nb_shoulder_alignment)
     )
+    uah_frame = _safe_frame(events.get("uah"))
+    context_origin = start
+    try:
+        context_origin = max(0, int((delivery_window or {}).get("analysis_start", start)))
+    except Exception:
+        context_origin = start
+    min_uah_runway = max(3.0, float(fps) * 0.10)
+    min_release_runway = max(6.0, float(fps) * 0.20)
+    uah_runway_score = 0.0
+    if uah_frame is not None:
+        uah_runway_score = _clamp01((float(uah_frame) - float(context_origin)) / min_uah_runway)
+    release_runway_score = 0.0
+    if release_frame is not None:
+        release_runway_score = _clamp01((float(release_frame) - float(context_origin)) / min_release_runway)
+    pre_release_context_score = round((0.70 * uah_runway_score) + (0.30 * release_runway_score), 3)
+
     score = (
         0.45 * spacing_score
         + 0.25 * release_conf
@@ -784,6 +813,8 @@ def _score_anchor_hypothesis(
         uncertain_checks.append("non_bowling_arm_peak_unavailable")
     if shoulder_peak_frame is None:
         uncertain_checks.append("shoulder_peak_unavailable")
+    if uah_runway_score < 0.75 or pre_release_context_score < 0.55:
+        uncertain_checks.append("pre_release_context_insufficient")
     debug = {
         "hand": hand,
         "score": round(score, 3),
@@ -795,7 +826,7 @@ def _score_anchor_hypothesis(
         "elbow_visibility": round(elbow_vis, 3),
         "non_bowling_elbow_visibility": round(nb_elbow_vis, 3),
         "release_frame": release_frame,
-        "uah_frame": _safe_frame(events.get("uah")),
+        "uah_frame": uah_frame,
         "ffc_frame": _safe_frame(events.get("ffc")),
         "bfc_frame": _safe_frame(events.get("bfc")),
         "release_hint_frame": release_hint,
@@ -804,11 +835,57 @@ def _score_anchor_hypothesis(
         "shoulder_peak_frame": shoulder_peak_frame,
         "nb_release_alignment": round(nb_release_alignment, 3),
         "nb_shoulder_alignment": round(nb_shoulder_alignment, 3),
+        "uah_runway_score": round(uah_runway_score, 3),
+        "release_runway_score": round(release_runway_score, 3),
         "behind_camera_hint": behind_camera_hint,
         "behind_camera_non_bowling_arm_score": round(behind_camera_non_bowling_arm_score, 3),
+        "pre_release_context_score": pre_release_context_score,
         "uncertain_checks": uncertain_checks,
     }
     return score, debug
+
+
+def _playback_mode_v1(*, video: Dict[str, Any]) -> Dict[str, Any]:
+    try:
+        fps = float(video.get("fps") or 0.0)
+    except Exception:
+        fps = 0.0
+    try:
+        total_frames = int(video.get("total_frames") or 0)
+    except Exception:
+        total_frames = 0
+    if fps <= 0.0 or total_frames <= 0:
+        return {
+            "mode": "unknown",
+            "reason": "insufficient_video_metadata",
+            "duration_seconds": None,
+            "effective_fps": None,
+            "effective_fps_source": "unknown",
+        }
+    duration_seconds = float(total_frames) / float(fps)
+    if duration_seconds >= 12.0 and total_frames >= 240:
+        return {
+            "mode": "likely_slow_motion",
+            "reason": "implausibly_long_single_delivery",
+            "duration_seconds": round(duration_seconds, 3),
+            "effective_fps": None,
+            "effective_fps_source": "unknown",
+        }
+    if fps <= 40.0 and duration_seconds >= 8.0 and total_frames >= 240:
+        return {
+            "mode": "likely_slow_motion",
+            "reason": "implausibly_long_single_delivery",
+            "duration_seconds": round(duration_seconds, 3),
+            "effective_fps": None,
+            "effective_fps_source": "unknown",
+        }
+    return {
+        "mode": "real_time_or_high_fps",
+        "reason": "video_duration_plausible",
+        "duration_seconds": round(duration_seconds, 3),
+        "effective_fps": round(float(fps), 3),
+        "effective_fps_source": "raw_video_fps",
+    }
 
 
 def _resolve_analysis_hand(
@@ -851,6 +928,23 @@ def _resolve_analysis_hand(
     else:
         debug["resolution_reason"] = "preferred_hand_tiebreak"
 
+    chosen_details = debug["hypotheses"].get(chosen) or {}
+    preferred_details = debug["hypotheses"].get(preferred) or {}
+    chosen_context = float(chosen_details.get("pre_release_context_score") or 0.0)
+    chosen_spacing = float(chosen_details.get("spacing_score") or 0.0)
+    chosen_uah_runway = float(chosen_details.get("uah_runway_score") or 0.0)
+    if (
+        chosen != preferred
+        and (chosen_context < 0.55 or chosen_uah_runway < 0.75)
+        and chosen_spacing <= 0.10
+        and margin < 0.25
+    ):
+        chosen = preferred
+        debug["resolution_reason"] = "preferred_hand_context_guard"
+        chosen_details = debug["hypotheses"].get(chosen) or {}
+        if "hand_override_blocked_due_to_low_context" not in chosen_details.get("uncertain_checks", []):
+            chosen_details.setdefault("uncertain_checks", []).append("hand_override_blocked_due_to_low_context")
+
     debug["resolved_hand"] = chosen
     debug["score_margin"] = round(margin, 3)
     return chosen, hypotheses[chosen]["events"], debug
@@ -860,6 +954,7 @@ def _walkthrough_render_window(
     *,
     events: dict,
     total_frames: int,
+    playback_mode: Optional[dict] = None,
 ) -> Tuple[int, Optional[int]]:
     bfc_frame = (events.get("bfc") or {}).get("frame")
     ffc_frame = (events.get("ffc") or {}).get("frame")
@@ -874,8 +969,16 @@ def _walkthrough_render_window(
         fallback_end = min(total_frames, 180) if total_frames else 180
         return 0, fallback_end
 
-    start = max(0, min(anchors) - 30)
-    end = min(total_frames, max(anchors) + 28) if total_frames else max(anchors) + 28
+    slow_motion_mode = str((playback_mode or {}).get("mode") or "").strip().lower() == "likely_slow_motion"
+    if slow_motion_mode:
+        start_pad = 96
+        end_pad = 18
+    else:
+        start_pad = 30
+        end_pad = 28
+
+    start = max(0, min(anchors) - start_pad)
+    end = min(total_frames, max(anchors) + end_pad) if total_frames else max(anchors) + end_pad
     if end <= start:
         return start, None
     return start, end
@@ -936,6 +1039,7 @@ def _build_walkthrough_render(
     elbow: dict,
     risks: list,
     estimated_release_speed: dict,
+    playback_mode: Optional[dict] = None,
     kinetic_chain: Optional[dict] = None,
     report_story: Optional[dict],
     root_cause: Optional[dict],
@@ -948,6 +1052,7 @@ def _build_walkthrough_render(
     start_frame, end_frame = _walkthrough_render_window(
         events=events,
         total_frames=total_frames,
+        playback_mode=playback_mode,
     )
     output_path = os.path.join(RENDERS_DIR, f"{run_id}_walkthrough.mp4")
 
@@ -970,6 +1075,7 @@ def _build_walkthrough_render(
             pause_seconds=WALKTHROUGH_PAUSE_SECONDS,
             slow_motion_factor=WALKTHROUGH_SLOW_MOTION_FACTOR,
             end_summary_seconds=WALKTHROUGH_END_SUMMARY_SECONDS,
+            playback_mode=playback_mode,
         )
     except Exception as exc:
         logger.warning(
@@ -1238,6 +1344,7 @@ def analyze(
             f"frames={video.get('total_frames')} "
             f"file_size_bytes={temp_file_size if temp_file_size is not None else '-'}"
         )
+        playback_mode = _playback_mode_v1(video=video)
 
         resolved_hand, events, hand_resolution = _resolve_analysis_hand(
             pose_frames=pose_frames,
@@ -1335,6 +1442,7 @@ def analyze(
             estimated_release_speed=estimated_release_speed,
             event_chain=events.get("event_chain") or {},
             events=events,
+            playback_mode=playback_mode,
         )
         speed_debug = estimated_release_speed.get("debug") or {}
         logger.info(
@@ -1393,6 +1501,7 @@ def analyze(
             "video": {
                 "fps": video.get("fps"),
                 "total_frames": video.get("total_frames"),
+                "playback_mode_v1": playback_mode,
             },
             "events": events,
             "elbow": elbow,
@@ -1424,6 +1533,7 @@ def analyze(
             elbow=elbow,
             risks=risks,
             estimated_release_speed=estimated_release_speed,
+            playback_mode=playback_mode,
             kinetic_chain=deterministic_expert.get("kinetic_chain_v1"),
             report_story=_deterministic_render_story_context(deterministic_expert),
             root_cause=((deterministic_expert.get("coach_diagnosis_v1") or {}).get("root_cause")),

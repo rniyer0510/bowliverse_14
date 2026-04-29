@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Set
 
 from app.workers.events.timing_constants import render_timing
 
@@ -168,10 +168,102 @@ def resolve_render_timeline_events(
     return timeline
 
 
+def _is_likely_slow_motion(playback_mode: Optional[Dict[str, Any]]) -> bool:
+    return str((playback_mode or {}).get("mode") or "").strip().lower() == "likely_slow_motion"
+
+
+def _candidate_render_frames_for_event(
+    *,
+    payload: Dict[str, Any],
+    fallback_frame: Optional[int],
+    fps: float,
+) -> Set[int]:
+    frames: Set[int] = set()
+    if fallback_frame is not None:
+        frames.add(int(fallback_frame))
+
+    detected_frame = _safe_int(payload.get("detected_frame"))
+    if detected_frame is not None:
+        frames.add(int(detected_frame))
+
+    window = max(2, int(render_timing(fps)["render_tolerance"]))
+    center = detected_frame if detected_frame is not None else fallback_frame
+    if center is not None:
+        for frame_idx in range(int(center) - window, int(center) + window + 1):
+            frames.add(int(frame_idx))
+
+    for candidate in payload.get("candidates") or []:
+        if not isinstance(candidate, dict):
+            continue
+        candidate_frame = _safe_int(candidate.get("frame"))
+        if candidate_frame is not None:
+            frames.add(int(candidate_frame))
+    return frames
+
+
+def _resolve_low_quality_render_frame(
+    *,
+    event_key: str,
+    payload: Dict[str, Any],
+    tracks: Dict[int, Dict[str, Any]],
+    fps: float,
+    playback_mode: Optional[Dict[str, Any]],
+) -> Dict[str, Any]:
+    render_frame = _safe_int(payload.get("render_frame"))
+    if render_frame is None:
+        render_frame = _safe_int(payload.get("frame"))
+    if render_frame is None:
+        return payload
+
+    current_quality = float(_track_frame_quality(tracks, render_frame))
+    slow_motion_mode = _is_likely_slow_motion(playback_mode)
+    release_like_event = event_key == "release"
+    if not slow_motion_mode and (not release_like_event or current_quality >= 0.55):
+        return payload
+    if slow_motion_mode and current_quality >= 0.62:
+        return payload
+
+    detected_frame = _safe_int(payload.get("detected_frame"))
+    best_frame = int(render_frame)
+    best_score = current_quality
+
+    for candidate_frame in sorted(
+        _candidate_render_frames_for_event(
+            payload=payload,
+            fallback_frame=render_frame,
+            fps=fps,
+        )
+    ):
+        quality = float(_track_frame_quality(tracks, candidate_frame))
+        if quality <= 0.0:
+            continue
+
+        distance_penalty = 0.02 * abs(candidate_frame - (detected_frame if detected_frame is not None else render_frame))
+        late_penalty = 0.0
+        if release_like_event and detected_frame is not None and candidate_frame > detected_frame:
+            late_penalty = 0.03 * float(candidate_frame - detected_frame)
+        score = quality - distance_penalty - late_penalty
+        if score > best_score + 0.08:
+            best_score = score
+            best_frame = int(candidate_frame)
+
+    if best_frame == int(render_frame):
+        return payload
+
+    resolved = dict(payload)
+    resolved["frame"] = int(best_frame)
+    resolved["render_frame"] = int(best_frame)
+    resolved["render_method"] = "quality_resolved_neighbor"
+    resolved["render_resolved"] = True
+    return resolved
+
+
 def attach_render_quality_metadata(
     *,
     events: Optional[Dict[str, Any]],
     tracks: Dict[int, Dict[str, Any]],
+    fps: float = 30.0,
+    playback_mode: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     timeline = dict(events or {})
     quality_values = []
@@ -179,7 +271,13 @@ def attach_render_quality_metadata(
         event = timeline.get(key)
         if not isinstance(event, dict):
             continue
-        payload = dict(event)
+        payload = _resolve_low_quality_render_frame(
+            event_key=key,
+            payload=dict(event),
+            tracks=tracks,
+            fps=fps,
+            playback_mode=playback_mode,
+        )
         render_frame = _safe_int(payload.get("render_frame"))
         detected_frame = _safe_int(payload.get("detected_frame"))
         if render_frame is None:

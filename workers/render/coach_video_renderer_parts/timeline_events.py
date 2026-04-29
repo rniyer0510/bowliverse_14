@@ -4,12 +4,17 @@ from .analytics import _safe_int, _safe_float, _event_confidence
 from .tracks import *
 from .render_frame_resolver import resolve_render_timeline_events
 
+
+def _is_likely_slow_motion(playback_mode: Optional[Dict[str, Any]]) -> bool:
+    return str((playback_mode or {}).get("mode") or "").strip().lower() == "likely_slow_motion"
+
 def _phase_cut_points(
     *,
     start: int,
     stop: int,
     events: Optional[Dict[str, Any]],
     fps: float = 30.0,
+    playback_mode: Optional[Dict[str, Any]] = None,
 ) -> Tuple[int, int, int]:
     last = max(start + 3, stop - 1)
     span = max(4, stop - start)
@@ -27,6 +32,22 @@ def _phase_cut_points(
     cp1 = max(start + 1, min(last - 2, cp1))
     cp2 = max(cp1 + 1, min(last - 1, cp2))
     cp3 = max(cp2 + 1, min(last, cp3))
+
+    if _is_likely_slow_motion(playback_mode):
+        bfc_ratio = float(cp1 - start) / float(max(1, span))
+        anchor_clustered_late = bfc_ratio >= 0.55
+        if anchor_clustered_late:
+            target_cp1 = start + int(round(span * 0.34))
+            target_cp2 = start + int(round(span * 0.62))
+            target_cp3 = start + int(round(span * 0.84))
+
+            cp1 = min(cp1, max(start + 1, target_cp1))
+            cp2 = min(cp2, max(cp1 + 1, target_cp2))
+            cp3 = min(cp3, max(cp2 + 1, target_cp3))
+
+            cp1 = max(start + 1, min(last - 2, cp1))
+            cp2 = max(cp1 + 1, min(last - 1, cp2))
+            cp3 = max(cp2 + 1, min(last, cp3))
     return cp1, cp2, cp3
 def _event_method(events: Optional[Dict[str, Any]], key: str) -> str:
     event = (events or {}).get(key) or {}

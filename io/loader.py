@@ -31,9 +31,25 @@ MIN_WINDOW_CONFIDENCE = 0.30
 MIN_WINDOW_SECONDS = 1.6
 LATE_FALLBACK_MIN_SECONDS = 2.6
 LATE_FALLBACK_CLIP_RATIO = 0.38
+SLOW_MOTION_FALLBACK_MIN_SECONDS = 4.0
+SLOW_MOTION_FALLBACK_CLIP_RATIO = 0.30
+SLOW_MOTION_POST_SECONDS = 0.6
 TEMP_UPLOAD_ROOT_PREFIX = "actionlab_upload_"
 TEMP_UPLOAD_PREFIX = f"{TEMP_UPLOAD_ROOT_PREFIX}{os.getpid()}_"
 STALE_TEMP_UPLOAD_MAX_AGE_SECONDS = 24 * 60 * 60
+
+
+def _is_likely_slow_motion_video(video: Dict[str, Any]) -> bool:
+    fps = float(video.get("fps") or 0.0)
+    total_frames = int(video.get("total_frames") or 0)
+    if fps <= 0.0 or total_frames <= 0:
+        return False
+    duration_seconds = total_frames / fps
+    if duration_seconds >= 12.0 and total_frames >= 240:
+        return True
+    if fps <= 40.0 and duration_seconds >= 8.0 and total_frames >= 240:
+        return True
+    return False
 
 
 def _conservative_late_window(video: Dict[str, Any], delivery_window: Dict[str, Any]) -> Dict[str, Any]:
@@ -54,10 +70,19 @@ def _conservative_late_window(video: Dict[str, Any], delivery_window: Dict[str, 
         hint_frame = None
 
     if hint_frame is not None:
-        start = int(delivery_window.get("analysis_start") or 0)
-        end = int(delivery_window.get("analysis_end") or (total_frames - 1))
-        start = max(0, min(total_frames - 1, start))
-        end = max(start, min(total_frames - 1, end))
+        if _is_likely_slow_motion_video(video):
+            pre_frames = max(
+                int(round(SLOW_MOTION_FALLBACK_MIN_SECONDS * fps)),
+                int(round(total_frames * SLOW_MOTION_FALLBACK_CLIP_RATIO)),
+            )
+            post_frames = max(12, int(round(SLOW_MOTION_POST_SECONDS * fps)))
+            start = max(0, hint_frame - pre_frames)
+            end = min(total_frames - 1, hint_frame + post_frames)
+        else:
+            start = int(delivery_window.get("analysis_start") or 0)
+            end = int(delivery_window.get("analysis_end") or (total_frames - 1))
+            start = max(0, min(total_frames - 1, start))
+            end = max(start, min(total_frames - 1, end))
     else:
         width = min(
             total_frames,
