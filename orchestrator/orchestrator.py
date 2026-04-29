@@ -895,9 +895,9 @@ def _resolve_analysis_hand(
     delivery_window: Optional[Dict[str, Any]],
     preferred_hand: str,
 ) -> Tuple[str, Dict[str, Any], Dict[str, Any]]:
-    preferred = str(preferred_hand or "R").strip().upper()
-    if preferred not in {"R", "L"}:
-        preferred = "R"
+    preferred_raw = str(preferred_hand or "").strip().upper()
+    preferred_valid = preferred_raw in {"R", "L"}
+    preferred = preferred_raw if preferred_valid else "R"
 
     hypotheses: Dict[str, Dict[str, Any]] = {}
     debug: Dict[str, Any] = {"preferred_hand": preferred, "hypotheses": {}}
@@ -918,32 +918,23 @@ def _resolve_analysis_hand(
         hypotheses[hand] = {"events": events, "score": score, "details": details}
         debug["hypotheses"][hand] = details
 
-    chosen = preferred
     r_score = float(hypotheses["R"]["score"])
     l_score = float(hypotheses["L"]["score"])
+    evidence_best = "R" if r_score >= l_score else "L"
     margin = abs(r_score - l_score)
-    if margin >= 0.03:
-        chosen = "R" if r_score > l_score else "L"
-        debug["resolution_reason"] = "clip_evidence_override"
-    else:
-        debug["resolution_reason"] = "preferred_hand_tiebreak"
 
-    chosen_details = debug["hypotheses"].get(chosen) or {}
-    preferred_details = debug["hypotheses"].get(preferred) or {}
-    chosen_context = float(chosen_details.get("pre_release_context_score") or 0.0)
-    chosen_spacing = float(chosen_details.get("spacing_score") or 0.0)
-    chosen_uah_runway = float(chosen_details.get("uah_runway_score") or 0.0)
-    if (
-        chosen != preferred
-        and (chosen_context < 0.55 or chosen_uah_runway < 0.75)
-        and chosen_spacing <= 0.10
-        and margin < 0.25
-    ):
+    if preferred_valid:
         chosen = preferred
-        debug["resolution_reason"] = "preferred_hand_context_guard"
-        chosen_details = debug["hypotheses"].get(chosen) or {}
-        if "hand_override_blocked_due_to_low_context" not in chosen_details.get("uncertain_checks", []):
-            chosen_details.setdefault("uncertain_checks", []).append("hand_override_blocked_due_to_low_context")
+        debug["resolution_reason"] = "profile_hand_locked"
+        debug["clip_evidence_best_hand"] = evidence_best
+        if evidence_best != preferred:
+            chosen_details = debug["hypotheses"].get(chosen) or {}
+            uncertain = chosen_details.setdefault("uncertain_checks", [])
+            if "clip_evidence_disagrees_with_profile_hand" not in uncertain:
+                uncertain.append("clip_evidence_disagrees_with_profile_hand")
+    else:
+        chosen = evidence_best
+        debug["resolution_reason"] = "profile_hand_missing_fallback"
 
     debug["resolved_hand"] = chosen
     debug["score_margin"] = round(margin, 3)

@@ -270,10 +270,14 @@ class AnalyzePersistenceFallbackTests(unittest.TestCase):
                 preferred_hand="L",
             )
 
-        self.assertEqual(resolved_hand, "R")
-        self.assertEqual((events.get("release") or {}).get("frame"), 141)
-        self.assertEqual(debug["resolution_reason"], "clip_evidence_override")
-        self.assertIn("uncertain_checks", debug["hypotheses"]["R"])
+        self.assertEqual(resolved_hand, "L")
+        self.assertEqual((events.get("release") or {}).get("frame"), 136)
+        self.assertEqual(debug["resolution_reason"], "profile_hand_locked")
+        self.assertEqual(debug["clip_evidence_best_hand"], "R")
+        self.assertIn(
+            "clip_evidence_disagrees_with_profile_hand",
+            debug["hypotheses"]["L"]["uncertain_checks"],
+        )
 
     def test_hand_resolution_prefers_non_bowling_arm_when_release_hint_matches_rear_view_cluster(self):
         from app.orchestrator import orchestrator
@@ -346,6 +350,7 @@ class AnalyzePersistenceFallbackTests(unittest.TestCase):
 
         self.assertEqual(resolved_hand, "R")
         self.assertEqual((events.get("release") or {}).get("frame"), 95)
+        self.assertEqual(debug["resolution_reason"], "profile_hand_locked")
         self.assertTrue(debug["hypotheses"]["R"]["behind_camera_hint"])
         self.assertGreater(
             debug["hypotheses"]["R"]["behind_camera_non_bowling_arm_score"],
@@ -412,10 +417,15 @@ class AnalyzePersistenceFallbackTests(unittest.TestCase):
             )
 
         self.assertEqual(resolved_hand, "R")
-        self.assertEqual(debug["resolution_reason"], "preferred_hand_context_guard")
+        self.assertEqual(debug["resolution_reason"], "profile_hand_locked")
+        self.assertEqual(debug["clip_evidence_best_hand"], "L")
         self.assertIn(
             "pre_release_context_insufficient",
             debug["hypotheses"]["L"]["uncertain_checks"],
+        )
+        self.assertIn(
+            "clip_evidence_disagrees_with_profile_hand",
+            debug["hypotheses"]["R"]["uncertain_checks"],
         )
 
     def test_playback_mode_does_not_flag_long_high_fps_clip_as_slow_motion(self):
