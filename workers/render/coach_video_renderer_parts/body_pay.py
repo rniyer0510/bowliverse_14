@@ -91,7 +91,8 @@ def _draw_body_pay_phase(
     if not geometry:
         return
     anchor = geometry.get("anchor")
-    if not isinstance(anchor, tuple) or len(anchor) != 2:
+    anchor_xy = _safe_point(anchor)
+    if anchor_xy is None:
         return
     scale = min(frame.shape[0], frame.shape[1])
     region = _select_body_pay_region(
@@ -101,17 +102,17 @@ def _draw_body_pay_phase(
         risk_id=risk_id,
         risk_by_id=risk_by_id,
         region_priority=region_priority,
-        anchor=anchor,
+        anchor=anchor_xy,
         scale=scale,
     )
     if not region:
         return
-    pay_center = region.get("center")
-    if not isinstance(pay_center, tuple) or len(pay_center) != 2:
+    pay_center = _safe_point(region.get("center"))
+    if pay_center is None:
         return
     thickness = max(3, scale // 180)
     shadow = max(5, thickness + 2)
-    path_points = [anchor, pay_center]
+    path_points = [anchor_xy, pay_center]
     _draw_partial_polyline(
         frame,
         points=path_points,
@@ -128,8 +129,8 @@ def _draw_body_pay_phase(
     cv2.addWeighted(overlay, alpha, frame, 1.0 - alpha, 0.0, frame)
     if progress >= 0.42:
         direction = (
-            float(pay_center[0] - anchor[0]),
-            float(pay_center[1] - anchor[1]),
+            float(pay_center[0] - anchor_xy[0]),
+            float(pay_center[1] - anchor_xy[1]),
         )
         _draw_hotspot_compact_label(
             frame,

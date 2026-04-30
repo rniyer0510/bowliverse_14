@@ -2,16 +2,23 @@ from __future__ import annotations
 from .shared import *
 from .analytics import _safe_int, _safe_float, _event_confidence
 from .tracks import *
+from .render_frame_resolver import resolve_render_timeline_events
+
+
+def _is_likely_slow_motion(playback_mode: Optional[Dict[str, Any]]) -> bool:
+    return str((playback_mode or {}).get("mode") or "").strip().lower() == "likely_slow_motion"
 
 def _phase_cut_points(
     *,
     start: int,
     stop: int,
     events: Optional[Dict[str, Any]],
+    fps: float = 30.0,
+    playback_mode: Optional[Dict[str, Any]] = None,
 ) -> Tuple[int, int, int]:
     last = max(start + 3, stop - 1)
     span = max(4, stop - start)
-    render_events = _render_timeline_events(start=start, stop=stop, events=events)
+    render_events = _render_timeline_events(start=start, stop=stop, events=events, fps=fps)
     bfc = _safe_int(((render_events or {}).get("bfc") or {}).get("frame"))
     ffc = _safe_int(((render_events or {}).get("ffc") or {}).get("frame"))
     uah = _safe_int(((render_events or {}).get("uah") or {}).get("frame"))
@@ -25,6 +32,22 @@ def _phase_cut_points(
     cp1 = max(start + 1, min(last - 2, cp1))
     cp2 = max(cp1 + 1, min(last - 1, cp2))
     cp3 = max(cp2 + 1, min(last, cp3))
+
+    if _is_likely_slow_motion(playback_mode):
+        bfc_ratio = float(cp1 - start) / float(max(1, span))
+        anchor_clustered_late = bfc_ratio >= 0.55
+        if anchor_clustered_late:
+            target_cp1 = start + int(round(span * 0.34))
+            target_cp2 = start + int(round(span * 0.62))
+            target_cp3 = start + int(round(span * 0.84))
+
+            cp1 = min(cp1, max(start + 1, target_cp1))
+            cp2 = min(cp2, max(cp1 + 1, target_cp2))
+            cp3 = min(cp3, max(cp2 + 1, target_cp3))
+
+            cp1 = max(start + 1, min(last - 2, cp1))
+            cp2 = max(cp1 + 1, min(last - 1, cp2))
+            cp3 = max(cp2 + 1, min(last, cp3))
     return cp1, cp2, cp3
 def _event_method(events: Optional[Dict[str, Any]], key: str) -> str:
     event = (events or {}).get(key) or {}
@@ -38,12 +61,15 @@ def _tracked_joint_quality(
     landmarks = (pose_frames[frame_idx] or {}).get("landmarks") or []
     if not isinstance(landmarks, list) or not landmarks:
         return 0.0
-    visible = 0
+    quality_sum = 0.0
     for joint_idx in TRACKED_JOINTS:
         visibility = _safe_landmark_value(landmarks, joint_idx, "visibility") or 0.0
-        if visibility >= MIN_VISIBILITY:
-            visible += 1
-    return float(visible) / float(max(1, len(TRACKED_JOINTS)))
+        x = _safe_landmark_value(landmarks, joint_idx, "x")
+        y = _safe_landmark_value(landmarks, joint_idx, "y")
+        if x is None or y is None:
+            continue
+        quality_sum += _visibility_weight(visibility)
+    return float(quality_sum) / float(max(1, len(TRACKED_JOINTS)))
 def _safe_landmark_value(landmarks: List[Dict[str, Any]], idx: int, key: str) -> Optional[float]:
     try:
         value = ((landmarks[idx] or {}).get(key))
@@ -53,11 +79,12 @@ def _safe_landmark_value(landmarks: List[Dict[str, Any]], idx: int, key: str) ->
 def _should_draw_skeleton_frame(
     *,
     pose_frames: List[Dict[str, Any]],
+    tracks: Optional[Dict[int, Dict[str, Any]]] = None,
     frame_idx: int,
     events: Optional[Dict[str, Any]],
     fps: float,
 ) -> bool:
-    quality = _tracked_joint_quality(pose_frames, frame_idx)
+    quality = _track_frame_quality(tracks or {}, frame_idx) if tracks is not None else _tracked_joint_quality(pose_frames, frame_idx)
     if quality < MIN_TRACK_QUALITY:
         return False
     release_frame = _safe_int(((events or {}).get("release") or {}).get("frame"))
@@ -72,77 +99,11 @@ def _render_timeline_events(
     start: int,
     stop: int,
     events: Optional[Dict[str, Any]],
+    fps: float = 30.0,
 ) -> Dict[str, Any]:
-    timeline = dict(events or {})
-    span = max(4, stop - start)
-    last = max(start + 3, stop - 1)
-
-    raw_bfc = _safe_int(((events or {}).get("bfc") or {}).get("frame"))
-    raw_ffc = _safe_int(((events or {}).get("ffc") or {}).get("frame"))
-    raw_uah = _safe_int(((events or {}).get("uah") or {}).get("frame"))
-    raw_release = _safe_int(((events or {}).get("release") or {}).get("frame"))
-    phase_release = raw_uah if raw_uah is not None and raw_uah >= (raw_ffc if raw_ffc is not None else start) else raw_release
-    fallback_bfc = start + int(round(span * 0.32))
-    fallback_ffc = start + int(round(span * 0.58))
-    fallback_release = phase_release if phase_release is not None else start + int(round(span * 0.82))
-
-    weak_ffc = (
-        raw_ffc is None
-        or raw_ffc < start + 2
-        or raw_ffc >= stop - 1
-        or _event_confidence(events, "ffc") < 0.30
-        or _event_method(events, "ffc") in WEAK_PHASE_METHODS
+    return resolve_render_timeline_events(
+        start=start,
+        stop=stop,
+        fps=fps,
+        events=events,
     )
-    if not weak_ffc and raw_release is not None and raw_ffc >= raw_release - 1:
-        weak_ffc = True
-
-    candidate_ffc = fallback_ffc if weak_ffc else raw_ffc
-    weak_bfc = (
-        raw_bfc is None
-        or raw_bfc < start + 1
-        or raw_bfc >= stop - 2
-        or (candidate_ffc is not None and raw_bfc >= candidate_ffc)
-    )
-
-    bfc_frame = raw_bfc if not weak_bfc else fallback_bfc
-    ffc_frame = raw_ffc if not weak_ffc else fallback_ffc
-    release_frame = raw_release if raw_release is not None else fallback_release
-
-    bfc_frame = max(start + 1, min(last - 2, int(bfc_frame)))
-    ffc_frame = max(bfc_frame + 1, min(last - 1, int(ffc_frame)))
-    release_frame = max(ffc_frame + 1, min(last, int(release_frame)))
-
-    if weak_bfc:
-        event = dict((timeline.get("bfc") or {}))
-        event.update(
-            {
-                "frame": int(bfc_frame),
-                "confidence": max(_event_confidence(events, "bfc"), 0.30),
-                "method": "render_phase_fallback",
-            }
-        )
-        timeline["bfc"] = event
-
-    if weak_ffc:
-        event = dict((timeline.get("ffc") or {}))
-        event.update(
-            {
-                "frame": int(ffc_frame),
-                "confidence": max(_event_confidence(events, "ffc"), 0.40),
-                "method": "render_phase_fallback",
-            }
-        )
-        timeline["ffc"] = event
-
-    if raw_release is None:
-        event = dict((timeline.get("release") or {}))
-        event.update(
-            {
-                "frame": int(release_frame),
-                "confidence": max(_event_confidence(events, "release"), 0.50),
-                "method": "render_phase_fallback",
-            }
-        )
-        timeline["release"] = event
-
-    return timeline

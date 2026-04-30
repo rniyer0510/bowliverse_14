@@ -94,6 +94,40 @@ A hybrid approach is the right long-term fit because it:
 - avoids overclaiming precision where the available evidence does not justify it
 - creates a clean path for future calibration against radar or other ground-truth systems
 
+### 2026-04-29 Follow-Up Note
+
+This ADR remains correct, but the current implementation needs another deliberate revisit before it should be treated as final.
+
+What we learned from the McGrath and Amogh speed passes:
+
+- speed regressions were driven more by upstream hand / anchor / release-neighborhood changes than by a single bug inside `release_speed.py`
+- clean fast-bowler clips such as McGrath need a path back toward the stronger `master` behavior
+- far-camera / small-subject clips such as `Amogh_new.mp4` need explicit protection against unstable distal visibility without blindly trusting noisy bowling-arm spikes
+- wrong-hand or weak-hand hypotheses can accidentally make a clip look numerically calmer, so speed must stay aligned to profile truth and validated event truth
+
+Current implementation direction at pause point:
+
+- keep the local camera-based release-speed estimate as the primary number source
+- keep narrow safety guards for implausible saturated estimates
+- allow limited recovery for clean salvage cases
+- allow limited compensation for far / small-subject clips when the clip is otherwise orderly
+
+What is intentionally deferred for the next revisit:
+
+- a more rigorous camera-distance / subject-scale treatment that improves small-subject pace estimates without altering raw arm-speed signals directly
+- a better mapping between ActionLab release truth and the local speed-estimation window when those two should not be identical
+- calibration against a wider real-clip acceptance set, especially:
+  - McGrath
+  - `Amogh_new.mp4`
+  - `Amogh_latest_April-26.mp4`
+- eventual validation against external ground truth such as radar where available
+
+Practical rule until revisited:
+
+- do not keep patching speed clip-by-clip
+- prefer a simpler `master`-like estimator with narrow guards over a broad governor that suppresses good fast-bowling clips
+- treat camera distance and distal-visibility loss as a first-class future calibration topic
+
 ## ADR-003: Pose Feeds Kinematics, and Heuristics Must Stay Last
 
 - Date: 2026-04-26

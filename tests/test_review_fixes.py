@@ -3,7 +3,7 @@ import os
 import tempfile
 import unittest
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -205,6 +205,263 @@ class ReviewerRoleTests(unittest.TestCase):
 
 
 class AnalyzePersistenceFallbackTests(unittest.TestCase):
+    def test_resolve_analysis_hand_prefers_clip_evidence_over_profile_hand(self):
+        from app.orchestrator import orchestrator
+
+        pose_frames = [{"frame": idx, "landmarks": []} for idx in range(200)]
+
+        def fake_release(*, hand, **_kwargs):
+            if hand == "R":
+                return {
+                    "release": {"frame": 141, "confidence": 0.77, "method": "multi_signal_consensus", "window": [140, 154]},
+                    "uah": {"frame": 139, "confidence": 0.68, "method": "bowling_elbow_height_minimum", "window": [135, 140]},
+                    "delivery_window": [140, 154],
+                }
+            return {
+                "release": {"frame": 136, "confidence": 0.60, "method": "multi_signal_consensus", "window": [134, 145]},
+                "uah": {"frame": 132, "confidence": 0.85, "method": "bowling_elbow_height_minimum_ffc_reconciled", "window": [130, 135]},
+                "delivery_window": [134, 145],
+            }
+
+        def fake_feet(*, hand, **_kwargs):
+            if hand == "R":
+                return {
+                    "ffc": {"frame": 137, "confidence": 0.90, "method": "release_backward_chain_grounding", "window": [118, 139]},
+                    "bfc": {"frame": 134, "confidence": 0.0, "method": "simple_grounded_bfc"},
+                }
+            return {
+                "ffc": {"frame": 132, "confidence": 0.90, "method": "release_backward_chain_grounding", "window": [113, 134]},
+                "bfc": {"frame": 128, "confidence": 0.69, "method": "back_foot_support_edge"},
+            }
+
+        def fake_cache(*, hand, **_kwargs):
+            raw = np.full(200, 0.95 if hand == "R" else 0.70, dtype=float)
+            weight = np.full(200, 0.90 if hand == "R" else 0.60, dtype=float)
+            if hand == "R":
+                nb_signal = np.linspace(0.8, 0.5, 200)
+                nb_signal[141] = 0.2
+                shoulder_signal = np.zeros(200, dtype=float)
+                shoulder_signal[140] = 5.0
+            else:
+                nb_signal = np.linspace(0.8, 0.5, 200)
+                nb_signal[150] = 0.2
+                shoulder_signal = np.zeros(200, dtype=float)
+                shoulder_signal[151] = 5.0
+            return {
+                "wrist_vis_raw": raw,
+                "wrist_vis_weight": weight,
+                "bowling_elbow_vis_raw": raw,
+                "bowling_elbow_vis_weight": weight,
+                "nb_elbow_vis_raw": raw,
+                "nb_elbow_vis_weight": weight,
+                "nb_elbow_y": nb_signal,
+                "shoulder_angular_velocity": shoulder_signal,
+            }
+
+        with patch.object(orchestrator, "detect_release_uah", side_effect=fake_release), patch.object(
+            orchestrator,
+            "detect_ffc_bfc",
+            side_effect=fake_feet,
+        ), patch.object(orchestrator, "build_signal_cache", side_effect=fake_cache):
+            resolved_hand, events, debug = orchestrator._resolve_analysis_hand(
+                pose_frames=pose_frames,
+                fps=25.0,
+                delivery_window={"analysis_start": 100, "analysis_end": 160},
+                preferred_hand="L",
+            )
+
+        self.assertEqual(resolved_hand, "L")
+        self.assertEqual((events.get("release") or {}).get("frame"), 136)
+        self.assertEqual(debug["resolution_reason"], "profile_hand_locked")
+        self.assertEqual(debug["clip_evidence_best_hand"], "R")
+        self.assertIn(
+            "clip_evidence_disagrees_with_profile_hand",
+            debug["hypotheses"]["L"]["uncertain_checks"],
+        )
+
+    def test_hand_resolution_prefers_non_bowling_arm_when_release_hint_matches_rear_view_cluster(self):
+        from app.orchestrator import orchestrator
+
+        pose_frames = [{"frame": idx, "landmarks": []} for idx in range(220)]
+
+        def fake_release(*, hand, **_kwargs):
+            if hand == "R":
+                return {
+                    "release": {"frame": 95, "confidence": 0.42, "method": "multi_signal_consensus", "window": [0, 110]},
+                    "uah": {"frame": 86, "confidence": 0.75, "method": "kinetic_chain_crossover", "window": [82, 94]},
+                    "delivery_window": [0, 110],
+                }
+            return {
+                "release": {"frame": 148, "confidence": 0.55, "method": "multi_signal_consensus", "window": [0, 161]},
+                "uah": {"frame": 144, "confidence": 0.75, "method": "kinetic_chain_crossover", "window": [138, 147]},
+                "delivery_window": [0, 161],
+            }
+
+        def fake_feet(*, hand, **_kwargs):
+            if hand == "R":
+                return {
+                    "ffc": {"frame": 87, "confidence": 0.90, "method": "release_backward_chain_grounding", "window": [41, 93]},
+                    "bfc": {"frame": 82, "confidence": 0.50, "method": "back_foot_support_edge"},
+                }
+            return {
+                "ffc": {"frame": 135, "confidence": 0.90, "method": "release_backward_chain_grounding", "window": [94, 146]},
+                "bfc": {"frame": 133, "confidence": 0.50, "method": "back_foot_support_edge"},
+            }
+
+        def fake_cache(*, hand, **_kwargs):
+            raw_r = np.full(220, 0.75, dtype=float)
+            raw_l = np.full(220, 0.62, dtype=float)
+            nb_raw = raw_r if hand == "R" else raw_l
+            nb_weight = np.full(220, 0.82 if hand == "R" else 0.63, dtype=float)
+            bowl_raw = np.full(220, 0.61 if hand == "R" else 0.68, dtype=float)
+            bowl_weight = np.full(220, 0.67 if hand == "R" else 0.69, dtype=float)
+            wrist_raw = np.full(220, 0.75 if hand == "R" else 0.63, dtype=float)
+            wrist_weight = np.full(220, 0.82 if hand == "R" else 0.64, dtype=float)
+            nb_signal = np.full(220, 0.7, dtype=float)
+            shoulder_signal = np.zeros(220, dtype=float)
+            if hand == "R":
+                nb_signal[93] = 0.2
+                shoulder_signal[87] = 5.0
+            else:
+                nb_signal[147] = 0.2
+                shoulder_signal[142] = 5.0
+            return {
+                "wrist_vis_raw": wrist_raw,
+                "wrist_vis_weight": wrist_weight,
+                "bowling_elbow_vis_raw": bowl_raw,
+                "bowling_elbow_vis_weight": bowl_weight,
+                "nb_elbow_vis_raw": nb_raw,
+                "nb_elbow_vis_weight": nb_weight,
+                "nb_elbow_y": nb_signal,
+                "shoulder_angular_velocity": shoulder_signal,
+            }
+
+        with patch.object(orchestrator, "detect_release_uah", side_effect=fake_release), patch.object(
+            orchestrator,
+            "detect_ffc_bfc",
+            side_effect=fake_feet,
+        ), patch.object(orchestrator, "build_signal_cache", side_effect=fake_cache):
+            resolved_hand, events, debug = orchestrator._resolve_analysis_hand(
+                pose_frames=pose_frames,
+                fps=60.0,
+                delivery_window={"release_hint": 88, "analysis_start": 0, "analysis_end": 166},
+                preferred_hand="R",
+            )
+
+        self.assertEqual(resolved_hand, "R")
+        self.assertEqual((events.get("release") or {}).get("frame"), 95)
+        self.assertEqual(debug["resolution_reason"], "profile_hand_locked")
+        self.assertTrue(debug["hypotheses"]["R"]["behind_camera_hint"])
+        self.assertGreater(
+            debug["hypotheses"]["R"]["behind_camera_non_bowling_arm_score"],
+            debug["hypotheses"]["L"]["behind_camera_non_bowling_arm_score"],
+        )
+
+    def test_hand_resolution_keeps_preferred_hand_when_override_context_is_truncated(self):
+        from app.orchestrator import orchestrator
+
+        pose_frames = [{"frame": idx, "landmarks": []} for idx in range(209)]
+
+        def fake_release(*, hand, **_kwargs):
+            if hand == "R":
+                return {
+                    "release": {"frame": 0, "confidence": 0.40, "method": "multi_signal_consensus", "window": [0, 18]},
+                    "uah": {"frame": 0, "confidence": 0.20, "method": "kinetic_chain_crossover", "window": [0, 6]},
+                    "delivery_window": [0, 18],
+                }
+            return {
+                "release": {"frame": 16, "confidence": 0.56, "method": "multi_signal_consensus", "window": [0, 18]},
+                "uah": {"frame": 2, "confidence": 0.90, "method": "bowling_elbow_height_minimum", "window": [0, 6]},
+                "delivery_window": [0, 18],
+            }
+
+        def fake_feet(*, hand, **_kwargs):
+            if hand == "R":
+                return {
+                    "ffc": {"frame": 0, "confidence": 0.60, "method": "release_backward_chain_grounding", "window": [0, 14]},
+                    "bfc": {"frame": None, "confidence": 0.0, "method": "simple_grounded_bfc"},
+                }
+            return {
+                "ffc": {"frame": 13, "confidence": 0.70, "method": "release_backward_chain_grounding", "window": [0, 14]},
+                "bfc": {"frame": 12, "confidence": 0.60, "method": "back_foot_support_edge"},
+            }
+
+        def fake_cache(*, hand, **_kwargs):
+            raw = np.full(209, 0.99, dtype=float)
+            weight = np.full(209, 0.99, dtype=float)
+            nb_signal = np.full(209, 0.7, dtype=float)
+            shoulder_signal = np.zeros(209, dtype=float)
+            nb_signal[0] = 0.2
+            shoulder_signal[17] = 5.0
+            return {
+                "wrist_vis_raw": raw,
+                "wrist_vis_weight": weight,
+                "bowling_elbow_vis_raw": raw,
+                "bowling_elbow_vis_weight": weight,
+                "nb_elbow_vis_raw": raw,
+                "nb_elbow_vis_weight": weight,
+                "nb_elbow_y": nb_signal,
+                "shoulder_angular_velocity": shoulder_signal,
+            }
+
+        with patch.object(orchestrator, "detect_release_uah", side_effect=fake_release), patch.object(
+            orchestrator,
+            "detect_ffc_bfc",
+            side_effect=fake_feet,
+        ), patch.object(orchestrator, "build_signal_cache", side_effect=fake_cache):
+            resolved_hand, events, debug = orchestrator._resolve_analysis_hand(
+                pose_frames=pose_frames,
+                fps=60.0,
+                delivery_window={"release_hint": 12, "analysis_start": 0, "analysis_end": 18},
+                preferred_hand="R",
+            )
+
+        self.assertEqual(resolved_hand, "R")
+        self.assertEqual(debug["resolution_reason"], "profile_hand_locked")
+        self.assertEqual(debug["clip_evidence_best_hand"], "L")
+        self.assertIn(
+            "pre_release_context_insufficient",
+            debug["hypotheses"]["L"]["uncertain_checks"],
+        )
+        self.assertIn(
+            "clip_evidence_disagrees_with_profile_hand",
+            debug["hypotheses"]["R"]["uncertain_checks"],
+        )
+
+    def test_playback_mode_does_not_flag_long_high_fps_clip_as_slow_motion(self):
+        from app.orchestrator import orchestrator
+
+        playback = orchestrator._playback_mode_v1(
+            video={"fps": 59.94, "total_frames": 504}
+        )
+
+        self.assertEqual(playback["mode"], "real_time_or_high_fps")
+
+    def test_playback_mode_flags_long_30fps_clip_as_likely_slow_motion(self):
+        from app.orchestrator import orchestrator
+
+        playback = orchestrator._playback_mode_v1(
+            video={"fps": 30.0, "total_frames": 427}
+        )
+
+        self.assertEqual(playback["mode"], "likely_slow_motion")
+
+    def test_walkthrough_render_window_widens_for_likely_slow_motion(self):
+        from app.orchestrator import orchestrator
+
+        start, end = orchestrator._walkthrough_render_window(
+            events={
+                "bfc": {"frame": 413},
+                "ffc": {"frame": 415},
+                "release": {"frame": 423},
+            },
+            total_frames=427,
+            playback_mode={"mode": "likely_slow_motion"},
+        )
+
+        self.assertEqual(start, 317)
+        self.assertEqual(end, 427)
+
     def test_persist_analysis_result_returns_warning_after_retries_fail(self):
         from app.orchestrator import orchestrator
 
@@ -386,7 +643,63 @@ class WriterSessionOwnershipTests(unittest.TestCase):
         )
         db.flush.assert_called()
 
-    def test_write_analysis_rejects_existing_explanation_trace(self):
+    def test_write_analysis_normalizes_raw_result_json_before_storage(self):
+        from app.persistence import writer
+        from app.persistence.models import AnalysisExplanationTrace, AnalysisResultRaw, Player
+
+        db = MagicMock()
+        player = SimpleNamespace(season=2026, age_group="U16")
+
+        def get_side_effect(model, key):
+            if model is Player:
+                return player
+            if model is AnalysisExplanationTrace:
+                return None
+            return None
+
+        db.get.side_effect = get_side_effect
+        nested_uuid = uuid.UUID("33333333-3333-3333-3333-333333333333")
+        now = datetime(2026, 4, 29, 8, 11, 44, tzinfo=timezone.utc)
+        result = {
+            "input": {"player_id": "11111111-1111-1111-1111-111111111111", "hand": "R"},
+            "video": {"fps": 30.0, "total_frames": 120},
+            "events": {"release": {"frame": 42, "captured_at": now}},
+            "elbow": {},
+            "action": {},
+            "risks": [],
+            "meta": {"generated_at": now, "trace_id": nested_uuid},
+            "deterministic_expert_v1": {
+                "knowledge_pack_id": "actionlab_deterministic_expert",
+                "knowledge_pack_version": "2026-04-22.v1",
+                "selection": {
+                    "diagnosis_status": "partial_match",
+                    "primary_mechanism_id": "soft_block_with_trunk_carry",
+                },
+                "archetype_v1": {"id": "soft_block_leakage_bowler"},
+            },
+        }
+
+        writer.write_analysis(
+            result=result,
+            db=db,
+            run_id="22222222-2222-2222-2222-222222222222",
+            season=2026,
+            age_group="U16",
+        )
+
+        raw_row = next(
+            call.args[0]
+            for call in db.add.call_args_list
+            if isinstance(call.args[0], AnalysisResultRaw)
+        )
+        self.assertEqual(raw_row.result_json["meta"]["generated_at"], now.isoformat())
+        self.assertEqual(raw_row.result_json["meta"]["trace_id"], str(nested_uuid))
+        self.assertEqual(
+            raw_row.result_json["events"]["release"]["captured_at"],
+            now.isoformat(),
+        )
+
+    def test_write_analysis_skips_existing_explanation_trace_without_failing_persistence(self):
         from app.persistence import writer
         from app.persistence.models import AnalysisExplanationTrace, Player
 
@@ -420,14 +733,69 @@ class WriterSessionOwnershipTests(unittest.TestCase):
             },
         }
 
-        with self.assertRaises(ValueError):
-            writer.write_analysis(
-                result=result,
-                db=db,
-                run_id="22222222-2222-2222-2222-222222222222",
-                season=2026,
-                age_group="U16",
-            )
+        persisted_run_id = writer.write_analysis(
+            result=result,
+            db=db,
+            run_id="22222222-2222-2222-2222-222222222222",
+            season=2026,
+            age_group="U16",
+        )
+
+        self.assertEqual(persisted_run_id, "22222222-2222-2222-2222-222222222222")
+        db.flush.assert_called()
+
+    def test_write_analysis_skips_trace_write_failure_without_failing_persistence(self):
+        from app.persistence import writer
+        from app.persistence.models import AnalysisExplanationTrace, Player
+
+        db = MagicMock()
+        player = SimpleNamespace(season=2026, age_group="U16")
+
+        def get_side_effect(model, key):
+            if model is Player:
+                return player
+            if model is AnalysisExplanationTrace:
+                return None
+            return None
+
+        db.get.side_effect = get_side_effect
+        nested_txn = MagicMock()
+        nested_txn.__enter__.return_value = nested_txn
+        nested_txn.__exit__.return_value = False
+        db.begin_nested.return_value = nested_txn
+        db.flush.side_effect = [
+            None,
+            PermissionError("permission denied for table analysis_explanation_trace"),
+            None,
+        ]
+        result = {
+            "input": {"player_id": "11111111-1111-1111-1111-111111111111", "hand": "R"},
+            "video": {"fps": 30.0, "total_frames": 120},
+            "events": {},
+            "elbow": {},
+            "action": {},
+            "risks": [],
+            "deterministic_expert_v1": {
+                "knowledge_pack_id": "actionlab_deterministic_expert",
+                "knowledge_pack_version": "2026-04-22.v1",
+                "selection": {
+                    "diagnosis_status": "partial_match",
+                    "primary_mechanism_id": "soft_block_with_trunk_carry",
+                },
+                "archetype_v1": {"id": "soft_block_leakage_bowler"},
+            },
+        }
+
+        persisted_run_id = writer.write_analysis(
+            result=result,
+            db=db,
+            run_id="22222222-2222-2222-2222-222222222222",
+            season=2026,
+            age_group="U16",
+        )
+
+        self.assertEqual(persisted_run_id, "22222222-2222-2222-2222-222222222222")
+        db.begin_nested.assert_called_once()
 
 
 class TempCleanupTests(unittest.TestCase):

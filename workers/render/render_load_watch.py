@@ -49,10 +49,7 @@ def _event_quality(events: Optional[Dict[str, Any]], key: str) -> float:
 def _supports_ffc_story(events: Optional[Dict[str, Any]]) -> bool:
     chain = ((events or {}).get("event_chain") or {}).get("quality")
     chain_quality = max(0.0, float(chain)) if isinstance(chain, (int, float)) else 1.0
-    method = str((((events or {}).get("ffc") or {}).get("method")) or "").strip()
-    return _event_quality(events, "ffc") >= 0.35 and (
-        chain_quality >= 0.20 or method == "render_phase_fallback"
-    )
+    return _event_quality(events, "ffc") >= 0.35 and chain_quality >= 0.20
 
 
 def _risk_supported_for_phase(

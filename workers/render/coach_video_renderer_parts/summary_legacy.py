@@ -2,10 +2,10 @@ from __future__ import annotations
 from .shared import *
 from .analytics import _speed_display_text
 from .story_logic import _format_action_label
-from .drawing_base import _apply_bottom_scrim, _overlay_panel
+from .drawing_base import _apply_bottom_scrim
 from .misc_helpers import _summary_telemetry_layout, _story_headline_and_support
 from .story_overlay import _draw_story_overlay_card
-from .themed_telemetry import _draw_themed_telemetry_pill
+from .themed_telemetry import _draw_themed_summary_metric_card
 from .pil_context import _frame_draw_context, _commit_frame_draw_context
 
 def _draw_end_summary_legacy(
@@ -19,6 +19,7 @@ def _draw_end_summary_legacy(
     report_story: Optional[Dict[str, Any]] = None,
     root_cause: Optional[Dict[str, Any]] = None,
 ) -> None:
+    # Keep summary typography on the same themed font family as the BFC/FFC/Release cards.
     root_cause_status = str((root_cause or {}).get("status") or "").strip().lower()
     blurred = cv2.GaussianBlur(frame, (0, 0), sigmaX=4, sigmaY=4)
     cv2.addWeighted(blurred, 0.16, frame, 0.84, 0.0, frame)
@@ -82,15 +83,16 @@ def _draw_end_summary_legacy(
         body=merged_body,
         accent=(92, 220, 255),
         title_scale_boost=1.18,
-        headline_scale_boost=1.26,
-        body_scale_boost=1.14,
+        headline_scale_boost=1.10,
+        body_scale_boost=1.10,
         headline_max_lines=2,
         body_max_lines=3,
+        unify_body_with_headline=True,
     )
     current_top_y = int(final_y1) + top_gap
 
     if root_cause_status != "not_interpretable":
-        bottom_y = max(int(round(height * 0.73)), current_top_y + int(round(height * 0.03)))
+        bottom_y = max(int(round(height * 0.695)), current_top_y + int(round(height * 0.03)))
         telemetry = _summary_telemetry_layout(width, height)
         stat_h = int(telemetry["stat_h"])
         gap = int(telemetry["gap"])
@@ -116,35 +118,24 @@ def _draw_end_summary_legacy(
             legality_value = "-"
             legality_accent = (120, 210, 255)
         stats.append(("Legality", legality_value, legality_accent))
-        if Image is not None and ImageDraw is not None:
-            image, overlay, draw = _frame_draw_context(frame)
-            for idx, (title, value, accent) in enumerate(stats):
-                x0 = left_x + idx * (stat_w + gap)
-                x1 = x0 + stat_w
-                y1 = bottom_y + stat_h
-                _draw_themed_telemetry_pill(
-                    draw,
-                    x0=x0,
-                    y0=bottom_y,
-                    x1=x1,
-                    y1=y1,
-                    title=title,
-                    value=value,
-                    accent=accent,
-                    width=width,
-                    height=height,
-                    title_scale_boost=1.06,
-                    value_scale_boost=1.14,
-                )
-            _commit_frame_draw_context(frame, image, overlay)
-        else:
-            for idx, (title, value, accent) in enumerate(stats):
-                x0 = left_x + idx * (stat_w + gap)
-                x1 = x0 + stat_w
-                y1 = bottom_y + stat_h
-                _overlay_panel(frame, x0=x0, y0=bottom_y, x1=x1, y1=y1, fill_color=PANEL_BG, edge_color=accent, alpha=0.90)
-                cv2.putText(frame, title, (x0 + 14, bottom_y + int(stat_h * 0.26)), cv2.FONT_HERSHEY_SIMPLEX, max(0.40, min(width, height) / 1500.0), MUTED_TEXT, 1, cv2.LINE_AA)
-                cv2.putText(frame, value, (x0 + 14, bottom_y + int(stat_h * 0.64)), cv2.FONT_HERSHEY_SIMPLEX, max(0.56, min(width, height) / 1120.0), TEXT_COLOR, 2, cv2.LINE_AA)
+        image, overlay, draw = _frame_draw_context(frame)
+        for idx, (title, value, accent) in enumerate(stats):
+            x0 = left_x + idx * (stat_w + gap)
+            x1 = x0 + stat_w
+            y1 = bottom_y + stat_h
+            _draw_themed_summary_metric_card(
+                draw,
+                x0=x0,
+                y0=bottom_y,
+                x1=x1,
+                y1=y1,
+                title=title,
+                value=value,
+                accent=accent,
+                width=width,
+                height=height,
+            )
+        _commit_frame_draw_context(frame, image, overlay)
 def _draw_end_summary(
     frame: np.ndarray,
     *,

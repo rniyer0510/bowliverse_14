@@ -379,24 +379,27 @@ def run_preanalysis_screen(
             "method": delivery_guard.get("method"),
             "candidate_frames": delivery_guard.get("candidate_frames") or [],
         }
-    if not delivery_check["passed"]:
-        blocking_issues.append(
-            {
-                "code": "multiple_deliveries",
-                "detail": "Please upload a video with only one bowling delivery.",
-            }
-        )
+    subject_crowding_issue = {
+        "code": "too_many_people_in_bowling_frame",
+        "detail": (
+            "Too many people are visible in the bowling frame. "
+            "Please upload a clip with one clear bowler in frame. "
+            "A smaller umpire or distant bystander is fine, but there "
+            "cannot be two prominent athletes in the delivery window."
+        ),
+    }
+
+    primary_subject_status = str(primary_subject.get("status") or "").strip().lower()
+    primary_subject_method = str(primary_subject.get("method") or "").strip().lower()
+    primary_subject_inconclusive = (
+        primary_subject_status == "warn"
+        and primary_subject_method == "detector_inconclusive"
+    )
+    raw_delivery_supports_single = raw_delivery_count <= 1
 
     if not primary_subject.get("passed", True):
         blocking_issues.append(
-            {
-                "code": "multiple_prominent_people",
-                "detail": (
-                    "Please upload a clip with one clear bowler in frame. "
-                    "A smaller umpire or distant bystander is fine, but there "
-                    "cannot be two prominent athletes in the delivery window."
-                ),
-            }
+            subject_crowding_issue
         )
     elif primary_subject.get("status") == "warn":
         warnings.append(
@@ -416,6 +419,20 @@ def run_preanalysis_screen(
                     "Minor bystanders were detected, but one dominant bowler "
                     "remained clear across the sampled frames."
                 ),
+            }
+        )
+
+    if (
+        not delivery_check["passed"]
+        and primary_subject_inconclusive
+        and raw_delivery_supports_single
+    ):
+        blocking_issues.append(subject_crowding_issue)
+    elif not delivery_check["passed"]:
+        blocking_issues.append(
+            {
+                "code": "multiple_deliveries",
+                "detail": "Please upload a video with only one bowling delivery.",
             }
         )
     if primary_subject.get("passed", True) and primary_subject.get("frames_with_competing_primary"):

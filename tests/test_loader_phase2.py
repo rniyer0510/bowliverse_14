@@ -5,6 +5,7 @@ from unittest.mock import patch
 import numpy as np
 
 from app.io.loader import load_video
+from app.io.loader import _resolve_pose_window
 
 
 class _FakeCap:
@@ -163,3 +164,22 @@ class LoaderPhase2Tests(unittest.TestCase):
         self.assertEqual(loaded_video["pose_window"]["end"], 119)
         self.assertIsNone(pose_frames[loaded_video["pose_window"]["start"] - 1]["landmarks"])
         self.assertIsInstance(pose_frames[loaded_video["pose_window"]["start"]]["landmarks"], list)
+
+    def test_resolve_pose_window_widens_slow_motion_hint_fallback(self):
+        video = {
+            "fps": 30.0,
+            "total_frames": 427,
+        }
+        delivery_window = {
+            "available": True,
+            "confidence": 0.776,
+            "analysis_start": 385,
+            "analysis_end": 426,
+            "release_hint": 418,
+        }
+
+        pose_window = _resolve_pose_window(video, delivery_window)
+
+        self.assertEqual(pose_window["source"], "late_window_fallback")
+        self.assertEqual(pose_window["end"], 426)
+        self.assertLessEqual(pose_window["start"], 320)

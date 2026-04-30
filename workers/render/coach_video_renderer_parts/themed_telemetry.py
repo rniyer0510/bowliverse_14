@@ -2,6 +2,7 @@ from __future__ import annotations
 from .shared import *
 from .font_utils import _load_theme_font, _fit_pil_wrapped_text, _pil_text_size
 from .pil_context import _bgr_to_rgb
+from .themed_card_shell import _draw_themed_card_shell
 
 def _telemetry_value_layout(
     draw: Any,
@@ -168,3 +169,78 @@ def _draw_themed_stat_card(
         )
         _, line_h = _pil_text_size(draw, line, value_font)
         current_y += line_h + line_gap
+
+
+def _draw_themed_summary_metric_card(
+    draw: Any,
+    *,
+    x0: int,
+    y0: int,
+    x1: int,
+    y1: int,
+    title: str,
+    value: str,
+    accent: Tuple[int, int, int],
+    width: int,
+    height: int,
+) -> None:
+    card_w = max(1, x1 - x0)
+    card_h = max(1, y1 - y0)
+    rail_offset = _draw_themed_card_shell(
+        draw,
+        x0=x0,
+        y0=y0,
+        x1=x1,
+        y1=y1,
+        accent=accent,
+        width=width,
+        height=height,
+    )
+
+    title_font = _load_theme_font(
+        LABEL_FONT_FILE,
+        max(12, int(round(card_h * 0.12))),
+    )
+    value_font, value_lines = _fit_pil_wrapped_text(
+        draw,
+        str(value or ""),
+        font_file=DISPLAY_FONT_FILE,
+        base_size=max(22, int(round(card_h * 0.25))),
+        min_size=max(15, int(round(card_h * 0.17))),
+        max_width=max(40, int(round(card_w * 0.68))),
+        max_lines=2,
+    )
+
+    inner_pad_x = max(16, int(round(card_w * 0.08))) + rail_offset + 2
+    title_y = y0 + max(12, int(round(card_h * 0.14)))
+    if title_font is not None:
+        title_text = str(title or "").upper()
+        _, title_h = _pil_text_size(draw, title_text, title_font)
+        draw.text(
+            (x0 + inner_pad_x, title_y),
+            title_text,
+            font=title_font,
+            fill=_bgr_to_rgb(accent),
+        )
+    else:
+        title_h = max(12, int(round(card_h * 0.12)))
+
+    value_gap = max(4, int(round(card_h * 0.04)))
+    line_heights = [_pil_text_size(draw, line, value_font)[1] for line in value_lines] if value_font is not None else []
+    value_block_h = sum(line_heights) + value_gap * max(0, len(line_heights) - 1)
+    value_y = title_y + title_h + max(10, int(round(card_h * 0.14)))
+    available_bottom = y1 - max(14, int(round(card_h * 0.14)))
+    if value_block_h > 0 and value_block_h < (available_bottom - value_y):
+        value_y += int(round((available_bottom - value_y - value_block_h) * 0.16))
+
+    for line in value_lines:
+        if value_font is None:
+            break
+        _, line_h = _pil_text_size(draw, line, value_font)
+        draw.text(
+            (x0 + inner_pad_x, value_y),
+            line,
+            font=value_font,
+            fill=_bgr_to_rgb(THEME_TEXT_PRIMARY),
+        )
+        value_y += line_h + value_gap

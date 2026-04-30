@@ -49,6 +49,9 @@ from app.workers.render.coach_video_renderer_parts.themed_story import (
 from app.workers.render.coach_video_renderer_parts.render_pause_sequence import (
     _write_stage_frames,
 )
+from app.workers.render.coach_video_renderer_parts.timeline_events import (
+    _phase_cut_points,
+)
 from app.workers.render.render_load_watch import (
     _load_hotspot_regions,
     _preferred_ffc_cue_risk_id,
@@ -132,6 +135,157 @@ class CoachVideoRendererTest(unittest.TestCase):
 
         self.assertGreater(int(frame.sum()), 0)
 
+    def test_smoothed_tracks_assign_draw_modes_for_soft_and_missing_visibility(self):
+        pose_frames = [_pose_frame(i, shift=0.0) for i in range(5)]
+        pose_frames[2]["landmarks"][11]["visibility"] = 0.45
+        pose_frames[2]["landmarks"][12]["visibility"] = 0.0
+
+        tracks = coach_video_renderer._build_smoothed_tracks(
+            pose_frames,
+            width=160,
+            height=120,
+            fps=24.0,
+        )
+
+        self.assertEqual(
+            coach_video_renderer._track_draw_mode(tracks, 11, 2),
+            "dashed",
+        )
+        self.assertEqual(
+            coach_video_renderer._track_draw_mode(tracks, 12, 2),
+            "placeholder",
+        )
+        self.assertIsNotNone(
+            coach_video_renderer._track_point(tracks, 12, 2),
+        )
+
+    def test_render_skeleton_video_returns_render_event_quality_metadata(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            video_path = os.path.join(tmpdir, "input.mp4")
+            output_path = os.path.join(tmpdir, "output.mp4")
+
+            writer = cv2.VideoWriter(
+                video_path,
+                cv2.VideoWriter_fourcc(*"mp4v"),
+                24.0,
+                (160, 120),
+            )
+            self.assertTrue(writer.isOpened())
+            for _ in range(5):
+                writer.write(np.zeros((120, 160, 3), dtype=np.uint8))
+            writer.release()
+
+            pose_frames = [_pose_frame(i, shift=0.0) for i in range(5)]
+            result = render_skeleton_video(
+                video_path=video_path,
+                pose_frames=pose_frames,
+                events={
+                    "bfc": {"frame": 1, "confidence": 0.8, "method": "simple_grounded_bfc"},
+                    "ffc": {"frame": 2, "confidence": 0.8, "method": "release_backward_chain_grounding"},
+                    "release": {"frame": 4, "confidence": 0.8, "method": "multi_signal_consensus"},
+                },
+                output_path=output_path,
+                pause_seconds=0.0,
+                end_summary_seconds=0.0,
+            )
+
+            self.assertTrue(result["available"])
+            self.assertIn("render_events", result)
+            self.assertIn("render_quality", result)
+            self.assertIn("ffc", result["render_events"])
+            self.assertIn("render_quality", result["render_events"]["ffc"])
+            self.assertEqual(
+                result["render_events"]["ffc"]["render_confidence"],
+                result["render_events"]["ffc"]["render_quality"],
+            )
+            self.assertIn("detected_frame", result["render_events"]["ffc"])
+
+    def test_render_skeleton_video_rescues_low_quality_release_frame_for_slow_motion(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            video_path = os.path.join(tmpdir, "input.mp4")
+            output_path = os.path.join(tmpdir, "output.mp4")
+
+            writer = cv2.VideoWriter(
+                video_path,
+                cv2.VideoWriter_fourcc(*"mp4v"),
+                24.0,
+                (160, 120),
+            )
+            self.assertTrue(writer.isOpened())
+            for _ in range(6):
+                writer.write(np.zeros((120, 160, 3), dtype=np.uint8))
+            writer.release()
+
+            pose_frames = [_pose_frame(i, shift=0.0) for i in range(6)]
+            for joint_idx in (11, 12, 13, 14, 15, 16, 23, 24, 25, 26, 27, 28):
+                pose_frames[4]["landmarks"][joint_idx]["visibility"] = 0.0
+
+            result = render_skeleton_video(
+                video_path=video_path,
+                pose_frames=pose_frames,
+                events={
+                    "bfc": {"frame": 1, "confidence": 0.8, "method": "simple_grounded_bfc"},
+                    "ffc": {"frame": 2, "confidence": 0.8, "method": "release_backward_chain_grounding"},
+                    "release": {"frame": 4, "confidence": 0.8, "method": "multi_signal_consensus"},
+                },
+                output_path=output_path,
+                pause_seconds=0.0,
+                end_summary_seconds=0.0,
+                playback_mode={"mode": "likely_slow_motion"},
+            )
+
+            self.assertTrue(result["available"])
+            self.assertEqual(result["render_events"]["release"]["detected_frame"], 4)
+            self.assertLess(result["render_events"]["release"]["render_frame"], 4)
+            self.assertEqual(
+                result["render_events"]["release"]["render_method"],
+                "quality_resolved_neighbor",
+            )
+
+    def test_skeleton_frame_gate_uses_track_quality_for_occluded_frame(self):
+        pose_frames = [_pose_frame(i, shift=0.0) for i in range(5)]
+        for joint_idx in (11, 12, 13, 14, 15, 16, 23, 24, 25, 26, 27, 28):
+            pose_frames[2]["landmarks"][joint_idx]["visibility"] = 0.0
+        tracks = coach_video_renderer._build_smoothed_tracks(
+            pose_frames,
+            width=160,
+            height=120,
+            fps=24.0,
+        )
+
+        self.assertFalse(
+            coach_video_renderer._should_draw_skeleton_frame(
+                pose_frames=pose_frames,
+                frame_idx=2,
+                events={"release": {"frame": 4}},
+                fps=24.0,
+            )
+        )
+        self.assertTrue(
+            coach_video_renderer._should_draw_skeleton_frame(
+                pose_frames=pose_frames,
+                tracks=tracks,
+                frame_idx=2,
+                events={"release": {"frame": 4}},
+                fps=24.0,
+            )
+        )
+
+    def test_tracked_joint_quality_uses_soft_visibility_weighting(self):
+        pose_frames = [_pose_frame(i, shift=0.0) for i in range(3)]
+        for joint_idx in (11, 12, 13, 14):
+            pose_frames[1]["landmarks"][joint_idx]["visibility"] = 0.45
+        for joint_idx in (23, 24):
+            pose_frames[1]["landmarks"][joint_idx]["visibility"] = 0.0
+
+        quality = coach_video_renderer._tracked_joint_quality(
+            pose_frames,
+            frame_idx=1,
+        )
+
+        self.assertGreater(quality, 0.0)
+        self.assertLess(quality, 1.0)
+
     def test_pause_hold_plan_gives_hotspots_extra_read_time(self):
         normal_cue, normal_hotspot = _pause_hold_plan(
             pause_frames=10,
@@ -146,6 +300,24 @@ class CoachVideoRendererTest(unittest.TestCase):
         self.assertLess(hotspot_cue, normal_cue)
         self.assertGreater(hotspot_hold, 5)
         self.assertGreater(hotspot_cue + hotspot_hold, normal_cue)
+
+    def test_phase_cut_points_retime_slow_motion_tail_cluster(self):
+        cp1, cp2, cp3 = _phase_cut_points(
+            start=319,
+            stop=427,
+            events={
+                "bfc": {"frame": 415},
+                "ffc": {"frame": 420},
+                "uah": {"frame": 421},
+                "release": {"frame": 423},
+            },
+            fps=30.0,
+            playback_mode={"mode": "likely_slow_motion"},
+        )
+
+        self.assertLess(cp1, 415)
+        self.assertLess(cp2, 420)
+        self.assertLess(cp3, 421)
 
     def test_pause_sequence_plan_reserves_body_pay_after_break(self):
         sequence = _pause_sequence_plan(
@@ -350,11 +522,15 @@ class CoachVideoRendererTest(unittest.TestCase):
             },
         )
 
-        self.assertEqual((render_events["bfc"] or {}).get("method"), "render_phase_fallback")
-        self.assertEqual((render_events["ffc"] or {}).get("method"), "render_phase_fallback")
+        self.assertEqual((render_events["bfc"] or {}).get("method"), "ultimate_fallback")
+        self.assertEqual((render_events["bfc"] or {}).get("render_method"), "phase_band_fallback")
+        self.assertEqual((render_events["bfc"] or {}).get("detected_frame"), 488)
+        self.assertEqual((render_events["ffc"] or {}).get("method"), "ultimate_fallback")
+        self.assertEqual((render_events["ffc"] or {}).get("render_method"), "phase_band_fallback")
+        self.assertEqual((render_events["ffc"] or {}).get("detected_frame"), 490)
         self.assertLess(int((render_events["bfc"] or {}).get("frame")), int((render_events["ffc"] or {}).get("frame")))
         self.assertLess(int((render_events["ffc"] or {}).get("frame")), 492)
-        self.assertGreaterEqual(int((render_events["ffc"] or {}).get("frame")), 460)
+        self.assertGreaterEqual(int((render_events["ffc"] or {}).get("frame")), 487)
 
     def test_render_timeline_events_preserves_ordered_bfc_even_if_low_confidence(self):
         render_events = _render_timeline_events(
@@ -369,6 +545,8 @@ class CoachVideoRendererTest(unittest.TestCase):
 
         self.assertEqual((render_events["bfc"] or {}).get("frame"), 133)
         self.assertEqual((render_events["bfc"] or {}).get("method"), "simple_grounded_bfc")
+        self.assertEqual((render_events["bfc"] or {}).get("render_method"), "detected_frame")
+        self.assertEqual((render_events["bfc"] or {}).get("detected_frame"), 133)
         self.assertEqual((render_events["ffc"] or {}).get("frame"), 134)
 
     def test_render_timeline_events_falls_back_when_bfc_is_not_before_ffc(self):
@@ -382,22 +560,23 @@ class CoachVideoRendererTest(unittest.TestCase):
             },
         )
 
-        self.assertEqual((render_events["bfc"] or {}).get("method"), "render_phase_fallback")
+        self.assertEqual((render_events["bfc"] or {}).get("method"), "simple_grounded_bfc")
+        self.assertEqual((render_events["bfc"] or {}).get("render_method"), "phase_band_fallback")
+        self.assertEqual((render_events["bfc"] or {}).get("detected_frame"), 136)
         self.assertLess(int((render_events["bfc"] or {}).get("frame")), 134)
 
-    def test_preferred_ffc_cue_risk_id_allows_render_phase_fallback_story(self):
+    def test_preferred_ffc_cue_risk_id_rejects_render_only_ffc_story(self):
         risk_by_id = {
             "knee_brace_failure": {"risk_id": "knee_brace_failure", "signal_strength": 0.8, "confidence": 0.8},
             "foot_line_deviation": {"risk_id": "foot_line_deviation", "signal_strength": 0.3, "confidence": 0.7},
         }
         events = {
-            "ffc": {"frame": 468, "confidence": 0.40, "method": "render_phase_fallback"},
+            "ffc": {"frame": 468, "confidence": 0.40, "method": "ultimate_fallback", "render_method": "phase_band_fallback"},
             "event_chain": {"quality": 0.05},
         }
 
-        self.assertEqual(
+        self.assertIsNone(
             _preferred_ffc_cue_risk_id(risk_by_id, report_story=None, events=events),
-            "knee_brace_failure",
         )
 
     def test_select_hotspot_frame_idx_prefers_visible_leg_stack_near_anchor(self):
@@ -883,6 +1062,46 @@ class CoachVideoRendererTest(unittest.TestCase):
             self.assertEqual(result["slow_motion_factor"], 5.0)
             self.assertEqual(result["frames_rendered"], 47)
 
+    def test_render_skeleton_video_adapts_pause_and_summary_holds_for_small_high_fps_clip(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            video_path = os.path.join(tmpdir, "input.mp4")
+            output_path = os.path.join(tmpdir, "output.mp4")
+
+            writer = cv2.VideoWriter(
+                video_path,
+                cv2.VideoWriter_fourcc(*"mp4v"),
+                60.0,
+                (160, 120),
+            )
+            self.assertTrue(writer.isOpened())
+            for _ in range(8):
+                writer.write(np.zeros((120, 160, 3), dtype=np.uint8))
+            writer.release()
+
+            pose_frames = [_pose_frame(i, shift=0.002 * i) for i in range(8)]
+            with mock.patch.object(
+                coach_video_renderer.render_video,
+                "_subject_height_ratio",
+                return_value=0.35,
+            ):
+                result = render_skeleton_video(
+                    video_path=video_path,
+                    pose_frames=pose_frames,
+                    events={
+                        "bfc": {"frame": 1},
+                        "ffc": {"frame": 3},
+                        "release": {"frame": 6},
+                    },
+                    output_path=output_path,
+                    pause_seconds=5.0,
+                    end_summary_seconds=2.5,
+                )
+
+            self.assertTrue(result["available"])
+            self.assertLess(result["pause_seconds"], 5.0)
+            self.assertLess(result["end_summary_seconds"], 2.5)
+            self.assertEqual(result["subject_height_ratio"], 0.35)
+
     def test_render_skeleton_video_uses_clean_raw_frame_for_end_summary(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             video_path = os.path.join(tmpdir, "input.mp4")
@@ -905,7 +1124,7 @@ class CoachVideoRendererTest(unittest.TestCase):
             def fake_draw_skeleton(frame, tracks, frame_idx):
                 frame[:, :] = (255, 0, 255)
 
-            def fake_draw_phase_overlay(frame, *, frame_idx, start, stop, events):
+            def fake_draw_phase_overlay(frame, *, frame_idx, start, stop, events, fps=30.0, playback_mode=None):
                 frame[0:10, 0:10] = (0, 255, 255)
 
             def capture_summary(frame, **kwargs):

@@ -70,7 +70,41 @@ class VideoScreenTests(unittest.TestCase):
         self.assertFalse(result["passed"])
         self.assertEqual(
             result["blocking_issues"][0]["code"],
-            "multiple_prominent_people",
+            "too_many_people_in_bowling_frame",
+        )
+        self.assertIn("Too many people", result["blocking_issues"][0]["detail"])
+
+    def test_screening_prefers_people_message_when_people_and_delivery_both_fail(self):
+        with patch(
+            "app.workers.screening.video_screen.detect_delivery_candidates",
+            return_value={
+                "delivery_count": 2,
+                "method": "wrist_velocity",
+                "candidate_frames": [40, 120],
+            },
+        ), patch(
+            "app.workers.screening.video_screen.assess_primary_subject",
+            return_value={
+                "passed": False,
+                "status": "fail",
+                "frames_with_competing_primary": [30, 60],
+                "frames_with_minor_people": [],
+            },
+        ):
+            result = run_preanalysis_screen(
+                video={"fps": 30.0, "total_frames": 150, "path": "/tmp/fake.mp4"},
+                pose_frames=[],
+                hand="R",
+            )
+
+        self.assertFalse(result["passed"])
+        self.assertEqual(
+            result["blocking_issues"][0]["code"],
+            "too_many_people_in_bowling_frame",
+        )
+        self.assertEqual(
+            result["blocking_issues"][1]["code"],
+            "multiple_deliveries",
         )
 
     def test_screening_allows_minor_people_with_warning(self):
@@ -203,6 +237,48 @@ class VideoScreenTests(unittest.TestCase):
         self.assertEqual(result["blocking_issues"][0]["code"], "multiple_deliveries")
         self.assertEqual(result["checks"]["delivery"]["delivery_count"], 2)
         self.assertEqual(result["checks"]["delivery"]["candidate_frames"], [60, 170])
+
+    def test_screening_reports_people_in_frame_when_subject_is_inconclusive_and_guard_splits_delivery(self):
+        with patch(
+            "app.workers.screening.video_screen.detect_delivery_candidates",
+            return_value={
+                "delivery_count": 2,
+                "method": "wrist_velocity",
+                "candidate_frames": [9, 82],
+            },
+        ), patch(
+            "app.workers.screening.video_screen.assess_primary_subject",
+            return_value={
+                "passed": True,
+                "status": "warn",
+                "method": "detector_inconclusive",
+                "frames_with_competing_primary": [],
+                "frames_with_minor_people": [],
+                "detector_frames": 0,
+                "max_prominent_people": 1,
+            },
+        ):
+            result = run_preanalysis_screen(
+                video={
+                    "fps": 60.0,
+                    "total_frames": 209,
+                    "path": "/tmp/fake.mp4",
+                    "coarse_delivery_window": {
+                        "available": True,
+                        "method": "subject_local_motion_scan",
+                        "delivery_count": 1,
+                        "peak_frames": [12],
+                    },
+                },
+                pose_frames=[],
+                hand="R",
+            )
+
+        self.assertFalse(result["passed"])
+        self.assertEqual(
+            result["blocking_issues"][0]["code"],
+            "too_many_people_in_bowling_frame",
+        )
 
 
 if __name__ == "__main__":

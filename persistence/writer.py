@@ -1,4 +1,5 @@
 import uuid
+from datetime import date, datetime
 from typing import Any, Dict, Optional
 
 from sqlalchemy import inspect
@@ -74,6 +75,34 @@ def _analysis_explanation_trace_available(db: Session) -> bool:
             exc,
         )
         return False
+
+
+def _json_safe(value: Any) -> Any:
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, uuid.UUID):
+        return str(value)
+    if isinstance(value, (datetime, date)):
+        return value.isoformat()
+    if isinstance(value, dict):
+        return {str(key): _json_safe(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(item) for item in value]
+    if isinstance(value, set):
+        return [_json_safe(item) for item in value]
+    item_method = getattr(value, "item", None)
+    if callable(item_method):
+        try:
+            return _json_safe(item_method())
+        except Exception:
+            pass
+    tolist_method = getattr(value, "tolist", None)
+    if callable(tolist_method):
+        try:
+            return _json_safe(tolist_method())
+        except Exception:
+            pass
+    return str(value)
 
 
 def _deterministic_summary(result: Dict[str, Any]) -> Dict[str, Optional[str]]:
@@ -383,37 +412,46 @@ def write_analysis(result: dict, db: Optional[Session] = None, **kwargs) -> str:
         # --------------------------------------------------------
         if isinstance(result, dict):
             result.setdefault("run_id", str(run_id))
+        result_json = _json_safe(result)
 
         db.add(
             AnalysisResultRaw(
                 run_id=run_id,
-                result_json=result,
+                result_json=result_json,
             )
         )
 
         if _analysis_explanation_trace_available(db):
-            explanation_trace = _deterministic_trace(result)
-            existing_trace = db.get(AnalysisExplanationTrace, run_id)
-            if existing_trace is not None:
-                raise ValueError(f"Explanation trace already exists for run_id={run_id}")
-            db.add(
-                AnalysisExplanationTrace(
-                    run_id=run_id,
-                    knowledge_pack_id=explanation_trace["knowledge_pack_id"],
-                    knowledge_pack_version=explanation_trace["knowledge_pack_version"],
-                    diagnosis_status=explanation_trace["diagnosis_status"],
-                    primary_mechanism_id=explanation_trace["primary_mechanism_id"],
-                    matched_symptom_ids=explanation_trace["matched_symptom_ids"],
-                    candidate_mechanisms=explanation_trace["candidate_mechanisms"],
-                    supporting_evidence=explanation_trace["supporting_evidence"],
-                    contradictions_triggered=explanation_trace["contradictions_triggered"],
-                    selected_trajectory_ids=explanation_trace["selected_trajectory_ids"],
-                    selected_prescription_ids=explanation_trace["selected_prescription_ids"],
-                    selected_render_story_ids=explanation_trace["selected_render_story_ids"],
-                    selected_history_binding_ids=explanation_trace["selected_history_binding_ids"],
-                    explanation_trace_json=explanation_trace["explanation_trace_json"],
+            explanation_trace = _json_safe(_deterministic_trace(result))
+            try:
+                with db.begin_nested():
+                    existing_trace = db.get(AnalysisExplanationTrace, run_id)
+                    if existing_trace is not None:
+                        raise ValueError(f"Explanation trace already exists for run_id={run_id}")
+                    db.add(
+                        AnalysisExplanationTrace(
+                            run_id=run_id,
+                            knowledge_pack_id=explanation_trace["knowledge_pack_id"],
+                            knowledge_pack_version=explanation_trace["knowledge_pack_version"],
+                            diagnosis_status=explanation_trace["diagnosis_status"],
+                            primary_mechanism_id=explanation_trace["primary_mechanism_id"],
+                            matched_symptom_ids=explanation_trace["matched_symptom_ids"],
+                            candidate_mechanisms=explanation_trace["candidate_mechanisms"],
+                            supporting_evidence=explanation_trace["supporting_evidence"],
+                            contradictions_triggered=explanation_trace["contradictions_triggered"],
+                            selected_trajectory_ids=explanation_trace["selected_trajectory_ids"],
+                            selected_prescription_ids=explanation_trace["selected_prescription_ids"],
+                            selected_render_story_ids=explanation_trace["selected_render_story_ids"],
+                            selected_history_binding_ids=explanation_trace["selected_history_binding_ids"],
+                            explanation_trace_json=explanation_trace["explanation_trace_json"],
+                        )
+                    )
+                    db.flush()
+            except Exception as exc:
+                logger.warning(
+                    "[persistence] skipping explanation trace persistence because trace write failed: %s",
+                    exc,
                 )
-            )
         else:
             logger.warning(
                 "[persistence] skipping explanation trace persistence because table %s is unavailable",

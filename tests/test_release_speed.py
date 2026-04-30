@@ -1,8 +1,13 @@
+import math
 import unittest
 from unittest.mock import patch
 
 from app.workers.speed.release_speed import (
+    _estimate_release_speed_pass,
+    _apply_clean_salvage_promotion,
     _apply_low_confidence_neighbor_recovery,
+    _apply_small_subject_compensation,
+    _is_implausible_saturated_estimate,
     estimate_release_speed,
 )
 
@@ -38,28 +43,71 @@ def _frame(frame_idx, wrist_x, wrist_y, shoulder_x=0.48, shoulder_y=0.30):
     return {"frame": frame_idx, "landmarks": lm}
 
 
+def _speed_test_frames():
+    return [
+        _frame(0, 0.40, 0.58),
+        _frame(1, 0.50, 0.50),
+        _frame(2, 0.63, 0.39),
+        _frame(3, 0.78, 0.28),
+        _frame(4, 0.88, 0.23),
+        _frame(5, 0.94, 0.20),
+        _frame(6, 0.98, 0.18),
+        _frame(7, 0.99, 0.175),
+        _frame(8, 1.00, 0.170),
+        _frame(9, 1.00, 0.168),
+        _frame(10, 1.00, 0.166),
+        _frame(11, 1.00, 0.165),
+    ]
+
+
+def _stable_speed_test_frames():
+    frames = []
+    shoulder_x = 0.48
+    shoulder_y = 0.30
+    elbow_radius = 0.12
+    wrist_radius = 0.24
+    angles = [132, 124, 116, 106, 96, 84, 70, 56, 42, 30, 21, 15, 11, 8]
+    for idx, angle_deg in enumerate(angles):
+        angle = math.radians(angle_deg)
+        lm = _blank_landmarks()
+        _set_pt(lm, 12, shoulder_x, shoulder_y)
+        _set_pt(
+            lm,
+            14,
+            shoulder_x + elbow_radius * math.cos(angle),
+            shoulder_y + elbow_radius * math.sin(angle),
+        )
+        _set_pt(
+            lm,
+            16,
+            shoulder_x + wrist_radius * math.cos(angle),
+            shoulder_y + wrist_radius * math.sin(angle),
+        )
+        _set_pt(lm, 11, 0.42, 0.30)
+        _set_pt(lm, 23, 0.46, 0.58)
+        _set_pt(lm, 24, 0.54, 0.58)
+        _set_pt(lm, 25, 0.47, 0.73)
+        _set_pt(lm, 26, 0.55, 0.73)
+        _set_pt(lm, 27, 0.48, 0.93)
+        _set_pt(lm, 28, 0.56, 0.93)
+        frames.append({"frame": idx, "landmarks": lm})
+    return frames
+
+
 class ReleaseSpeedTests(unittest.TestCase):
     def test_returns_estimated_speed_with_tilde_display(self):
-        pose_frames = [
-            _frame(0, 0.40, 0.58),
-            _frame(1, 0.50, 0.50),
-            _frame(2, 0.63, 0.39),
-            _frame(3, 0.78, 0.28),
-            _frame(4, 0.88, 0.23),
-            _frame(5, 0.94, 0.20),
-            _frame(6, 0.98, 0.18),
-        ]
+        pose_frames = _stable_speed_test_frames()
 
         result = estimate_release_speed(
             pose_frames=pose_frames,
-            events={"release": {"frame": 3}},
+            events={"release": {"frame": 5}},
             video={"fps": 60.0, "width": 360, "height": 640},
             hand="R",
         )
 
         self.assertTrue(result["available"])
         self.assertTrue(result["display"].startswith("~"))
-        self.assertGreaterEqual(result["value_kph"], 90)
+        self.assertGreaterEqual(result["value_kph"], 75)
         self.assertLessEqual(result["value_kph"], 145)
         self.assertGreater(result["confidence"], 0.25)
         self.assertEqual(result["method"], "release_kinematics_research_v2")
@@ -78,25 +126,17 @@ class ReleaseSpeedTests(unittest.TestCase):
         self.assertEqual(result["reason"], "missing_release_window")
 
     def test_low_release_confidence_uses_soft_recovery_metrics(self):
-        pose_frames = [
-            _frame(0, 0.40, 0.58),
-            _frame(1, 0.50, 0.50),
-            _frame(2, 0.63, 0.39),
-            _frame(3, 0.78, 0.28),
-            _frame(4, 0.88, 0.23),
-            _frame(5, 0.94, 0.20),
-            _frame(6, 0.98, 0.18),
-        ]
+        pose_frames = _stable_speed_test_frames()
 
         high_confidence = estimate_release_speed(
             pose_frames=pose_frames,
-            events={"release": {"frame": 3, "confidence": 0.85}},
+            events={"release": {"frame": 5, "confidence": 0.85}},
             video={"fps": 60.0, "width": 360, "height": 640},
             hand="R",
         )
         low_confidence = estimate_release_speed(
             pose_frames=pose_frames,
-            events={"release": {"frame": 3, "confidence": 0.55}},
+            events={"release": {"frame": 5, "confidence": 0.55}},
             video={"fps": 60.0, "width": 360, "height": 640},
             hand="R",
         )
@@ -106,6 +146,96 @@ class ReleaseSpeedTests(unittest.TestCase):
         self.assertFalse(high_confidence["debug"]["soft_release_recovery_mode"])
         self.assertTrue(low_confidence["debug"]["soft_release_recovery_mode"])
         self.assertGreaterEqual(low_confidence["value_kph"], high_confidence["value_kph"])
+
+    def test_estimate_release_speed_pass_receives_wrist_peak_anchor(self):
+        returned = {
+            "available": True,
+            "display_policy": "show",
+            "value_kph": 100,
+            "display": "~100 km/h",
+            "confidence": 0.6,
+            "method": "release_kinematics_research_v2",
+            "ball_weight_oz": 5.25,
+            "reason": None,
+            "debug": {"release_frame": 5, "wrist_peak_frame": 7, "peak_offset_frames": 2, "window_after": 6},
+        }
+
+        with patch(
+            "app.workers.speed.release_speed._estimate_release_speed_pass",
+            return_value=returned,
+        ) as estimate_pass:
+            result = estimate_release_speed(
+                pose_frames=[{} for _ in range(20)],
+                events={"release": {"frame": 5, "confidence": 0.85}, "peak": {"frame": 7}},
+                video={"fps": 30.0, "width": 360, "height": 640},
+                hand="R",
+            )
+
+        self.assertTrue(result["available"])
+        kwargs = estimate_pass.call_args.kwargs
+        self.assertEqual(kwargs["release_frame"], 5)
+        self.assertEqual(kwargs["wrist_peak_frame"], 7)
+        self.assertEqual(kwargs["window_after"], 4)
+
+    def test_estimate_release_speed_ignores_implausibly_far_peak_frame(self):
+        returned = {
+            "available": True,
+            "display_policy": "show",
+            "value_kph": 100,
+            "display": "~100 km/h",
+            "confidence": 0.6,
+            "method": "release_kinematics_research_v2",
+            "ball_weight_oz": 5.25,
+            "reason": None,
+            "debug": {"release_frame": 4, "wrist_peak_frame": 4, "peak_offset_frames": 0, "window_after": 6},
+        }
+
+        with patch(
+            "app.workers.speed.release_speed._estimate_release_speed_pass",
+            return_value=returned,
+        ) as estimate_pass:
+            result = estimate_release_speed(
+                pose_frames=[{} for _ in range(20)],
+                events={"release": {"frame": 4, "confidence": 0.85}, "peak": {"frame": 12}},
+                video={"fps": 30.0, "width": 360, "height": 640},
+                hand="R",
+            )
+
+        self.assertTrue(result["available"])
+        kwargs = estimate_pass.call_args.kwargs
+        self.assertEqual(kwargs["release_frame"], 4)
+        self.assertEqual(kwargs["wrist_peak_frame"], 4)
+        self.assertEqual(kwargs["window_after"], 3)
+
+    def test_estimate_release_speed_collapses_nearby_peak_to_release_anchor(self):
+        returned = {
+            "available": True,
+            "display_policy": "show",
+            "value_kph": 100,
+            "display": "~100 km/h",
+            "confidence": 0.6,
+            "method": "release_kinematics_research_v2",
+            "ball_weight_oz": 5.25,
+            "reason": None,
+            "debug": {"release_frame": 5, "wrist_peak_frame": 5, "peak_offset_frames": 0, "window_after": 3},
+        }
+
+        with patch(
+            "app.workers.speed.release_speed._estimate_release_speed_pass",
+            return_value=returned,
+        ) as estimate_pass:
+            result = estimate_release_speed(
+                pose_frames=[{} for _ in range(20)],
+                events={"release": {"frame": 5, "confidence": 0.85}, "peak": {"frame": 6}},
+                video={"fps": 30.0, "width": 360, "height": 640},
+                hand="R",
+            )
+
+        self.assertTrue(result["available"])
+        kwargs = estimate_pass.call_args.kwargs
+        self.assertEqual(kwargs["release_frame"], 5)
+        self.assertEqual(kwargs["wrist_peak_frame"], 5)
+        self.assertEqual(kwargs["window_after"], 3)
 
     def test_low_confidence_neighbor_recovery_uses_stable_upper_quartile(self):
         primary = {
@@ -165,11 +295,15 @@ class ReleaseSpeedTests(unittest.TestCase):
             _frame(4, 0.56, 0.50),
             _frame(5, 0.92, 0.18),
             _frame(6, 0.58, 0.46),
+            _frame(7, 0.94, 0.16),
+            _frame(8, 0.55, 0.49),
+            _frame(9, 0.95, 0.15),
+            _frame(10, 0.56, 0.47),
         ]
 
         result = estimate_release_speed(
             pose_frames=pose_frames,
-            events={"release": {"frame": 3}},
+            events={"release": {"frame": 4}},
             video={"fps": 60.0, "width": 360, "height": 640},
             hand="R",
         )
@@ -241,6 +375,176 @@ class ReleaseSpeedTests(unittest.TestCase):
         self.assertTrue(result["available"])
         self.assertEqual(result["value_kph"], 130)
         self.assertTrue(result["debug"]["low_confidence_neighbor_recovery"])
+
+    def test_implausible_saturated_estimate_is_detected(self):
+        result = {
+            "available": True,
+            "value_kph": 145,
+            "confidence": 0.49,
+            "debug": {
+                "saturated": True,
+                "release_confidence": 0.47,
+                "elbow_extension_velocity_deg_per_sec": 522.9,
+                "shoulder_body_ratio": 0.922,
+                "overall_wrist_visibility": 0.093,
+            },
+        }
+
+        self.assertTrue(_is_implausible_saturated_estimate(result))
+
+    def test_estimate_release_speed_recovers_from_implausible_saturation(self):
+        scripted = [
+            {
+                "available": True,
+                "display_policy": "show",
+                "value_kph": 145,
+                "display": "~145 km/h",
+                "confidence": 0.49,
+                "method": "release_kinematics_research_v2",
+                "debug": {
+                    "release_frame": 513,
+                    "saturated": True,
+                    "release_confidence": 0.47,
+                    "elbow_extension_velocity_deg_per_sec": 522.9,
+                    "shoulder_body_ratio": 0.922,
+                    "overall_wrist_visibility": 0.093,
+                },
+            },
+            {
+                "available": True,
+                "display_policy": "show_low_confidence",
+                "value_kph": 107,
+                "display": "~107 km/h",
+                "confidence": 0.52,
+                "method": "release_kinematics_research_v2_salvage",
+                "debug": {
+                    "release_frame": 513,
+                    "saturated": False,
+                    "release_confidence": 0.47,
+                    "elbow_extension_velocity_deg_per_sec": 240.0,
+                    "shoulder_body_ratio": 0.81,
+                    "overall_wrist_visibility": 0.093,
+                },
+            },
+        ]
+
+        with patch(
+            "app.workers.speed.release_speed._estimate_release_speed_pass",
+            side_effect=scripted,
+        ):
+            result = estimate_release_speed(
+                pose_frames=[{} for _ in range(700)],
+                events={"release": {"frame": 513, "confidence": 0.61}},
+                video={"fps": 59.94, "width": 478, "height": 850},
+                hand="R",
+            )
+
+        self.assertTrue(result["available"])
+        self.assertEqual(result["value_kph"], 107)
+        self.assertEqual(result["reason"], "recovered_implausible_saturation")
+        self.assertEqual(
+            result["debug"]["primary_failure_reason"],
+            "implausible_saturated_estimate",
+        )
+
+    def test_clean_salvage_promotion_restores_plausible_fast_clip(self):
+        result = {
+            "available": True,
+            "display_policy": "show_low_confidence",
+            "value_kph": 95,
+            "display": "~95 km/h",
+            "confidence": 0.52,
+            "method": "release_kinematics_research_v2_salvage",
+            "ball_weight_oz": 5.25,
+            "reason": "recovered_unstable_arm_scale",
+            "debug": {
+                "release_frame": 141,
+                "wrist_arm_ratio": 11.523,
+                "shoulder_body_ratio": 0.322,
+                "pelvis_body_ratio": 0.716,
+                "elbow_extension_velocity_deg_per_sec": 154.6,
+                "overall_wrist_visibility": 0.351,
+                "release_confidence": 0.59,
+                "saturated": False,
+            },
+        }
+
+        promoted = _apply_clean_salvage_promotion(
+            result,
+            events={
+                "release": {"frame": 141, "confidence": 0.59},
+                "event_chain": {"ordered": True, "quality": 0.35},
+            },
+        )
+
+        self.assertTrue(promoted["available"])
+        self.assertGreater(promoted["value_kph"], 95)
+        self.assertEqual(promoted["display_policy"], "show")
+        self.assertIn("clean_salvage_promotion", promoted["debug"])
+
+    def test_clean_salvage_promotion_allows_borderline_live_mcgrath_case(self):
+        result = {
+            "available": True,
+            "display_policy": "show_low_confidence",
+            "value_kph": 94,
+            "display": "~94 km/h",
+            "confidence": 0.51,
+            "method": "release_kinematics_research_v2_salvage",
+            "ball_weight_oz": 5.25,
+            "reason": "recovered_unstable_arm_scale",
+            "debug": {
+                "release_frame": 141,
+                "wrist_arm_ratio": 11.313,
+                "shoulder_body_ratio": 0.324,
+                "pelvis_body_ratio": 0.743,
+                "elbow_extension_velocity_deg_per_sec": 148.9,
+                "overall_wrist_visibility": 0.351,
+                "release_confidence": 0.51,
+                "saturated": False,
+            },
+        }
+
+        promoted = _apply_clean_salvage_promotion(
+            result,
+            events={
+                "release": {"frame": 141, "confidence": 0.51},
+                "event_chain": {"ordered": True, "quality": 0.29},
+            },
+        )
+
+        self.assertTrue(promoted["available"])
+        self.assertGreater(promoted["value_kph"], 94)
+        self.assertEqual(promoted["display_policy"], "show")
+        self.assertIn("clean_salvage_promotion", promoted["debug"])
+
+    def test_small_subject_compensation_lifts_far_clip_recovery(self):
+        result = {
+            "available": True,
+            "display_policy": "show_low_confidence",
+            "value_kph": 99,
+            "display": "~99 km/h",
+            "confidence": 0.60,
+            "method": "release_kinematics_research_v2_salvage",
+            "ball_weight_oz": 5.25,
+            "reason": "recovered_implausible_saturation",
+            "debug": {
+                "body_height_ratio": 0.233,
+                "body_height_px": 197.6,
+                "overall_wrist_visibility": 0.107,
+                "shoulder_body_ratio": 0.529,
+                "pelvis_body_ratio": 0.469,
+                "saturated": False,
+            },
+        }
+
+        compensated = _apply_small_subject_compensation(
+            result,
+            events={"event_chain": {"ordered": True, "quality": 0.42}},
+        )
+
+        self.assertTrue(compensated["available"])
+        self.assertGreater(compensated["value_kph"], 99)
+        self.assertIn("small_subject_compensation", compensated["debug"])
 
 
 if __name__ == "__main__":

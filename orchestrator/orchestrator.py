@@ -6,6 +6,7 @@ import os
 import time
 import uuid
 from typing import Any, Dict, List, Optional, Tuple
+import numpy as np
 
 from app.common.logger import get_logger
 from app.common.auth import get_current_account
@@ -24,7 +25,8 @@ from app.workers.render.render_storage import (
 # Events
 from app.workers.events.release_uah import detect_release_uah
 from app.workers.events.ffc_bfc import detect_ffc_bfc
-from app.workers.events.event_confidence import chain_quality
+from app.workers.events.event_confidence import chain_quality, annotate_detection_contract
+from app.workers.events.signal_cache import build_signal_cache
 
 # Elbow
 from app.workers.elbow.compute_elbow_signal import compute_elbow_signal
@@ -428,9 +430,22 @@ def _gate_speed_estimate(
     estimated_release_speed: dict,
     event_chain: dict,
     events: dict,
+    playback_mode: Optional[dict] = None,
 ) -> dict:
     if not estimated_release_speed.get("available"):
         return estimated_release_speed
+
+    playback_mode = playback_mode or {}
+    if str(playback_mode.get("mode") or "").strip().lower() == "likely_slow_motion":
+        return {
+            **estimated_release_speed,
+            "available": False,
+            "display_policy": "suppress",
+            "display": None,
+            "value_kph": None,
+            "confidence": 0.0,
+            "reason": "slow_motion_playback_detected",
+        }
 
     ordered = bool((event_chain or {}).get("ordered"))
     chain_quality = float((event_chain or {}).get("quality") or 0.0)
@@ -505,10 +520,432 @@ def _gate_speed_estimate(
     return estimated_release_speed
 
 
+def _reconcile_anchor_order(
+    *,
+    events: Dict[str, Any],
+    fps: float,
+) -> Dict[str, Any]:
+    """
+    Resolve tiny anchor-order inversions after all event detectors have run.
+
+    On noisy or behind-camera clips, UAH and FFC can land within a frame or two
+    of each other. If UAH is only slightly earlier than FFC, snap it forward to
+    the FFC instant instead of letting the whole chain go unordered.
+    """
+    try:
+        fps_f = max(1.0, float(fps or 30.0))
+    except Exception:
+        fps_f = 30.0
+
+    tol = max(1, int(round(0.04 * fps_f)))  # about 40 ms
+    uah = events.get("uah") or {}
+    ffc = events.get("ffc") or {}
+    uah_frame = uah.get("frame")
+    ffc_frame = ffc.get("frame")
+
+    if uah_frame is None or ffc_frame is None:
+        return events
+
+    try:
+        uah_i = int(uah_frame)
+        ffc_i = int(ffc_frame)
+    except Exception:
+        return events
+
+    if uah_i < ffc_i and (ffc_i - uah_i) <= tol:
+        reconciled = dict(uah)
+        reconciled["frame"] = ffc_i
+        reconciled["method"] = f"{uah.get('method') or 'uah'}_ffc_reconciled"
+        reconciled["confidence"] = round(
+            max(0.0, float(uah.get("confidence") or 0.0) - 0.05),
+            2,
+        )
+        events["uah"] = reconciled
+
+    return events
+
+
+def _safe_frame(event: Optional[Dict[str, Any]]) -> Optional[int]:
+    try:
+        if not isinstance(event, dict):
+            return None
+        frame = event.get("frame")
+        return None if frame is None else int(frame)
+    except Exception:
+        return None
+
+
+def _safe_confidence(event: Optional[Dict[str, Any]]) -> float:
+    try:
+        if not isinstance(event, dict):
+            return 0.0
+        return float(event.get("confidence") or 0.0)
+    except Exception:
+        return 0.0
+
+
+def _mean_visible_weight(raw_vis, weights, start: int, end: int, *, min_vis: float = 0.20) -> float:
+    try:
+        raw = raw_vis[start:end]
+        wts = weights[start:end]
+    except Exception:
+        return 0.0
+    mask = raw >= float(min_vis)
+    if not np.any(mask):
+        return 0.0
+    return float(np.mean(wts[mask]))
+
+
+def _clamp01(value: float) -> float:
+    return max(0.0, min(1.0, float(value)))
+
+
+def _local_peak_frame(
+    signal: Any,
+    start: int,
+    end: int,
+    *,
+    mode: str,
+) -> Optional[int]:
+    try:
+        window = np.asarray(signal[start:end], dtype=float)
+    except Exception:
+        return None
+    valid = np.isfinite(window)
+    if not np.any(valid):
+        return None
+    if mode == "peak_min":
+        filled = np.where(valid, window, np.inf)
+        return int(start + int(np.argmin(filled)))
+    filled = np.where(valid, window, -np.inf)
+    return int(start + int(np.argmax(filled)))
+
+
+def _anchor_spacing_score(events: Dict[str, Any]) -> float:
+    bfc = _safe_frame(events.get("bfc"))
+    ffc = _safe_frame(events.get("ffc"))
+    uah = _safe_frame(events.get("uah"))
+    release = _safe_frame(events.get("release"))
+    if None in {bfc, ffc, uah, release}:
+        return 0.0
+
+    score = 1.0
+    if not (bfc <= ffc <= uah <= release):
+        score -= 0.70
+
+    gaps = (
+        (ffc - bfc, 2, 8, 14, 0.30),
+        (uah - ffc, 1, 6, 10, 0.45),
+        (release - uah, 1, 6, 10, 0.35),
+    )
+    for gap, ideal_min, ideal_max, hard_max, penalty in gaps:
+        if gap < ideal_min:
+            score -= penalty * (1.0 if gap <= 0 else 0.5)
+        elif gap > hard_max:
+            score -= penalty * 0.75
+        elif gap > ideal_max:
+            score -= penalty * 0.35
+
+    return max(0.0, min(1.0, round(score, 3)))
+
+
+def _detect_anchor_hypothesis(
+    *,
+    pose_frames: List[Dict[str, Any]],
+    hand: str,
+    fps: float,
+    delivery_window: Optional[Dict[str, Any]],
+) -> Dict[str, Any]:
+    events = detect_release_uah(
+        pose_frames=pose_frames,
+        hand=hand,
+        fps=fps,
+        delivery_window=delivery_window,
+    )
+    release_frame = _safe_frame(events.get("release"))
+    hypothesis_window = events.get("delivery_window")
+    if release_frame is not None and hypothesis_window is not None:
+        foot_events = detect_ffc_bfc(
+            pose_frames=pose_frames,
+            hand=hand,
+            release_frame=release_frame,
+            delivery_window=tuple(hypothesis_window),
+            fps=fps,
+        )
+        if foot_events:
+            events.update(foot_events)
+
+    events = _reconcile_anchor_order(
+        events=events,
+        fps=fps,
+    )
+    events["event_chain"] = chain_quality(
+        bfc_frame=_safe_frame(events.get("bfc")),
+        ffc_frame=_safe_frame(events.get("ffc")),
+        uah_frame=_safe_frame(events.get("uah")),
+        release_frame=_safe_frame(events.get("release")),
+        bfc_confidence=_safe_confidence(events.get("bfc")),
+        ffc_confidence=_safe_confidence(events.get("ffc")),
+        uah_confidence=_safe_confidence(events.get("uah")),
+        release_confidence=_safe_confidence(events.get("release")),
+    )
+    return annotate_detection_contract(events)
+
+
+def _score_anchor_hypothesis(
+    *,
+    pose_frames: List[Dict[str, Any]],
+    hand: str,
+    fps: float,
+    events: Dict[str, Any],
+    delivery_window: Optional[Dict[str, Any]],
+) -> Tuple[float, Dict[str, Any]]:
+    n_frames = len(pose_frames)
+    cache = build_signal_cache(
+        pose_frames=pose_frames,
+        hand=hand,
+        fps=fps,
+    )
+    release_window = (events.get("release") or {}).get("window") or []
+    try:
+        start = max(0, min(n_frames - 1, int(release_window[0])))
+        end = max(start + 1, min(n_frames, int(release_window[1]) + 1))
+    except Exception:
+        start = 0
+        end = max(1, n_frames)
+
+    wrist_vis = _mean_visible_weight(
+        cache["wrist_vis_raw"],
+        cache["wrist_vis_weight"],
+        start,
+        end,
+    )
+    elbow_vis = _mean_visible_weight(
+        cache["bowling_elbow_vis_raw"],
+        cache["bowling_elbow_vis_weight"],
+        start,
+        end,
+    )
+    nb_elbow_vis = _mean_visible_weight(
+        cache["nb_elbow_vis_raw"],
+        cache["nb_elbow_vis_weight"],
+        start,
+        end,
+    )
+    visibility_score = max(0.0, min(1.0, (wrist_vis + elbow_vis) / 2.0))
+    spacing_score = _anchor_spacing_score(events)
+    release_conf = _safe_confidence(events.get("release"))
+    uah_conf = _safe_confidence(events.get("uah"))
+    release_frame = _safe_frame(events.get("release"))
+    release_hint = None
+    try:
+        release_hint = int((delivery_window or {}).get("release_hint"))
+    except Exception:
+        release_hint = None
+
+    nb_peak_frame = _local_peak_frame(
+        cache.get("nb_elbow_y"),
+        start,
+        end,
+        mode="peak_min",
+    )
+    shoulder_peak_frame = _local_peak_frame(
+        cache.get("shoulder_angular_velocity"),
+        start,
+        end,
+        mode="peak_max",
+    )
+
+    hint_alignment = 0.0
+    if release_hint is not None and release_frame is not None:
+        hint_band = max(6.0, float(fps) * 0.35)
+        hint_alignment = _clamp01(1.0 - (abs(int(release_frame) - int(release_hint)) / hint_band))
+
+    nb_release_alignment = 0.0
+    if nb_peak_frame is not None and release_frame is not None:
+        nb_band = max(4.0, float(fps) * 0.18)
+        nb_release_alignment = _clamp01(
+            1.0 - (abs(int(release_frame) - int(nb_peak_frame)) / nb_band)
+        )
+
+    nb_shoulder_alignment = 0.0
+    if nb_peak_frame is not None and shoulder_peak_frame is not None:
+        shoulder_band = max(4.0, float(fps) * 0.22)
+        nb_shoulder_alignment = _clamp01(
+            1.0 - (abs(int(nb_peak_frame) - int(shoulder_peak_frame)) / shoulder_band)
+        )
+
+    behind_camera_non_bowling_arm_score = hint_alignment * (
+        (0.55 * nb_elbow_vis)
+        + (0.25 * nb_release_alignment)
+        + (0.20 * nb_shoulder_alignment)
+    )
+    uah_frame = _safe_frame(events.get("uah"))
+    context_origin = start
+    try:
+        context_origin = max(0, int((delivery_window or {}).get("analysis_start", start)))
+    except Exception:
+        context_origin = start
+    min_uah_runway = max(3.0, float(fps) * 0.10)
+    min_release_runway = max(6.0, float(fps) * 0.20)
+    uah_runway_score = 0.0
+    if uah_frame is not None:
+        uah_runway_score = _clamp01((float(uah_frame) - float(context_origin)) / min_uah_runway)
+    release_runway_score = 0.0
+    if release_frame is not None:
+        release_runway_score = _clamp01((float(release_frame) - float(context_origin)) / min_release_runway)
+    pre_release_context_score = round((0.70 * uah_runway_score) + (0.30 * release_runway_score), 3)
+
+    score = (
+        0.45 * spacing_score
+        + 0.25 * release_conf
+        + 0.15 * uah_conf
+        + 0.15 * visibility_score
+        + 0.45 * behind_camera_non_bowling_arm_score
+    )
+    behind_camera_hint = bool(hint_alignment >= 0.45)
+    uncertain_checks: List[str] = []
+    if release_hint is None:
+        uncertain_checks.append("release_hint_unavailable")
+    elif hint_alignment < 0.45:
+        uncertain_checks.append("rear_view_release_hint_not_confirmed")
+    if nb_peak_frame is None:
+        uncertain_checks.append("non_bowling_arm_peak_unavailable")
+    if shoulder_peak_frame is None:
+        uncertain_checks.append("shoulder_peak_unavailable")
+    if uah_runway_score < 0.75 or pre_release_context_score < 0.55:
+        uncertain_checks.append("pre_release_context_insufficient")
+    debug = {
+        "hand": hand,
+        "score": round(score, 3),
+        "spacing_score": round(spacing_score, 3),
+        "release_confidence": round(release_conf, 3),
+        "uah_confidence": round(uah_conf, 3),
+        "visibility_score": round(visibility_score, 3),
+        "wrist_visibility": round(wrist_vis, 3),
+        "elbow_visibility": round(elbow_vis, 3),
+        "non_bowling_elbow_visibility": round(nb_elbow_vis, 3),
+        "release_frame": release_frame,
+        "uah_frame": uah_frame,
+        "ffc_frame": _safe_frame(events.get("ffc")),
+        "bfc_frame": _safe_frame(events.get("bfc")),
+        "release_hint_frame": release_hint,
+        "release_hint_alignment": round(hint_alignment, 3),
+        "nb_elbow_peak_frame": nb_peak_frame,
+        "shoulder_peak_frame": shoulder_peak_frame,
+        "nb_release_alignment": round(nb_release_alignment, 3),
+        "nb_shoulder_alignment": round(nb_shoulder_alignment, 3),
+        "uah_runway_score": round(uah_runway_score, 3),
+        "release_runway_score": round(release_runway_score, 3),
+        "behind_camera_hint": behind_camera_hint,
+        "behind_camera_non_bowling_arm_score": round(behind_camera_non_bowling_arm_score, 3),
+        "pre_release_context_score": pre_release_context_score,
+        "uncertain_checks": uncertain_checks,
+    }
+    return score, debug
+
+
+def _playback_mode_v1(*, video: Dict[str, Any]) -> Dict[str, Any]:
+    try:
+        fps = float(video.get("fps") or 0.0)
+    except Exception:
+        fps = 0.0
+    try:
+        total_frames = int(video.get("total_frames") or 0)
+    except Exception:
+        total_frames = 0
+    if fps <= 0.0 or total_frames <= 0:
+        return {
+            "mode": "unknown",
+            "reason": "insufficient_video_metadata",
+            "duration_seconds": None,
+            "effective_fps": None,
+            "effective_fps_source": "unknown",
+        }
+    duration_seconds = float(total_frames) / float(fps)
+    if duration_seconds >= 12.0 and total_frames >= 240:
+        return {
+            "mode": "likely_slow_motion",
+            "reason": "implausibly_long_single_delivery",
+            "duration_seconds": round(duration_seconds, 3),
+            "effective_fps": None,
+            "effective_fps_source": "unknown",
+        }
+    if fps <= 40.0 and duration_seconds >= 8.0 and total_frames >= 240:
+        return {
+            "mode": "likely_slow_motion",
+            "reason": "implausibly_long_single_delivery",
+            "duration_seconds": round(duration_seconds, 3),
+            "effective_fps": None,
+            "effective_fps_source": "unknown",
+        }
+    return {
+        "mode": "real_time_or_high_fps",
+        "reason": "video_duration_plausible",
+        "duration_seconds": round(duration_seconds, 3),
+        "effective_fps": round(float(fps), 3),
+        "effective_fps_source": "raw_video_fps",
+    }
+
+
+def _resolve_analysis_hand(
+    *,
+    pose_frames: List[Dict[str, Any]],
+    fps: float,
+    delivery_window: Optional[Dict[str, Any]],
+    preferred_hand: str,
+) -> Tuple[str, Dict[str, Any], Dict[str, Any]]:
+    preferred_raw = str(preferred_hand or "").strip().upper()
+    preferred_valid = preferred_raw in {"R", "L"}
+    preferred = preferred_raw if preferred_valid else "R"
+
+    hypotheses: Dict[str, Dict[str, Any]] = {}
+    debug: Dict[str, Any] = {"preferred_hand": preferred, "hypotheses": {}}
+    for hand in ("R", "L"):
+        events = _detect_anchor_hypothesis(
+            pose_frames=pose_frames,
+            hand=hand,
+            fps=fps,
+            delivery_window=delivery_window,
+        )
+        score, details = _score_anchor_hypothesis(
+            pose_frames=pose_frames,
+            hand=hand,
+            fps=fps,
+            events=events,
+            delivery_window=delivery_window,
+        )
+        hypotheses[hand] = {"events": events, "score": score, "details": details}
+        debug["hypotheses"][hand] = details
+
+    r_score = float(hypotheses["R"]["score"])
+    l_score = float(hypotheses["L"]["score"])
+    evidence_best = "R" if r_score >= l_score else "L"
+    margin = abs(r_score - l_score)
+
+    if preferred_valid:
+        chosen = preferred
+        debug["resolution_reason"] = "profile_hand_locked"
+        debug["clip_evidence_best_hand"] = evidence_best
+        if evidence_best != preferred:
+            chosen_details = debug["hypotheses"].get(chosen) or {}
+            uncertain = chosen_details.setdefault("uncertain_checks", [])
+            if "clip_evidence_disagrees_with_profile_hand" not in uncertain:
+                uncertain.append("clip_evidence_disagrees_with_profile_hand")
+    else:
+        chosen = evidence_best
+        debug["resolution_reason"] = "profile_hand_missing_fallback"
+
+    debug["resolved_hand"] = chosen
+    debug["score_margin"] = round(margin, 3)
+    return chosen, hypotheses[chosen]["events"], debug
+
+
 def _walkthrough_render_window(
     *,
     events: dict,
     total_frames: int,
+    playback_mode: Optional[dict] = None,
 ) -> Tuple[int, Optional[int]]:
     bfc_frame = (events.get("bfc") or {}).get("frame")
     ffc_frame = (events.get("ffc") or {}).get("frame")
@@ -523,8 +960,16 @@ def _walkthrough_render_window(
         fallback_end = min(total_frames, 180) if total_frames else 180
         return 0, fallback_end
 
-    start = max(0, min(anchors) - 30)
-    end = min(total_frames, max(anchors) + 28) if total_frames else max(anchors) + 28
+    slow_motion_mode = str((playback_mode or {}).get("mode") or "").strip().lower() == "likely_slow_motion"
+    if slow_motion_mode:
+        start_pad = 96
+        end_pad = 18
+    else:
+        start_pad = 30
+        end_pad = 28
+
+    start = max(0, min(anchors) - start_pad)
+    end = min(total_frames, max(anchors) + end_pad) if total_frames else max(anchors) + end_pad
     if end <= start:
         return start, None
     return start, end
@@ -585,6 +1030,7 @@ def _build_walkthrough_render(
     elbow: dict,
     risks: list,
     estimated_release_speed: dict,
+    playback_mode: Optional[dict] = None,
     kinetic_chain: Optional[dict] = None,
     report_story: Optional[dict],
     root_cause: Optional[dict],
@@ -597,6 +1043,7 @@ def _build_walkthrough_render(
     start_frame, end_frame = _walkthrough_render_window(
         events=events,
         total_frames=total_frames,
+        playback_mode=playback_mode,
     )
     output_path = os.path.join(RENDERS_DIR, f"{run_id}_walkthrough.mp4")
 
@@ -619,6 +1066,7 @@ def _build_walkthrough_render(
             pause_seconds=WALKTHROUGH_PAUSE_SECONDS,
             slow_motion_factor=WALKTHROUGH_SLOW_MOTION_FACTOR,
             end_summary_seconds=WALKTHROUGH_END_SUMMARY_SECONDS,
+            playback_mode=playback_mode,
         )
     except Exception as exc:
         logger.warning(
@@ -656,8 +1104,14 @@ def _build_walkthrough_render(
         upload_result.get("reason") or "-",
     )
 
+    public_render_result = {
+        key: value
+        for key, value in render_result.items()
+        if key != "path"
+    }
+
     return {
-        **render_result,
+        **public_render_result,
         "renderer_version": WALKTHROUGH_RENDERER_VERSION,
         "artifact_type": "walkthrough_mp4",
         "storage_backend": upload_result.get("storage_backend") or "local",
@@ -881,6 +1335,24 @@ def analyze(
             f"frames={video.get('total_frames')} "
             f"file_size_bytes={temp_file_size if temp_file_size is not None else '-'}"
         )
+        playback_mode = _playback_mode_v1(video=video)
+
+        resolved_hand, events, hand_resolution = _resolve_analysis_hand(
+            pose_frames=pose_frames,
+            fps=fps_val,
+            delivery_window=video.get("coarse_delivery_window"),
+            preferred_hand=hand,
+        )
+        hand = resolved_hand
+        logger.info(
+            "[analyze:hand_resolution] request_id=%s run_id=%s preferred_hand=%s resolved_hand=%s margin=%s reason=%s",
+            request_id,
+            run_id,
+            hand_resolution.get("preferred_hand"),
+            hand_resolution.get("resolved_hand"),
+            hand_resolution.get("score_margin"),
+            hand_resolution.get("resolution_reason"),
+        )
 
         screening = run_preanalysis_screen(
             video=video,
@@ -893,50 +1365,8 @@ def analyze(
                 run_id=run_id,
                 screening=screening,
             )
-
-        # ------------------------------------------------------------
-        # Events
-        # ------------------------------------------------------------
-        events = detect_release_uah(
-            pose_frames=pose_frames,
-            hand=hand,
-            fps=fps_val,
-        )
-
-        # ------------------------------------------------------------
-        # FFC / BFC
-        # ------------------------------------------------------------
-        release_frame = (events.get("release") or {}).get("frame")
-        delivery_window = events.get("delivery_window")
-
-        if release_frame is not None and delivery_window is not None:
-            foot_events = detect_ffc_bfc(
-                pose_frames=pose_frames,
-                hand=hand,
-                release_frame=release_frame,
-                delivery_window=tuple(delivery_window),
-                fps=fps_val,
-            )
-            if foot_events:
-                events.update(foot_events)
-
         bfc_frame = (events.get("bfc") or {}).get("frame")
         ffc_frame = (events.get("ffc") or {}).get("frame")
-        uah_frame = (events.get("uah") or {}).get("frame")
-        release_confidence = float((events.get("release") or {}).get("confidence") or 0.0)
-        uah_confidence = float((events.get("uah") or {}).get("confidence") or 0.0)
-        ffc_confidence = float((events.get("ffc") or {}).get("confidence") or 0.0)
-        bfc_confidence = float((events.get("bfc") or {}).get("confidence") or 0.0)
-        events["event_chain"] = chain_quality(
-            bfc_frame=bfc_frame,
-            ffc_frame=ffc_frame,
-            uah_frame=uah_frame,
-            release_frame=release_frame,
-            bfc_confidence=bfc_confidence,
-            ffc_confidence=ffc_confidence,
-            uah_confidence=uah_confidence,
-            release_confidence=release_confidence,
-        )
 
         # ------------------------------------------------------------
         # Action Classification
@@ -1003,6 +1433,7 @@ def analyze(
             estimated_release_speed=estimated_release_speed,
             event_chain=events.get("event_chain") or {},
             events=events,
+            playback_mode=playback_mode,
         )
         speed_debug = estimated_release_speed.get("debug") or {}
         logger.info(
@@ -1053,12 +1484,15 @@ def analyze(
             "input": {
                 "player_id": player_id,
                 "hand": hand,
+                "profile_hand": hand_resolution.get("preferred_hand"),
                 "age_group": effective_age_group,
                 "season": effective_season,
+                "hand_resolution_v1": hand_resolution,
             },
             "video": {
                 "fps": video.get("fps"),
                 "total_frames": video.get("total_frames"),
+                "playback_mode_v1": playback_mode,
             },
             "events": events,
             "elbow": elbow,
@@ -1090,6 +1524,7 @@ def analyze(
             elbow=elbow,
             risks=risks,
             estimated_release_speed=estimated_release_speed,
+            playback_mode=playback_mode,
             kinetic_chain=deterministic_expert.get("kinetic_chain_v1"),
             report_story=_deterministic_render_story_context(deterministic_expert),
             root_cause=((deterministic_expert.get("coach_diagnosis_v1") or {}).get("root_cause")),

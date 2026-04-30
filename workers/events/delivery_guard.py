@@ -6,6 +6,8 @@ import numpy as np
 from scipy.ndimage import gaussian_filter1d
 from scipy.signal import find_peaks
 
+from app.workers.events.timing_constants import signal_cache_timing
+
 # MediaPipe pose indices
 LS, LE, LW = 11, 13, 15
 RS, RE, RW = 12, 14, 16
@@ -111,8 +113,9 @@ def detect_delivery_candidates(
     hand: str,
     fps: float,
 ) -> Dict[str, Any]:
-    fps = float(fps or 25.0)
-    dt = 1.0 / max(fps, 1.0)
+    timing = signal_cache_timing(fps or 25.0)
+    fps = float(timing["fps"])
+    dt = float(timing["dt"])
     h = (hand or "R").upper()
 
     s_idx, w_idx = (RS, RW) if h == "R" else (LS, LW)
@@ -183,7 +186,11 @@ def detect_delivery_candidates(
                 )
             )
     if pelvis_vels:
-        forward = _unit(tuple(map(float, np.sum(np.asarray(pelvis_vels), axis=0))))
+        steps = np.asarray(pelvis_vels, dtype=float)
+        med_dx = float(np.median(steps[:, 0]))
+        med_dy = float(np.median(steps[:, 1]))
+        med_dz = float(np.median(steps[:, 2]))
+        forward = _unit((med_dx, med_dy, med_dz))
     else:
         forward = (1.0, 0.0, 0.0)
 
@@ -197,7 +204,7 @@ def detect_delivery_candidates(
             )
             wrist_signal[i] = float(np.dot(np.asarray(dv), np.asarray(forward))) / dt
 
-    sigma = max(1.0, 0.03 * fps)
+    sigma = float(timing["smooth_sigma"])
     wrist_signal = gaussian_filter1d(wrist_signal, sigma=sigma)
     wrist_peaks = _strong_peak_frames(
         wrist_signal,

@@ -4,28 +4,117 @@ from .font_utils import _load_theme_font, _pil_text_size
 from .pil_context import _bgr_to_rgb, _frame_draw_context, _commit_frame_draw_context
 from .tracks import *
 
-def _draw_joint(frame: np.ndarray, point: Tuple[int, int], scale: int) -> None:
+def _draw_dashed_line(
+    frame: np.ndarray,
+    start: Tuple[int, int],
+    end: Tuple[int, int],
+    color: Tuple[int, int, int],
+    thickness: int,
+    *,
+    dash_px: int,
+) -> None:
+    start_xy = np.array(start, dtype=float)
+    end_xy = np.array(end, dtype=float)
+    vector = end_xy - start_xy
+    length = float(np.linalg.norm(vector))
+    if length <= 1e-6:
+        return
+    direction = vector / length
+    step = max(4, dash_px)
+    draw = True
+    pos = 0.0
+    while pos < length:
+        next_pos = min(length, pos + step)
+        if draw:
+            p0 = tuple(np.round(start_xy + direction * pos).astype(int))
+            p1 = tuple(np.round(start_xy + direction * next_pos).astype(int))
+            cv2.line(frame, p0, p1, color, thickness, cv2.LINE_AA)
+        draw = not draw
+        pos = next_pos
+
+
+def _draw_joint(
+    frame: np.ndarray,
+    point: Tuple[int, int],
+    scale: int,
+    *,
+    draw_mode: str = "solid",
+    quality: float = 1.0,
+) -> None:
     outer = max(4, scale // 190)
     inner = max(2, outer - 1)
+    quality = max(0.0, min(1.0, float(quality)))
+    if draw_mode == "placeholder":
+        ring = max(1, outer - 1)
+        cv2.circle(frame, point, outer + 1, SKELETON_SHADOW, 1, cv2.LINE_AA)
+        cv2.circle(frame, point, outer, JOINT_OUTER, 1, cv2.LINE_AA)
+        cv2.circle(frame, point, ring, SKELETON_PLACEHOLDER, 1, cv2.LINE_AA)
+        return
+    fill_color = SKELETON_COLOR if draw_mode == "solid" else SKELETON_DASHED
+    inner_radius = max(1, int(round(inner * (0.72 + 0.28 * quality))))
     cv2.circle(frame, point, outer + 1, SKELETON_SHADOW, -1, cv2.LINE_AA)
     cv2.circle(frame, point, outer, JOINT_OUTER, -1, cv2.LINE_AA)
-    cv2.circle(frame, point, inner, SKELETON_COLOR, -1, cv2.LINE_AA)
+    cv2.circle(frame, point, inner_radius, fill_color, -1, cv2.LINE_AA)
+
+
 def _draw_skeleton(frame: np.ndarray, tracks: Dict[int, Dict[str, Any]], frame_idx: int) -> None:
     scale = min(frame.shape[0], frame.shape[1])
     shadow_thickness = max(5, scale // 120)
     line_thickness = max(3, scale // 180)
+    dash_px = max(6, scale // 55)
     for start_idx, end_idx in SKELETON_EDGES:
-        start = _track_point(tracks, start_idx, frame_idx)
-        end = _track_point(tracks, end_idx, frame_idx)
-        if start is None or end is None:
+        start_state = _track_state(tracks, start_idx, frame_idx)
+        end_state = _track_state(tracks, end_idx, frame_idx)
+        if not start_state or not end_state:
             continue
-        cv2.line(frame, start, end, SKELETON_SHADOW, shadow_thickness, cv2.LINE_AA)
-        cv2.line(frame, start, end, SKELETON_COLOR, line_thickness, cv2.LINE_AA)
+        start = start_state["point"]
+        end = end_state["point"]
+        edge_quality = min(
+            float(start_state.get("quality") or 0.0),
+            float(end_state.get("quality") or 0.0),
+        )
+        start_mode = start_state.get("draw_mode") or "placeholder"
+        end_mode = end_state.get("draw_mode") or "placeholder"
+        if start_mode == "solid" and end_mode == "solid":
+            line_color = SKELETON_COLOR
+            line_mode = "solid"
+        elif start_mode == "placeholder" or end_mode == "placeholder":
+            line_color = SKELETON_PLACEHOLDER
+            line_mode = "dashed"
+        else:
+            line_color = SKELETON_DASHED
+            line_mode = "dashed"
+        if line_mode == "solid":
+            cv2.line(frame, start, end, SKELETON_SHADOW, shadow_thickness, cv2.LINE_AA)
+            cv2.line(frame, start, end, line_color, line_thickness, cv2.LINE_AA)
+        else:
+            _draw_dashed_line(
+                frame,
+                start,
+                end,
+                SKELETON_SHADOW,
+                shadow_thickness,
+                dash_px=dash_px,
+            )
+            _draw_dashed_line(
+                frame,
+                start,
+                end,
+                line_color,
+                max(1, line_thickness - (0 if edge_quality >= 0.34 else 1)),
+                dash_px=dash_px,
+            )
     for joint_idx in TRACKED_JOINTS:
-        point = _track_point(tracks, joint_idx, frame_idx)
-        if point is None:
+        state = _track_state(tracks, joint_idx, frame_idx)
+        if not state:
             continue
-        _draw_joint(frame, point, scale)
+        _draw_joint(
+            frame,
+            state["point"],
+            scale,
+            draw_mode=state.get("draw_mode") or "placeholder",
+            quality=float(state.get("quality") or 0.0),
+        )
 def _overlay_panel(
     frame: np.ndarray,
     *,

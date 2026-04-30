@@ -101,8 +101,9 @@ def _pause_anchor_frames(
     start: int,
     stop: int,
     events: Optional[Dict[str, Any]],
+    fps: float = 30.0,
 ) -> Dict[int, str]:
-    render_events = _render_timeline_events(start=start, stop=stop, events=events)
+    render_events = _render_timeline_events(start=start, stop=stop, events=events, fps=fps)
     anchors: Dict[int, str] = {}
     for key in ("bfc", "ffc", "release"):
         frame_value = _safe_int(((render_events or {}).get(key) or {}).get("frame"))

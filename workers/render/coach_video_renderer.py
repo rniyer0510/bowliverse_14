@@ -10,7 +10,7 @@ from .coach_video_renderer_parts.kinetic_story import _kinetic_pace_translation,
 from .coach_video_renderer_parts.text_layout import _wrap_text_lines, _fit_wrapped_text
 from .coach_video_renderer_parts.joints import _front_leg_joints, _foot_indices
 from .coach_video_renderer_parts.render_output import _make_output_path, _intermediate_render_path, _publish_fallback_render, _finalize_render_video
-from .coach_video_renderer_parts.tracks import _point_from_landmarks, _smooth_series, _build_smoothed_tracks, _track_point, _frame_point
+from .coach_video_renderer_parts.tracks import _point_from_landmarks, _smooth_series, _build_smoothed_tracks, _track_state, _track_quality, _track_draw_mode, _track_point, _track_frame_quality, _visibility_weight, _frame_point
 from .coach_video_renderer_parts.drawing_base import _draw_joint, _draw_skeleton, _overlay_panel, _apply_bottom_scrim
 from .coach_video_renderer_parts.timeline_events import _phase_cut_points, _event_method, _tracked_joint_quality, _safe_landmark_value, _should_draw_skeleton_frame, _render_timeline_events
 from .coach_video_renderer_parts.phase_rail import _phase_index_for_frame, _draw_phase_rail, _draw_phase_overlay
@@ -77,7 +77,12 @@ __all__ = [
     "_point_from_landmarks",
     "_smooth_series",
     "_build_smoothed_tracks",
+    "_track_state",
+    "_track_quality",
+    "_track_draw_mode",
     "_track_point",
+    "_track_frame_quality",
+    "_visibility_weight",
     "_frame_point",
     "_draw_joint",
     "_draw_skeleton",

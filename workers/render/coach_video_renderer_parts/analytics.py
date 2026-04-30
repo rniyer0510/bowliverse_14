@@ -38,10 +38,9 @@ def _event_chain_quality(events: Optional[Dict[str, Any]]) -> float:
         return 1.0
     return max(0.0, quality)
 def _supports_ffc_story(events: Optional[Dict[str, Any]]) -> bool:
-    method = str((((events or {}).get("ffc") or {}).get("method")) or "").strip()
-    return _event_confidence(events, "ffc") >= MIN_FFC_STORY_CONFIDENCE and (
-        _event_chain_quality(events) >= MIN_EVENT_CHAIN_QUALITY
-        or method == "render_phase_fallback"
+    return (
+        _event_confidence(events, "ffc") >= MIN_FFC_STORY_CONFIDENCE
+        and _event_chain_quality(events) >= MIN_EVENT_CHAIN_QUALITY
     )
 def _speed_display_text(speed: Optional[Dict[str, Any]]) -> Optional[str]:
     if not isinstance(speed, dict):
