@@ -1,6 +1,6 @@
 from __future__ import annotations
 from .shared import *
-from .themed_story import _draw_themed_story_card
+from .themed_story import _draw_themed_insight_card
 from .pil_context import _frame_draw_context, _commit_frame_draw_context
 
 def _draw_story_overlay_card(
@@ -20,11 +20,12 @@ def _draw_story_overlay_card(
     title_max_lines: int = 2,
     headline_max_lines: int = 4,
     body_max_lines: int = 3,
+    unify_body_with_headline: bool = False,
 ) -> int:
     if Image is None or ImageDraw is None:
         return y1
     image, overlay, draw = _frame_draw_context(frame)
-    final_y1 = _draw_themed_story_card(
+    final_y1 = _draw_themed_insight_card(
         draw,
         x0=x0,
         y0=y0,
@@ -39,9 +40,9 @@ def _draw_story_overlay_card(
         title_scale_boost=title_scale_boost,
         headline_scale_boost=headline_scale_boost,
         body_scale_boost=body_scale_boost,
-        title_max_lines=title_max_lines,
         headline_max_lines=headline_max_lines,
         body_max_lines=body_max_lines,
+        unify_body_with_headline=unify_body_with_headline,
     )
     _commit_frame_draw_context(frame, image, overlay)
     return int(final_y1)

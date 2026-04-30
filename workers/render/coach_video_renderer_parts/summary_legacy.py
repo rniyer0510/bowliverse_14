@@ -83,15 +83,16 @@ def _draw_end_summary_legacy(
         body=merged_body,
         accent=(92, 220, 255),
         title_scale_boost=1.18,
-        headline_scale_boost=1.26,
-        body_scale_boost=1.14,
+        headline_scale_boost=1.10,
+        body_scale_boost=1.10,
         headline_max_lines=2,
         body_max_lines=3,
+        unify_body_with_headline=True,
     )
     current_top_y = int(final_y1) + top_gap
 
     if root_cause_status != "not_interpretable":
-        bottom_y = max(int(round(height * 0.73)), current_top_y + int(round(height * 0.03)))
+        bottom_y = max(int(round(height * 0.695)), current_top_y + int(round(height * 0.03)))
         telemetry = _summary_telemetry_layout(width, height)
         stat_h = int(telemetry["stat_h"])
         gap = int(telemetry["gap"])

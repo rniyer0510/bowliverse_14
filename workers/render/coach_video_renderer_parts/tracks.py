@@ -49,7 +49,7 @@ def _build_smoothed_tracks(
     height: int,
     fps: float,
 ) -> Dict[int, Dict[str, Any]]:
-    sigma = max(1.0, float(fps or 30.0) * 0.03)
+    sigma = min(max(1.0, float(fps or 30.0) * 0.03), 2.5)
     tracks: Dict[int, Dict[str, Any]] = {}
     for joint_idx in TRACKED_JOINTS:
         raw_points = []

@@ -2,6 +2,7 @@ from __future__ import annotations
 from .shared import *
 from .font_utils import _load_theme_font, _fit_pil_wrapped_text, _pil_text_size
 from .pil_context import _bgr_to_rgb
+from .themed_card_shell import _draw_themed_card_shell
 
 def _telemetry_value_layout(
     draw: Any,
@@ -185,84 +186,59 @@ def _draw_themed_summary_metric_card(
 ) -> None:
     card_w = max(1, x1 - x0)
     card_h = max(1, y1 - y0)
-    radius = max(18, int(round(card_h * 0.24)))
-    shadow_shift = max(4, int(round(min(width, height) * 0.006)))
-
-    draw.rounded_rectangle(
-        (x0 + shadow_shift, y0 + shadow_shift, x1 + shadow_shift, y1 + shadow_shift),
-        radius=radius,
-        fill=(0, 0, 0, 88),
-    )
-    draw.rounded_rectangle(
-        (x0, y0, x1, y1),
-        radius=radius,
-        fill=_bgr_to_rgb((13, 16, 18), 238),
-        outline=_bgr_to_rgb((42, 46, 48), 132),
-        width=1,
-    )
-
-    top_band_h = max(10, int(round(card_h * 0.18)))
-    draw.rounded_rectangle(
-        (x0, y0, x1, y0 + top_band_h),
-        radius=radius,
-        fill=_bgr_to_rgb(accent, 255),
-    )
-    draw.rectangle(
-        (x0, y0 + top_band_h // 2, x1, y0 + top_band_h),
-        fill=_bgr_to_rgb(accent, 255),
-    )
-
-    accent_glow_h = max(10, int(round(card_h * 0.12)))
-    draw.rounded_rectangle(
-        (x0 + max(10, int(round(card_w * 0.06))), y1 - accent_glow_h - max(8, int(round(card_h * 0.07))), x1 - max(10, int(round(card_w * 0.06))), y1 - max(8, int(round(card_h * 0.07)))),
-        radius=max(10, int(round(accent_glow_h * 0.7))),
-        fill=_bgr_to_rgb(accent, 44),
+    rail_offset = _draw_themed_card_shell(
+        draw,
+        x0=x0,
+        y0=y0,
+        x1=x1,
+        y1=y1,
+        accent=accent,
+        width=width,
+        height=height,
     )
 
     title_font = _load_theme_font(
         LABEL_FONT_FILE,
-        max(12, int(round(card_h * 0.13))),
+        max(12, int(round(card_h * 0.12))),
     )
     value_font, value_lines = _fit_pil_wrapped_text(
         draw,
         str(value or ""),
         font_file=DISPLAY_FONT_FILE,
-        base_size=max(24, int(round(card_h * 0.30))),
-        min_size=max(16, int(round(card_h * 0.18))),
-        max_width=max(40, int(round(card_w * 0.78))),
+        base_size=max(22, int(round(card_h * 0.25))),
+        min_size=max(15, int(round(card_h * 0.17))),
+        max_width=max(40, int(round(card_w * 0.68))),
         max_lines=2,
     )
 
-    inner_pad_x = max(16, int(round(card_w * 0.11)))
-    title_y = y0 + max(10, int(round(card_h * 0.10)))
+    inner_pad_x = max(16, int(round(card_w * 0.08))) + rail_offset + 2
+    title_y = y0 + max(12, int(round(card_h * 0.14)))
     if title_font is not None:
+        title_text = str(title or "").upper()
+        _, title_h = _pil_text_size(draw, title_text, title_font)
         draw.text(
             (x0 + inner_pad_x, title_y),
-            str(title or "").upper(),
+            title_text,
             font=title_font,
-            fill=_bgr_to_rgb((13, 16, 18), 214),
+            fill=_bgr_to_rgb(accent),
         )
-        _, title_h = _pil_text_size(draw, str(title or "").upper(), title_font)
     else:
         title_h = max(12, int(round(card_h * 0.12)))
 
     value_gap = max(4, int(round(card_h * 0.04)))
     line_heights = [_pil_text_size(draw, line, value_font)[1] for line in value_lines] if value_font is not None else []
     value_block_h = sum(line_heights) + value_gap * max(0, len(line_heights) - 1)
-    value_y = y0 + top_band_h + max(12, int(round(card_h * 0.12)))
-    available_bottom = y1 - max(12, int(round(card_h * 0.12)))
+    value_y = title_y + title_h + max(10, int(round(card_h * 0.14)))
+    available_bottom = y1 - max(14, int(round(card_h * 0.14)))
     if value_block_h > 0 and value_block_h < (available_bottom - value_y):
-        value_y += int(round((available_bottom - value_y - value_block_h) * 0.22))
+        value_y += int(round((available_bottom - value_y - value_block_h) * 0.16))
 
-    for idx, line in enumerate(value_lines):
+    for line in value_lines:
         if value_font is None:
             break
-        line_w, line_h = _pil_text_size(draw, line, value_font)
-        line_x = x0 + inner_pad_x
-        if idx == 0:
-            line_x = max(line_x, x0 + int(round((card_w - line_w) * 0.10)))
+        _, line_h = _pil_text_size(draw, line, value_font)
         draw.text(
-            (line_x, value_y),
+            (x0 + inner_pad_x, value_y),
             line,
             font=value_font,
             fill=_bgr_to_rgb(THEME_TEXT_PRIMARY),

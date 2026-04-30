@@ -39,15 +39,21 @@ def resolve_render_timeline_events(
     fps: float,
     events: Optional[Dict[str, Any]],
 ) -> Dict[str, Any]:
-    if all(
-        isinstance(((events or {}).get(key) or {}), dict)
-        and "render_frame" in (((events or {}).get(key) or {}))
-        for key in ("bfc", "ffc", "release")
-        if ((events or {}).get(key) or {}) or key == "release"
+    existing_events = dict(events or {})
+    existing_bfc = existing_events.get("bfc")
+    existing_ffc = existing_events.get("ffc")
+    existing_release = existing_events.get("release")
+    if (
+        isinstance(existing_bfc, dict)
+        and "render_frame" in existing_bfc
+        and isinstance(existing_ffc, dict)
+        and "render_frame" in existing_ffc
+        and isinstance(existing_release, dict)
+        and "render_frame" in existing_release
     ):
         return dict(events or {})
 
-    timeline = dict(events or {})
+    timeline = existing_events
     span = max(4, stop - start)
     last = max(start + 3, stop - 1)
     tolerance = int(render_timing(fps)["render_tolerance"])

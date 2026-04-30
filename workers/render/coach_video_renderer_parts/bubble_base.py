@@ -2,7 +2,7 @@ from __future__ import annotations
 from .shared import *
 from .font_utils import _fit_pil_wrapped_text, _pil_text_size, _phase_label_font_size
 from .pil_context import _bgr_to_rgb, _frame_draw_context, _commit_frame_draw_context
-from .themed_story import _draw_themed_story_card
+from .themed_story import _draw_themed_insight_card, _draw_themed_story_card
 from .themed_card_shell import _draw_themed_card_shell
 
 def _bubble_copy(
@@ -191,12 +191,12 @@ def _draw_top_risk_panel(
     width = frame.shape[1]
     height = frame.shape[0]
     image, overlay, draw = _frame_draw_context(frame)
-    layout = _story_card_layout(width=width, height=height, anchor=anchor, bowler_hand=bowler_hand)
+    layout = _story_card_layout(width=width, height=height, anchor=anchor, bowler_hand=bowler_hand, width_ratio=0.36, top_height_ratio=0.058)
     card_x0 = int(layout["x0"])
     card_y0 = int(layout["y0"])
     card_x1 = int(layout["x1"])
     card_y1 = int(layout["y1"])
-    final_y1 = _draw_themed_story_card(
+    final_y1 = _draw_themed_insight_card(
         draw,
         x0=card_x0,
         y0=card_y0,
@@ -209,11 +209,10 @@ def _draw_top_risk_panel(
         width=width,
         height=height,
         title_scale_boost=1.0,
-        headline_scale_boost=1.08,
+        headline_scale_boost=1.0,
         body_scale_boost=1.0,
-        headline_max_lines=6,
-        body_max_lines=5,
-        vertical_align="top",
+        headline_max_lines=4,
+        body_max_lines=3,
     )
     if anchor is not None:
         scale = min(width, height)
