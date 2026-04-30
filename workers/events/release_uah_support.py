@@ -251,7 +251,6 @@ def build_release_candidates(
         ("nb_elbow_peak", signals["nb_elbow_y"], "peak_min"),
         ("shoulder_ang_vel_peak", signals["shoulder_ang_vel"], "peak_max"),
         ("wrist_fwd_peak", signals["wrist_fwd_vel"], "peak_max"),
-        ("pelvis_jerk_peak", signals["pelvis_jerk"], "peak_max"),
     ):
         frame = _local_peak(signal, start, end, mode=mode)
         if frame is None:
@@ -280,11 +279,13 @@ def release_consensus(
     total_weight = 0.0
     used_signals: List[Dict[str, Any]] = []
 
+    # Pelvis jerk is not a release locator. Its peak sits closer to FFC /
+    # chain impact than to the wrist-speed release neighborhood, so use it
+    # later as a suppression gate instead of letting it pull consensus early.
     locators = (
         ("nb_elbow_y", signals["nb_elbow_y"], signals["nb_elbow_vis_raw"], signals["nb_elbow_vis_weight"], 0.40, "peak_min"),
         ("shoulder_ang_vel", signals["shoulder_ang_vel"], signals["shoulder_vis_raw"], signals["shoulder_vis_weight"], 0.25, "peak_max"),
         ("wrist_fwd_vel", signals["wrist_fwd_vel"], signals["wrist_vis_raw"], signals["wrist_vis_weight"], 0.20, "peak_max"),
-        ("pelvis_jerk", signals["pelvis_jerk"], signals["pelvis_vis_raw"], signals["pelvis_vis_weight"], 0.10, "peak_max"),
     )
 
     for name, signal, raw_vis, weights, base_weight, mode in locators:
@@ -357,6 +358,30 @@ def release_consensus(
                     "name": "pelvis_fwd_vel_gate",
                     "clip_vis": round(pelvis_gate_vis, 3),
                     "effective_weight": 0.05,
+                    "used": True,
+                }
+            )
+
+    jerk_gate_vis = _clip_mean_weight(
+        signals["pelvis_vis_raw"],
+        signals["pelvis_vis_weight"],
+        start,
+        end,
+    )
+    if jerk_gate_vis >= 0.20:
+        jerk = signals["pelvis_jerk"][start:end].copy()
+        valid = np.isfinite(jerk)
+        if np.any(valid):
+            jerk_abs = np.abs(jerk[valid])
+            baseline = float(np.nanpercentile(jerk_abs, 85)) + 1e-9
+            gate = 1.0 - np.clip(np.abs(jerk) / baseline, 0.0, 1.0)
+            gate[~valid] = 0.9
+            consensus *= (0.92 + 0.08 * gate)
+            used_signals.append(
+                {
+                    "name": "pelvis_jerk_gate",
+                    "clip_vis": round(jerk_gate_vis, 3),
+                    "effective_weight": 0.08,
                     "used": True,
                 }
             )

@@ -224,6 +224,7 @@ def _estimate_release_speed_pass(
     video: Dict[str, Any],
     hand: str,
     release_frame: int,
+    wrist_peak_frame: int,
     ball_weight_oz: float,
     window_before: int,
     window_after: int,
@@ -243,9 +244,12 @@ def _estimate_release_speed_pass(
     if fps <= 0.0 or width <= 0.0 or height <= 0.0:
         return {**unavailable, "reason": "missing_video_geometry"}
 
-    if release_frame < window_before:
+    if release_frame < 0 or wrist_peak_frame < 0:
+        return {**unavailable, "reason": "missing_release_window"}
+
+    if wrist_peak_frame < window_before:
         return {**unavailable, "reason": "release_too_close_to_clip_start"}
-    if release_frame + window_after >= len(pose_frames):
+    if wrist_peak_frame + window_after >= len(pose_frames):
         return {**unavailable, "reason": "release_too_close_to_clip_end"}
 
     h = (hand or "R").upper()
@@ -351,7 +355,7 @@ def _estimate_release_speed_pass(
     elbow_extension_speed = np.abs(np.gradient(elbow_series, dt))
 
     metric_window = _window_indices(
-        release_frame,
+        wrist_peak_frame,
         len(pose_frames),
         before=window_before,
         after=window_after,
@@ -570,6 +574,8 @@ def _estimate_release_speed_pass(
         "reason": None if not salvage_mode else "salvaged_recovery_pass",
         "debug": {
             "release_frame": int(release_frame),
+            "wrist_peak_frame": int(wrist_peak_frame),
+            "peak_offset_frames": int(wrist_peak_frame - release_frame),
             "wrist_arm_ratio": round(wrist_arm_ratio, 3),
             "scoring_wrist_arm_ratio": round(scoring_wrist_arm_ratio, 3),
             "shoulder_body_ratio": round(shoulder_body_ratio, 3),
@@ -706,6 +712,7 @@ def _apply_clean_salvage_promotion(
         + 0.08 * release_term
         + 0.08 * chain_term
     )
+    uplift = min(1.40, uplift)
     value_kph = min(145, int(round(int(result.get("value_kph") or 0) * uplift)))
 
     debug["clean_salvage_promotion"] = round(uplift, 3)
@@ -798,6 +805,18 @@ def _is_implausible_saturated_estimate(result: Dict[str, Any]) -> bool:
     )
 
 
+def _window_after_for_peak_offset(
+    *,
+    base_after: int,
+    max_after: int,
+    release_frame: int,
+    wrist_peak_frame: int,
+) -> int:
+    peak_offset = abs(int(wrist_peak_frame) - int(release_frame))
+    extra = max(0, peak_offset - 1)
+    return min(max_after, base_after + extra)
+
+
 def estimate_release_speed(
     *,
     pose_frames: List[Dict[str, Any]],
@@ -806,16 +825,38 @@ def estimate_release_speed(
     hand: str,
     ball_weight_oz: float = BALL_WEIGHT_OZ,
 ) -> Dict[str, Any]:
+    fps = float(video.get("fps") or 30.0)
     release_frame = int(((events.get("release") or {}).get("frame")) or -1)
     release_confidence = float(((events.get("release") or {}).get("confidence")) or 0.0)
+    raw_wrist_peak = int(((events.get("peak") or {}).get("frame")) or release_frame)
+    max_peak_offset = max(3, int(round(fps * 0.20)))
+    if abs(raw_wrist_peak - release_frame) > max_peak_offset:
+        wrist_peak_frame = release_frame
+    elif abs(raw_wrist_peak - release_frame) <= 1:
+        wrist_peak_frame = release_frame
+    else:
+        wrist_peak_frame = raw_wrist_peak
+    primary_window_after = _window_after_for_peak_offset(
+        base_after=3,
+        max_after=6,
+        release_frame=release_frame,
+        wrist_peak_frame=wrist_peak_frame,
+    )
+    salvage_window_after = _window_after_for_peak_offset(
+        base_after=5,
+        max_after=8,
+        release_frame=release_frame,
+        wrist_peak_frame=wrist_peak_frame,
+    )
     primary = _estimate_release_speed_pass(
         pose_frames=pose_frames,
         video=video,
         hand=hand,
         release_frame=release_frame,
+        wrist_peak_frame=wrist_peak_frame,
         ball_weight_oz=ball_weight_oz,
         window_before=3,
-        window_after=3,
+        window_after=primary_window_after,
         scale_before=3,
         scale_after=3,
         sigma_scale=0.03,
@@ -847,9 +888,10 @@ def estimate_release_speed(
                         video=video,
                         hand=hand,
                         release_frame=candidate_frame,
+                        wrist_peak_frame=wrist_peak_frame,
                         ball_weight_oz=ball_weight_oz,
                         window_before=3,
-                        window_after=3,
+                        window_after=primary_window_after,
                         scale_before=3,
                         scale_after=3,
                         sigma_scale=0.03,
@@ -866,9 +908,10 @@ def estimate_release_speed(
                 video=video,
                 hand=hand,
                 release_frame=release_frame,
+                wrist_peak_frame=wrist_peak_frame,
                 ball_weight_oz=ball_weight_oz,
                 window_before=5,
-                window_after=5,
+                window_after=salvage_window_after,
                 scale_before=10,
                 scale_after=10,
                 sigma_scale=0.05,
@@ -899,9 +942,10 @@ def estimate_release_speed(
         video=video,
         hand=hand,
         release_frame=release_frame,
+        wrist_peak_frame=wrist_peak_frame,
         ball_weight_oz=ball_weight_oz,
         window_before=5,
-        window_after=5,
+        window_after=salvage_window_after,
         scale_before=10,
         scale_after=10,
         sigma_scale=0.05,
