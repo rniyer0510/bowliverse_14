@@ -213,11 +213,47 @@ def detect_ffc_bfc(
         )
 
     if ffc is None:
-        for i in range(win_end - hold, search_start - 1, -1):
-            if is_grounded(y_LA, y_LFI, i, hold, win_start, win_end, dt) or is_grounded(y_RA, y_RFI, i, hold, win_start, win_end, dt):
-                ffc = i
+        for i in range(win_end, search_start - 1, -1):
+            left_ground = is_grounded(
+                y_LA, y_LFI, i, hold, win_start, win_end, dt, approach_speed=v_lin
+            )
+            right_ground = is_grounded(
+                y_RA, y_RFI, i, hold, win_start, win_end, dt, approach_speed=v_lin
+            )
+            if left_ground or right_ground:
+                block_start = i
+                gap_budget = 1
+                gap_count = 0
+                for j in range(i - 1, search_start - 1, -1):
+                    grounded_j = is_grounded(
+                        y_LA,
+                        y_LFI,
+                        j,
+                        hold,
+                        win_start,
+                        win_end,
+                        dt,
+                        approach_speed=v_lin,
+                    ) or is_grounded(
+                        y_RA,
+                        y_RFI,
+                        j,
+                        hold,
+                        win_start,
+                        win_end,
+                        dt,
+                        approach_speed=v_lin,
+                    )
+                    if grounded_j:
+                        block_start = j
+                        gap_count = 0
+                        continue
+                    gap_count += 1
+                    if gap_count > gap_budget:
+                        break
+                ffc = max(search_start, block_start)
                 candidate = build_candidate(
-                    frame=i,
+                    frame=ffc,
                     method="single_foot_fallback",
                     confidence=0.22,
                     score=1.0,

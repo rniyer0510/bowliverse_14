@@ -152,27 +152,50 @@ def _foot_ground_score(
     win0: int,
     win1: int,
     dt: float,
+    approach_speed: Optional[np.ndarray] = None,
 ) -> int:
     if t < 0 or t + hold >= len(y_ank):
         return 0
 
+    speed_norm = _approach_speed_norm(
+        approach_speed,
+        frame=t,
+        start=win0,
+        end=win1,
+        radius=max(1, hold),
+    )
+    support_frames = _adaptive_settling_frames(
+        approach_speed,
+        frame=t,
+        hold=hold,
+        start=win0,
+        end=win1,
+        dt=dt,
+    )
     a_seg = y_ank[t : t + hold]
     t_seg = y_toe[t : t + hold]
+    support_probe = max(2, min(hold, support_frames))
+    a_support_seg = y_ank[t : min(len(y_ank), t + support_probe)]
+    t_support_seg = y_toe[t : min(len(y_toe), t + support_probe)]
     if not np.all(np.isfinite(a_seg)) or not np.all(np.isfinite(t_seg)):
+        return 0
+    if not np.all(np.isfinite(a_support_seg)) or not np.all(np.isfinite(t_support_seg)):
         return 0
 
     w0 = max(win0, t - max(hold * 3, 6))
-    w1 = min(win1, t + max(hold, 3))
+    w1 = min(win1, t + max(hold, support_frames))
     hist_a = y_ank[w0 : w1 + 1]
     hist_t = y_toe[w0 : w1 + 1]
     if not np.any(np.isfinite(hist_a)) or not np.any(np.isfinite(hist_t)):
         return 0
 
-    med_a = float(np.median(a_seg))
-    med_t = float(np.median(t_seg))
+    med_a = float(np.median(a_support_seg))
+    med_t = float(np.median(t_support_seg))
     support_a = _support_position(med_a, hist_a)
     support_t = _support_position(med_t, hist_t)
-    support_ready = support_a >= 0.72 and support_t >= 0.72
+    release_proximity = max(0.0, min(1.0, float(t - win0) / float(max(1, win1 - win0))))
+    support_threshold = max(0.50, 0.72 - (0.30 * speed_norm * release_proximity))
+    support_ready = support_a >= support_threshold and support_t >= support_threshold
     if not support_ready:
         return 0
 
@@ -201,8 +224,18 @@ def is_grounded(
     win0: int,
     win1: int,
     dt: float,
+    approach_speed: Optional[np.ndarray] = None,
 ) -> bool:
-    return _foot_ground_score(y_ank, y_toe, t, hold, win0, win1, dt) >= 2
+    return _foot_ground_score(
+        y_ank,
+        y_toe,
+        t,
+        hold,
+        win0,
+        win1,
+        dt,
+        approach_speed=approach_speed,
+    ) >= 2
 
 
 def _recently_grounded(
@@ -214,10 +247,20 @@ def _recently_grounded(
     win1: int,
     dt: float,
     lookback: int,
+    approach_speed: Optional[np.ndarray] = None,
 ) -> bool:
     j0 = max(win0, t - lookback)
     for j in range(t - 1, j0 - 1, -1):
-        if is_grounded(y_ank, y_toe, j, hold, win0, win1, dt):
+        if is_grounded(
+            y_ank,
+            y_toe,
+            j,
+            hold,
+            win0,
+            win1,
+            dt,
+            approach_speed=approach_speed,
+        ):
             return True
     return False
 
@@ -277,6 +320,7 @@ def _ground_window_strength(
     win_end: int,
     dt: float,
     radius: int,
+    approach_speed: Optional[np.ndarray] = None,
 ) -> float:
     strength = 0.0
     for offset in range(-radius, radius + 1):
@@ -292,6 +336,7 @@ def _ground_window_strength(
             win_start,
             win_end,
             dt,
+            approach_speed=approach_speed,
         )
     return strength
 
@@ -306,6 +351,7 @@ def _has_recent_support_transition(
     win_end: int,
     dt: float,
     lookback: int,
+    approach_speed: Optional[np.ndarray] = None,
 ) -> bool:
     """
     True when the current support frame is locally preceded by an ungrounded
@@ -317,7 +363,16 @@ def _has_recent_support_transition(
     start = max(win_start, frame - max(1, lookback))
     saw_support = False
     for idx in range(frame, start - 1, -1):
-        score = _foot_ground_score(y_ank, y_toe, idx, hold, win_start, win_end, dt)
+        score = _foot_ground_score(
+            y_ank,
+            y_toe,
+            idx,
+            hold,
+            win_start,
+            win_end,
+            dt,
+            approach_speed=approach_speed,
+        )
         if score >= 2:
             saw_support = True
             continue
@@ -345,6 +400,76 @@ def _speed_scale(
     return max(0.85, min(1.20, ratio))
 
 
+def _approach_speed_norm(
+    approach_speed: Optional[np.ndarray],
+    *,
+    frame: int,
+    start: int,
+    end: int,
+    radius: int,
+) -> float:
+    """
+    Normalize local approach speed inside the current FFC/BFC search band.
+
+    0.0 ~ slow/gliding approach, 1.0 ~ fast/hard plant approach.
+    """
+    if approach_speed is None:
+        return 0.0
+    if frame < 0:
+        return 0.5
+    speed = np.asarray(approach_speed, dtype=float)
+    if speed.size == 0:
+        return 0.0
+    start = max(0, min(int(start), len(speed) - 1))
+    end = max(start, min(int(end), len(speed) - 1))
+    segment = speed[start : end + 1]
+    segment = segment[np.isfinite(segment)]
+    if segment.size < 5:
+        return 0.0
+
+    local_start = max(start, frame - max(1, radius))
+    local_end = min(end, frame + max(1, radius))
+    local = speed[local_start : local_end + 1]
+    local = local[np.isfinite(local)]
+    if local.size == 0:
+        return 0.0
+
+    lo = float(np.percentile(segment, 10))
+    hi = float(np.percentile(segment, 90))
+    if hi <= lo + 1e-6:
+        return 0.0
+
+    value = float(np.median(local))
+    return max(0.0, min(1.0, (value - lo) / (hi - lo)))
+
+
+def _adaptive_settling_frames(
+    approach_speed: Optional[np.ndarray],
+    *,
+    frame: int,
+    hold: int,
+    start: int,
+    end: int,
+    dt: float,
+) -> int:
+    """
+    Fast run-up -> harder plant -> shorter post-contact settling window.
+    Slow run-up -> softer/gliding plant -> longer settling window.
+    """
+    fps = 1.0 / max(dt, 1e-6)
+    fast_frames = max(2, int(round(fps * 0.035)))
+    slow_frames = max(fast_frames + 1, int(round(fps * 0.170)))
+    norm = _approach_speed_norm(
+        approach_speed,
+        frame=frame,
+        start=start,
+        end=end,
+        radius=max(1, hold),
+    )
+    settle = int(round(fast_frames + ((1.0 - norm) * (slow_frames - fast_frames))))
+    return max(1, min(slow_frames, settle))
+
+
 def _contact_edge_strength(
     y_ank: np.ndarray,
     y_toe: np.ndarray,
@@ -355,21 +480,49 @@ def _contact_edge_strength(
     win_end: int,
     dt: float,
     pelvis_jerk: Optional[np.ndarray] = None,
+    approach_speed: Optional[np.ndarray] = None,
 ) -> float:
     if frame < win_start or frame + hold >= len(y_ank):
         return 0.0
 
-    current_score = _foot_ground_score(y_ank, y_toe, frame, hold, win_start, win_end, dt)
+    current_score = _foot_ground_score(
+        y_ank,
+        y_toe,
+        frame,
+        hold,
+        win_start,
+        win_end,
+        dt,
+        approach_speed=approach_speed,
+    )
     if current_score < 2:
         return 0.0
 
     prev_score = 0
     if frame - 1 >= win_start:
-        prev_score = _foot_ground_score(y_ank, y_toe, frame - 1, hold, win_start, win_end, dt)
+        prev_score = _foot_ground_score(
+            y_ank,
+            y_toe,
+            frame - 1,
+            hold,
+            win_start,
+            win_end,
+            dt,
+            approach_speed=approach_speed,
+        )
 
     next_score = current_score
     if frame + 1 + hold < len(y_ank):
-        next_score = _foot_ground_score(y_ank, y_toe, frame + 1, hold, win_start, win_end, dt)
+        next_score = _foot_ground_score(
+            y_ank,
+            y_toe,
+            frame + 1,
+            hold,
+            win_start,
+            win_end,
+            dt,
+            approach_speed=approach_speed,
+        )
 
     if frame - 1 < win_start:
         edge_ground = 0.0
@@ -422,22 +575,78 @@ def _refine_to_established_support(
     dt: float,
     pelvis_jerk: Optional[np.ndarray] = None,
     max_forward: Optional[int] = None,
+    approach_speed: Optional[np.ndarray] = None,
 ) -> int:
-    grounded = _foot_ground_score(y_ank, y_toe, frame, hold, win_start, win_end, dt)
+    grounded = _foot_ground_score(
+        y_ank,
+        y_toe,
+        frame,
+        hold,
+        win_start,
+        win_end,
+        dt,
+        approach_speed=approach_speed,
+    )
     if grounded < 2:
         return int(frame)
+
+    if frame - 1 >= int(win_start) and dt <= (1.0 / 45.0):
+        prev_score = _foot_ground_score(
+            y_ank,
+            y_toe,
+            frame - 1,
+            hold,
+            win_start,
+            win_end,
+            dt,
+            approach_speed=approach_speed,
+        )
+        edge_strength = _contact_edge_strength(
+            y_ank,
+            y_toe,
+            frame=frame,
+            hold=hold,
+            win_start=win_start,
+            win_end=win_end,
+            dt=dt,
+            pelvis_jerk=pelvis_jerk,
+            approach_speed=approach_speed,
+        )
+        if prev_score < 2 and edge_strength >= 0.50:
+            return int(frame - 1)
 
     # Walk backward through the release-side support block and return the
     # first supported frame in that local block. This matches the step-wise
     # ActionLab process: start near release, then walk backward until the foot
     # is no longer supported, instead of drifting forward to a later settled
     # frame.
+    settle_back_limit = max(
+        1,
+        _adaptive_settling_frames(
+            approach_speed,
+            frame=frame,
+            hold=hold,
+            start=win_start,
+            end=win_end,
+            dt=dt,
+        ) - 1,
+    )
+    refine_start = max(int(win_start), int(frame) - settle_back_limit)
     block_start = int(frame)
     gap_budget = 1
     gap_count = 0
     idx = int(frame) - 1
-    while idx >= int(win_start):
-        score = _foot_ground_score(y_ank, y_toe, idx, hold, win_start, win_end, dt)
+    while idx >= refine_start:
+        score = _foot_ground_score(
+            y_ank,
+            y_toe,
+            idx,
+            hold,
+            win_start,
+            win_end,
+            dt,
+            approach_speed=approach_speed,
+        )
         if score >= 2:
             block_start = idx
             gap_count = 0
@@ -541,15 +750,19 @@ def pick_ffc_backward_from_release(
     transition_lookback = max(hold * 3, 6)
 
     for i in range(win_end, search_start - 1, -1):
-        left_score = _foot_ground_score(y_LA, y_LFI, i, hold, win_start, win_end, dt)
-        right_score = _foot_ground_score(y_RA, y_RFI, i, hold, win_start, win_end, dt)
+        left_score = _foot_ground_score(
+            y_LA, y_LFI, i, hold, win_start, win_end, dt, approach_speed=approach_speed
+        )
+        right_score = _foot_ground_score(
+            y_RA, y_RFI, i, hold, win_start, win_end, dt, approach_speed=approach_speed
+        )
         left_grounded = left_score >= 2
         right_grounded = right_score >= 2
         right_recent = _recently_grounded(
-            y_RA, y_RFI, i, hold, win_start, win_end, dt, back_recent
+            y_RA, y_RFI, i, hold, win_start, win_end, dt, back_recent, approach_speed=approach_speed
         )
         left_recent = _recently_grounded(
-            y_LA, y_LFI, i, hold, win_start, win_end, dt, back_recent
+            y_LA, y_LFI, i, hold, win_start, win_end, dt, back_recent, approach_speed=approach_speed
         )
 
         left_edge = _contact_edge_strength(
@@ -561,6 +774,7 @@ def pick_ffc_backward_from_release(
             win_end=win_end,
             dt=dt,
             pelvis_jerk=pelvis_jerk,
+            approach_speed=approach_speed,
         )
         right_edge = _contact_edge_strength(
             y_RA,
@@ -571,6 +785,7 @@ def pick_ffc_backward_from_release(
             win_end=win_end,
             dt=dt,
             pelvis_jerk=pelvis_jerk,
+            approach_speed=approach_speed,
         )
 
         left_transition = _has_recent_support_transition(
@@ -582,6 +797,7 @@ def pick_ffc_backward_from_release(
             win_end=win_end,
             dt=dt,
             lookback=transition_lookback,
+            approach_speed=approach_speed,
         )
         right_transition = _has_recent_support_transition(
             y_RA,
@@ -592,6 +808,7 @@ def pick_ffc_backward_from_release(
             win_end=win_end,
             dt=dt,
             lookback=transition_lookback,
+            approach_speed=approach_speed,
         )
 
         left_front_ok = (
@@ -615,6 +832,7 @@ def pick_ffc_backward_from_release(
                 win_end=win_end,
                 dt=dt,
                 radius=radius,
+                approach_speed=approach_speed,
             )
             back_support = max(right_score, 1 if right_recent else 0)
             rank_score = _ffc_rank_score(
@@ -659,6 +877,7 @@ def pick_ffc_backward_from_release(
                 win_end=win_end,
                 dt=dt,
                 radius=radius,
+                approach_speed=approach_speed,
             )
             back_support = max(left_score, 1 if left_recent else 0)
             rank_score = _ffc_rank_score(
@@ -738,6 +957,7 @@ def pick_ffc_backward_from_release(
                     win_end=win_end,
                     dt=dt,
                     pelvis_jerk=pelvis_jerk,
+                    approach_speed=approach_speed,
                 )
                 return (
                     frame,
@@ -759,6 +979,7 @@ def pick_ffc_backward_from_release(
             win_end=win_end,
             dt=dt,
             pelvis_jerk=pelvis_jerk,
+            approach_speed=approach_speed,
         )
         return (
             frame,
@@ -923,6 +1144,16 @@ def pick_bfc_backward_from_ffc(
     else:
         chosen_confidence = 0.0
         chosen_method = "simple_grounded_bfc"
+        if median_recent_vis >= MIN_VIS and chosen_frame >= edge_search_start:
+            unloading_after = False
+            for j in range(chosen_frame + 1, min(ffc, chosen_frame + hold + 2)):
+                if _foot_ground_score(back_ank, back_toe, j, hold, win_start, win_end, dt) < 2:
+                    unloading_after = True
+                    break
+            support_block_len = int(chosen_frame) - int(seed_frame) + 1 if seed_frame is not None else hold
+            if unloading_after and support_block_len < hold:
+                chosen_confidence = 0.45
+                chosen_method = "back_foot_support_edge"
 
     if approach_speed is not None and band_end > band_start:
         speed = np.asarray(approach_speed, dtype=float)

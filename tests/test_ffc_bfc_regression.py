@@ -8,9 +8,36 @@ from app.workers.events.ffc_bfc import (
     _pick_ffc_backward_from_release,
     _sanitize_bfc_frame,
 )
+from app.workers.events.ffc_bfc_support import _adaptive_settling_frames
 
 
 class FfcBfcRegressionTest(unittest.TestCase):
+    def test_adaptive_settling_window_shrinks_for_faster_approach(self):
+        dt = 1.0 / 30.0
+        hold = 3
+        speed = np.linspace(0.10, 1.00, 40, dtype=float)
+
+        slow_frames = _adaptive_settling_frames(
+            speed,
+            frame=8,
+            hold=hold,
+            start=0,
+            end=30,
+            dt=dt,
+        )
+        fast_frames = _adaptive_settling_frames(
+            speed,
+            frame=28,
+            hold=hold,
+            start=0,
+            end=39,
+            dt=dt,
+        )
+
+        self.assertGreater(slow_frames, fast_frames)
+        self.assertGreaterEqual(slow_frames, 4)
+        self.assertLessEqual(fast_frames, 3)
+
     def test_ffc_search_start_keeps_pre_pelvis_lead_band_when_pelvis_on_is_late(self):
         start = _ffc_search_start(
             win_start=141,
