@@ -218,6 +218,91 @@ Still pending:
 
 - remove remaining renderer-owned interpretation phrasing where the knowledge base should decide the teaching copy
 - move risk-specific coaching language fully into the deterministic / knowledge-pack path
+
+## Speed Meta Context
+
+Release speed should currently be understood as one of the most sensitive outputs to upstream anchor changes.
+
+Important current understanding:
+
+- many recent speed shifts were not caused by the raw speed formula itself
+- they were caused by changes in:
+  - handedness resolution
+  - release frame placement
+  - the local release neighborhood reaching the speed estimator
+- this means ActionLab must treat speed as downstream of anchor truth, not as an isolated calculator
+
+### Current Speed Rule
+
+The speed estimator is still primarily a local camera-based kinematic estimator.
+
+Its raw terms remain:
+
+- wrist velocity relative to arm scale
+- elbow extension speed
+- pelvis movement contribution
+- shoulder movement penalty
+
+Current direction is:
+
+- keep the raw pace formula mostly intact
+- avoid clip-specific patching
+- correct upstream frame alignment first
+- add only narrow safeguards when the estimate is clearly implausible
+
+### Current Diagnosis
+
+The most important current speed issue is release-window alignment.
+
+What we observed:
+
+- release truth can move earlier when consensus uses stronger kinematic signals
+- when the speed metric window stays centered on `release.frame`, it can miss the true wrist-speed peak
+- this systematically underestimates pace on some clips
+- pathological clips can do the opposite and saturate high when the bowling-arm window is noisy
+
+Key insight:
+
+- `events["peak"]["frame"]` is often a better speed-window anchor than `events["release"]["frame"]`
+- release truth and speed-measurement center should not always be assumed to be the same frame
+
+### Current Planned Revisit
+
+When speed is revisited, the next preferred direction is:
+
+- move `pelvis_jerk` out of release locators and treat it as an early-frame suppression gate
+- anchor the speed metric window to `peak.frame` with a plausibility guard relative to `release.frame`
+- widen the forward side of the metric window so small release shifts do not truncate the true wrist peak
+- keep body/arm scale measurement anchored on release rather than blindly moving all windows to wrist peak
+
+### Camera Distance / Occlusion Follow-Up
+
+Another explicit follow-up area is small-subject and occlusion-aware speed handling.
+
+Current belief:
+
+- camera distance itself is not the only problem
+- the practical failure mode is loss of distal visibility and stability on far / small-subject clips
+- ActionLab already has occlusion-aware rendering and track honesty
+- speed does not yet fully consume that occlusion-aware trust model
+
+Future direction:
+
+- integrate occlusion-aware joint trust into speed confidence and compensation
+- especially for:
+  - bowling wrist
+  - bowling elbow
+  - bowling shoulder
+  - pelvis
+
+### Practical Reminder
+
+Until this revisit is complete:
+
+- do not overfit speed to individual clips
+- prefer simpler, defensible behavior over aggressive correction
+- treat McGrath as the clean carried-pace reference
+- treat `Amogh_new.mp4` as the small-subject / weak-distal-visibility reference
 - make renderer-facing story payloads come from one contract instead of a mix of renderer helper phrasing plus deterministic truth
 - review all fallback channels so none can recreate pathology outside acceptable kinetic-chain bands
 - verify frontend surfaces are consuming the newer deterministic contracts as directly as possible

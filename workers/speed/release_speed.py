@@ -679,8 +679,8 @@ def _apply_clean_salvage_promotion(
 
     if (
         not ordered
-        or chain_quality < 0.30
-        or release_confidence < 0.55
+        or chain_quality < 0.25
+        or release_confidence < 0.50
         or overall_wrist_visibility < 0.30
         or shoulder_body_ratio > 0.40
         or pelvis_body_ratio < 0.55
@@ -695,8 +695,8 @@ def _apply_clean_salvage_promotion(
     pelvis_term = max(0.0, min(1.0, (pelvis_body_ratio - 0.55) / 0.20))
     wrist_vis_term = max(0.0, min(1.0, (overall_wrist_visibility - 0.30) / 0.20))
     wrist_ratio_term = max(0.0, min(1.0, (wrist_arm_ratio - 8.0) / 4.0))
-    release_term = max(0.0, min(1.0, (release_confidence - 0.55) / 0.20))
-    chain_term = max(0.0, min(1.0, (chain_quality - 0.30) / 0.20))
+    release_term = max(0.0, min(1.0, (release_confidence - 0.50) / 0.20))
+    chain_term = max(0.0, min(1.0, (chain_quality - 0.25) / 0.20))
 
     uplift = 1.0 + (
         0.18 * shoulder_term

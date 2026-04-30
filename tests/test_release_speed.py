@@ -351,6 +351,41 @@ class ReleaseSpeedTests(unittest.TestCase):
         self.assertEqual(promoted["display_policy"], "show")
         self.assertIn("clean_salvage_promotion", promoted["debug"])
 
+    def test_clean_salvage_promotion_allows_borderline_live_mcgrath_case(self):
+        result = {
+            "available": True,
+            "display_policy": "show_low_confidence",
+            "value_kph": 94,
+            "display": "~94 km/h",
+            "confidence": 0.51,
+            "method": "release_kinematics_research_v2_salvage",
+            "ball_weight_oz": 5.25,
+            "reason": "recovered_unstable_arm_scale",
+            "debug": {
+                "release_frame": 141,
+                "wrist_arm_ratio": 11.313,
+                "shoulder_body_ratio": 0.324,
+                "pelvis_body_ratio": 0.743,
+                "elbow_extension_velocity_deg_per_sec": 148.9,
+                "overall_wrist_visibility": 0.351,
+                "release_confidence": 0.51,
+                "saturated": False,
+            },
+        }
+
+        promoted = _apply_clean_salvage_promotion(
+            result,
+            events={
+                "release": {"frame": 141, "confidence": 0.51},
+                "event_chain": {"ordered": True, "quality": 0.29},
+            },
+        )
+
+        self.assertTrue(promoted["available"])
+        self.assertGreater(promoted["value_kph"], 94)
+        self.assertEqual(promoted["display_policy"], "show")
+        self.assertIn("clean_salvage_promotion", promoted["debug"])
+
     def test_small_subject_compensation_lifts_far_clip_recovery(self):
         result = {
             "available": True,
