@@ -17,6 +17,8 @@ LH, RH = 23, 24
 # -----------------------------
 HIP_OPEN_LIMIT = 55.0      # deg
 HIP_DRIFT_LIMIT = 12.0     # deg (BFC → FFC)
+SIDE_ON_MAX = 35.0
+FRONT_ON_MIN = 80.0
 
 
 def classify_action(pose_frames, hand, bfc_frame, ffc_frame):
@@ -79,9 +81,9 @@ def classify_action(pose_frames, hand, bfc_frame, ffc_frame):
         shoulder_med = statistics.median(shoulder_angles)
         shoulder_var = statistics.pstdev(shoulder_angles) if len(shoulder_angles) > 1 else 0.0
 
-        if shoulder_med < 35:
+        if shoulder_med < SIDE_ON_MAX:
             shoulder_intent = "SIDE_ON"
-        elif shoulder_med > 65:
+        elif shoulder_med >= FRONT_ON_MIN:
             shoulder_intent = "FRONT_ON"
         else:
             shoulder_intent = "SEMI_OPEN"
@@ -93,14 +95,17 @@ def classify_action(pose_frames, hand, bfc_frame, ffc_frame):
     # --------------------------------
     # Final intent
     # --------------------------------
+    intent_source = None
     if foot_intent:
         intent = foot_intent
         confidence = foot_conf
+        intent_source = "foot"
     elif shoulder_intent:
         intent = shoulder_intent
         confidence = shoulder_conf
+        intent_source = "shoulder"
     else:
-        return {"intent": None, "action": "UNKNOWN", "confidence": 0.0}
+        return {"intent": None, "action": "UNKNOWN", "confidence": 0.0, "hand": (hand or "").upper() or None}
 
     # --------------------------------
     # STRUCTURAL MIXED detection
@@ -127,7 +132,17 @@ def classify_action(pose_frames, hand, bfc_frame, ffc_frame):
         if (hip_ang_ffc - hip_ang_bfc) > HIP_DRIFT_LIMIT:
             mixed = True
 
-    action = "MIXED" if mixed else intent
+    if mixed:
+        if intent_source == "shoulder" and intent == "SIDE_ON":
+            # When the front-foot read is missing, avoid promoting a noisy
+            # shoulder-side snapshot all the way to MIXED. The structural
+            # opening is real, but the safer label is SEMI_OPEN.
+            action = "SEMI_OPEN"
+            confidence = max(confidence, 0.25)
+        else:
+            action = "MIXED"
+    else:
+        action = intent
 
     return {
         "intent": intent.lower(),

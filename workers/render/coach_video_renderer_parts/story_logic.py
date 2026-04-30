@@ -106,7 +106,7 @@ def _story_risk_for_phase(
 def _format_action_label(action: Optional[Dict[str, Any]]) -> Optional[str]:
     if not isinstance(action, dict):
         return None
-    for key in ("intent", "action"):
+    for key in ("action", "intent"):
         raw = str(action.get(key) or "").strip()
         if raw and raw.upper() != "UNKNOWN":
             return raw.replace("_", " ").title()

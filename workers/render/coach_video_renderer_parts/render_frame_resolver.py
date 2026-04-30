@@ -95,6 +95,7 @@ def resolve_render_timeline_events(
         or raw_bfc < start + 1
         or raw_bfc >= stop - 2
         or (render_ffc is not None and raw_bfc >= render_ffc)
+        or str((((events or {}).get("bfc") or {}).get("method")) or "").strip().lower() == "no_ground_confirmed"
     )
 
     if weak_bfc:
@@ -146,7 +147,7 @@ def resolve_render_timeline_events(
     if weak_ffc:
         timeline["ffc"] = _render_event_payload(
             event=(timeline.get("ffc") or {}),
-            detected_frame=detected_ffc,
+            detected_frame=raw_ffc,
             render_frame=render_ffc,
             detected_confidence=_event_confidence(events, "ffc"),
             render_method="phase_band_fallback",

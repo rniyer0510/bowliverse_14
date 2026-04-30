@@ -118,10 +118,11 @@ def _pause_hold_plan(*, pause_frames: int, has_hotspot: bool) -> Tuple[int, int]
         return 0, 0
     if not has_hotspot:
         return base_pause, 0
-    cue_hold = max(1, int(round(base_pause * 0.45)))
+    cue_hold = max(1, int(round(base_pause * 0.42)))
     hotspot_hold = max(1, base_pause - cue_hold)
-    hotspot_bonus = max(1, int(round(base_pause * 0.35)))
-    return cue_hold, hotspot_hold + hotspot_bonus
+    if cue_hold + hotspot_hold > base_pause:
+        hotspot_hold = max(0, base_pause - cue_hold)
+    return cue_hold, hotspot_hold
 def _pause_sequence_plan(
     *,
     pause_frames: int,

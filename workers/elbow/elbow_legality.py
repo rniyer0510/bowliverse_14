@@ -2,7 +2,7 @@
 Elbow legality evaluation — ActionLab V14.
 
 Primary rule:
-- Use measured elbow extension whenever a release-anchored elbow window is dense enough.
+- Measure elbow extension directly from the UAH -> Release event window.
 
 Fallback rule:
 - If extension cannot be measured reliably, judge legality from the smoothness of the
@@ -16,11 +16,14 @@ THRESH_LEGAL = 18.0
 THRESH_BORDERLINE = 22.0
 
 RELEASE_TRIM_FRAMES = 2
+PRIMARY_MIN_SAMPLES = 2
 MIN_SAMPLES = 5
 BASELINE_MAX_SAMPLES = 4
 PEAK_Q = 90
 PRE_RELEASE_LOOKBACK = 10
 POST_RELEASE_GRACE = 12
+UAH_BASELINE_MAX_FRAMES = 2
+UAH_BASELINE_RATIO = 0.30
 
 BASELINE_VEL_MAX = 3.0  # deg/frame
 FLOW_MIN_SAMPLES = 6
@@ -126,6 +129,12 @@ def _percentile(vals: List[float], q: int) -> float:
     return xs[f] if f == c else xs[f] + (xs[c] - xs[f]) * (k - f)
 
 
+def _release_trim_frames(fps: Optional[float] = None) -> int:
+    if fps is None or not _finite(fps):
+        return RELEASE_TRIM_FRAMES
+    return 3 if float(fps) >= 50.0 else RELEASE_TRIM_FRAMES
+
+
 def _mad_filter(vals: List[float], z: float = 6.0) -> List[float]:
     if len(vals) < 5:
         return vals
@@ -180,6 +189,7 @@ def _flow_based_legality(
     *,
     primary_reason: str,
     primary_debug: Optional[Dict[str, Any]] = None,
+    fps: Optional[float] = None,
 ) -> Dict[str, Any]:
     ffc = _extract_event_frame(events, "ffc")
     uah = _extract_event_frame(events, "uah")
@@ -239,8 +249,9 @@ def _flow_based_legality(
     abs_rates = [abs(r) for r in rates]
     jerks = [abs(rates[i] - rates[i - 1]) for i in range(1, len(rates))]
     sign_flips = _sign_flips(rates)
-    p90_rate = _percentile(abs_rates, 90)
-    p90_jerk = _percentile(jerks, 90) if jerks else 0.0
+    fps_scale = float(fps) / 30.0 if _finite(fps) and float(fps) > 0.0 else 1.0
+    p90_rate = _percentile(abs_rates, 90) * fps_scale
+    p90_jerk = (_percentile(jerks, 90) if jerks else 0.0) * fps_scale
 
     irregular = (
         p90_rate > FLOW_MAX_RATE
@@ -491,7 +502,9 @@ def _is_weak_primary_window(primary: Dict[str, Any]) -> bool:
     debug = primary.get("debug") or {}
     window_mode = debug.get("window_mode")
     valid_samples = int(debug.get("valid_samples") or 0)
-    return window_mode == "release_grace_rescue" and valid_samples <= MIN_SAMPLES
+    return window_mode == "release_grace_rescue" or (
+        window_mode == "release_anchored_sparse" and valid_samples <= MIN_SAMPLES
+    )
 
 
 def _review_weak_primary_window(
@@ -513,19 +526,19 @@ def _review_weak_primary_window(
     # Strongly legal measured windows stay legal even if the rescue is cautious.
     if reviewed.get("verdict") == "LEGAL" and extension <= (THRESH_LEGAL - WEAK_WINDOW_MARGIN_DEG):
         reviewed["confidence"] = min(float(reviewed.get("confidence") or 0.0), 0.70)
-        reviewed["reason"] = "weak_window_but_clear_margin"
+        reviewed["reason"] = "post_release_window_but_clear_margin"
         return reviewed
 
     # Weak near-threshold calls must be corroborated.
     if reviewed.get("verdict") == "LEGAL":
         if rescue.get("verdict") == "LEGAL":
             reviewed["confidence"] = min(float(reviewed.get("confidence") or 0.0), 0.65)
-            reviewed["reason"] = "weak_window_confirmed"
+            reviewed["reason"] = "post_release_window_confirmed"
             return reviewed
         return {
             "verdict": "SUSPECT",
             "confidence": 0.45,
-            "reason": "weak_window_near_threshold",
+            "reason": "post_release_window_unconfirmed",
             "extension_deg": extension,
             "debug": reviewed_debug,
         }
@@ -534,13 +547,22 @@ def _review_weak_primary_window(
         return {
             "verdict": "SUSPECT",
             "confidence": 0.50,
-            "reason": "weak_window_conflicted",
+            "reason": "post_release_window_conflicted",
+            "extension_deg": extension,
+            "debug": reviewed_debug,
+        }
+
+    if reviewed.get("verdict") in {"BORDERLINE", "ILLEGAL"}:
+        return {
+            "verdict": "SUSPECT",
+            "confidence": 0.50,
+            "reason": "post_release_window_unconfirmed",
             "extension_deg": extension,
             "debug": reviewed_debug,
         }
 
     reviewed["confidence"] = min(float(reviewed.get("confidence") or 0.0), 0.60)
-    reviewed["reason"] = "weak_window_unconfirmed"
+    reviewed["reason"] = "post_release_window_unconfirmed"
     return reviewed
 
 
@@ -551,6 +573,7 @@ def _review_weak_primary_window(
 def _compute_elbow_legality(
     elbow_signal: List[Dict[str, Any]],
     events: Dict[str, Any],
+    fps: Optional[float] = None,
 ) -> Dict[str, Any]:
 
     uah = _extract_event_frame(events, "uah")
@@ -562,16 +585,65 @@ def _compute_elbow_legality(
             events,
             primary_reason="events_missing",
             primary_debug={"uah": uah, "release": release},
+            fps=fps,
         )
 
-    release_used = release - RELEASE_TRIM_FRAMES
+    release_used = release - _release_trim_frames(fps)
     if release_used < 0:
         return _flow_based_legality(
             elbow_signal,
             events,
             primary_reason="event_window_too_short",
             primary_debug={"uah": uah, "release": release, "release_used": release_used},
+            fps=fps,
         )
+
+    primary_rows = (
+        [a for _, a in _collect_rows(elbow_signal, uah, release_used)]
+        if uah is not None and uah <= release_used
+        else []
+    )
+
+    if len(primary_rows) >= PRIMARY_MIN_SAMPLES:
+        rows = _mad_filter(primary_rows)
+        if len(rows) >= PRIMARY_MIN_SAMPLES:
+            early_n = max(
+                1,
+                min(
+                    UAH_BASELINE_MAX_FRAMES,
+                    int(math.ceil(len(rows) * UAH_BASELINE_RATIO)),
+                ),
+            )
+            baseline = _percentile(rows[:early_n], 50)
+            peak = _percentile(rows, PEAK_Q) if len(rows) >= 6 else max(rows)
+            extension = max(0.0, float(peak) - float(baseline))
+
+            if extension > THRESH_BORDERLINE:
+                verdict = "ILLEGAL"
+                confidence = 0.75
+            elif extension > THRESH_LEGAL:
+                verdict = "BORDERLINE"
+                confidence = 0.60
+            else:
+                verdict = "LEGAL"
+                confidence = 0.80
+
+            return {
+                "verdict": verdict,
+                "confidence": round(confidence, 2),
+                "extension_deg": round(extension, 2),
+                "baseline_angle_deg": round(float(baseline), 2),
+                "release_angle_deg": round(float(peak), 2),
+                "window": {"start_frame": uah, "end_frame": release_used},
+                "debug": {
+                    "window_mode": "uah_to_release",
+                    "window_start": uah,
+                    "window_end": release_used,
+                    "valid_samples": len(rows),
+                    "uah_baseline_samples": early_n,
+                    "peak_method": "p90" if len(rows) >= 6 else "max",
+                },
+            }
 
     start_frame, end_frame, rows, window_debug = _select_measurement_rows(
         elbow_signal,
@@ -595,6 +667,7 @@ def _compute_elbow_legality(
                 **window_debug,
                 "note": "Event window sufficient; elbow landmarks sparse",
             },
+            fps=fps,
         )
 
     rows = _mad_filter(rows)
@@ -653,7 +726,7 @@ def evaluate_elbow_legality(
             "confidence": 0.20,
             "reason": "events_missing",
         }
-    primary = _compute_elbow_legality(elbow_signal, events)
+    primary = _compute_elbow_legality(elbow_signal, events, fps=kwargs.get("fps"))
     if primary.get("verdict") == "UNKNOWN":
         if not pose_frames or not hand:
             return primary

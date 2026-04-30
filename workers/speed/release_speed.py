@@ -817,42 +817,35 @@ def _window_after_for_peak_offset(
     return min(max_after, base_after + extra)
 
 
-def estimate_release_speed(
+def _estimate_speed_for_anchor_frame(
     *,
     pose_frames: List[Dict[str, Any]],
-    events: Dict[str, Any],
     video: Dict[str, Any],
     hand: str,
-    ball_weight_oz: float = BALL_WEIGHT_OZ,
+    anchor_frame: int,
+    wrist_peak_frame: int,
+    ball_weight_oz: float,
+    release_confidence: float,
+    events: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-    fps = float(video.get("fps") or 30.0)
-    release_frame = int(((events.get("release") or {}).get("frame")) or -1)
-    release_confidence = float(((events.get("release") or {}).get("confidence")) or 0.0)
-    raw_wrist_peak = int(((events.get("peak") or {}).get("frame")) or release_frame)
-    max_peak_offset = max(3, int(round(fps * 0.20)))
-    if abs(raw_wrist_peak - release_frame) > max_peak_offset:
-        wrist_peak_frame = release_frame
-    elif abs(raw_wrist_peak - release_frame) <= 1:
-        wrist_peak_frame = release_frame
-    else:
-        wrist_peak_frame = raw_wrist_peak
     primary_window_after = _window_after_for_peak_offset(
         base_after=3,
         max_after=6,
-        release_frame=release_frame,
+        release_frame=anchor_frame,
         wrist_peak_frame=wrist_peak_frame,
     )
     salvage_window_after = _window_after_for_peak_offset(
         base_after=5,
         max_after=8,
-        release_frame=release_frame,
+        release_frame=anchor_frame,
         wrist_peak_frame=wrist_peak_frame,
     )
+
     primary = _estimate_release_speed_pass(
         pose_frames=pose_frames,
         video=video,
         hand=hand,
-        release_frame=release_frame,
+        release_frame=anchor_frame,
         wrist_peak_frame=wrist_peak_frame,
         ball_weight_oz=ball_weight_oz,
         window_before=3,
@@ -879,8 +872,8 @@ def estimate_release_speed(
     if primary.get("available"):
         if release_confidence < 0.60:
             neighbor_results = [primary]
-            for candidate_frame in range(max(3, release_frame - 2), release_frame + 3):
-                if candidate_frame == release_frame:
+            for candidate_frame in range(max(3, anchor_frame - 2), anchor_frame + 3):
+                if candidate_frame == anchor_frame:
                     continue
                 neighbor_results.append(
                     _estimate_release_speed_pass(
@@ -907,7 +900,7 @@ def estimate_release_speed(
                 pose_frames=pose_frames,
                 video=video,
                 hand=hand,
-                release_frame=release_frame,
+                release_frame=anchor_frame,
                 wrist_peak_frame=wrist_peak_frame,
                 ball_weight_oz=ball_weight_oz,
                 window_before=5,
@@ -924,7 +917,7 @@ def estimate_release_speed(
                 recovery["reason"] = "recovered_implausible_saturation"
                 recovery_debug = recovery.setdefault("debug", {})
                 recovery_debug["primary_failure_reason"] = "implausible_saturated_estimate"
-                return _apply_small_subject_compensation(recovery, events=events)
+                return _apply_small_subject_compensation(recovery, events=events or {})
             debug = dict(primary.get("debug") or {})
             debug["primary_failure_reason"] = "implausible_saturated_estimate"
             return {
@@ -941,7 +934,7 @@ def estimate_release_speed(
         pose_frames=pose_frames,
         video=video,
         hand=hand,
-        release_frame=release_frame,
+        release_frame=anchor_frame,
         wrist_peak_frame=wrist_peak_frame,
         ball_weight_oz=ball_weight_oz,
         window_before=5,
@@ -958,7 +951,7 @@ def estimate_release_speed(
         salvage["reason"] = f"recovered_{primary.get('reason')}"
         salvage_debug = salvage.setdefault("debug", {})
         salvage_debug["primary_failure_reason"] = primary.get("reason")
-        return _apply_clean_salvage_promotion(salvage, events=events)
+        return _apply_clean_salvage_promotion(salvage, events=events or {})
 
     if salvage.get("reason") in {
         "release_too_close_to_clip_start",
@@ -974,4 +967,130 @@ def estimate_release_speed(
         }
 
     result = salvage if salvage.get("reason") != primary.get("reason") else primary
-    return _apply_clean_salvage_promotion(result, events=events) if result.get("available") else result
+    return _apply_clean_salvage_promotion(result, events=events or {}) if result.get("available") else result
+
+
+def _recover_from_late_speed_anchor(
+    *,
+    primary: Dict[str, Any],
+    pose_frames: List[Dict[str, Any]],
+    video: Dict[str, Any],
+    hand: str,
+    release_frame: int,
+    ball_weight_oz: float,
+    release_confidence: float,
+    events: Dict[str, Any],
+) -> Dict[str, Any]:
+    if not primary.get("available"):
+        return primary
+
+    debug = dict(primary.get("debug") or {})
+    if not bool(debug.get("soft_release_recovery_mode")):
+        return primary
+    if float(debug.get("overall_wrist_visibility") or 0.0) >= 0.20:
+        return primary
+    if float(debug.get("shoulder_body_ratio") or 0.0) <= 0.80:
+        return primary
+    if int(primary.get("value_kph") or 0) < 130:
+        return primary
+
+    fps = float(video.get("fps") or 30.0)
+    max_offset = max(6, int(round(fps * 0.30)))
+    best_result = None
+    best_score = float("-inf")
+
+    for anchor_frame in range(release_frame + 2, min(len(pose_frames) - 1, release_frame + max_offset) + 1):
+        candidate = _estimate_speed_for_anchor_frame(
+            pose_frames=pose_frames,
+            video=video,
+            hand=hand,
+            anchor_frame=anchor_frame,
+            wrist_peak_frame=anchor_frame,
+            ball_weight_oz=ball_weight_oz,
+            release_confidence=release_confidence,
+            events=events,
+        )
+        if not candidate.get("available"):
+            continue
+        candidate_debug = dict(candidate.get("debug") or {})
+        value_kph = int(candidate.get("value_kph") or 0)
+        shoulder_body_ratio = float(candidate_debug.get("shoulder_body_ratio") or 0.0)
+        elbow_velocity = float(candidate_debug.get("elbow_extension_velocity_deg_per_sec") or 0.0)
+        wrist_arm_ratio = float(candidate_debug.get("wrist_arm_ratio") or 0.0)
+        if (
+            value_kph < 85
+            or value_kph > 125
+            or shoulder_body_ratio > 0.65
+            or elbow_velocity < 140.0
+            or elbow_velocity > 280.0
+            or wrist_arm_ratio < 6.0
+            or wrist_arm_ratio > 12.5
+        ):
+            continue
+
+        score = float(value_kph)
+        score -= abs(shoulder_body_ratio - 0.48) * 40.0
+        score -= abs(min(elbow_velocity, 280.0) - 220.0) / 20.0
+        score -= abs(wrist_arm_ratio - 10.0) * 3.0
+        score -= max(0, anchor_frame - release_frame) * 0.05
+        if str(candidate.get("reason") or "").startswith("recovered_"):
+            score += 1.0
+
+        if score > best_score:
+            best_score = score
+            best_result = candidate
+
+    if best_result is None:
+        return primary
+
+    recovered_debug = {
+        **dict(best_result.get("debug") or {}),
+        "late_anchor_recovery": True,
+        "late_anchor_source_frame": int(release_frame),
+    }
+    return {
+        **best_result,
+        "debug": recovered_debug,
+    }
+
+
+def estimate_release_speed(
+    *,
+    pose_frames: List[Dict[str, Any]],
+    events: Dict[str, Any],
+    video: Dict[str, Any],
+    hand: str,
+    ball_weight_oz: float = BALL_WEIGHT_OZ,
+) -> Dict[str, Any]:
+    fps = float(video.get("fps") or 30.0)
+    release_frame = int(((events.get("release") or {}).get("frame")) or -1)
+    release_confidence = float(((events.get("release") or {}).get("confidence")) or 0.0)
+    raw_wrist_peak = int(((events.get("peak") or {}).get("frame")) or release_frame)
+    max_peak_offset = max(3, int(round(fps * 0.20)))
+    if abs(raw_wrist_peak - release_frame) > max_peak_offset:
+        wrist_peak_frame = release_frame
+    elif abs(raw_wrist_peak - release_frame) <= 1:
+        wrist_peak_frame = release_frame
+    else:
+        wrist_peak_frame = raw_wrist_peak
+    primary = _estimate_speed_for_anchor_frame(
+        pose_frames=pose_frames,
+        video=video,
+        hand=hand,
+        anchor_frame=release_frame,
+        wrist_peak_frame=wrist_peak_frame,
+        ball_weight_oz=ball_weight_oz,
+        release_confidence=release_confidence,
+        events=events,
+    )
+    primary = _recover_from_late_speed_anchor(
+        primary=primary,
+        pose_frames=pose_frames,
+        video=video,
+        hand=hand,
+        release_frame=release_frame,
+        ball_weight_oz=ball_weight_oz,
+        release_confidence=release_confidence,
+        events=events,
+    )
+    return primary

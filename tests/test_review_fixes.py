@@ -4,6 +4,7 @@ import tempfile
 import unittest
 import uuid
 from datetime import datetime, timezone
+from io import BytesIO
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -38,6 +39,97 @@ class ResolverFixTests(unittest.TestCase):
         created_player = db.add.call_args_list[0].args[0]
         self.assertEqual(created_player.handedness, "L")
         self.assertEqual(created_player.season, datetime.utcnow().year)
+
+    def test_update_player_profile_can_correct_handedness(self):
+        from app.common.stable_cache import clear_stable_cache, get_player_profile
+        from app.persistence.read_api import PlayerProfileUpdate, update_player_profile
+
+        clear_stable_cache()
+        link = SimpleNamespace(player_id="player-1")
+        player = SimpleNamespace(player_id="player-1", handedness="R", age_group="U16", season=2026)
+
+        link_query = MagicMock()
+        link_query.filter_by.return_value.first.return_value = link
+        player_query = MagicMock()
+        player_query.filter_by.return_value.first.return_value = player
+
+        db = MagicMock()
+        db.query.side_effect = [link_query, player_query]
+        current_account = SimpleNamespace(account_id="acc-1")
+
+        result = update_player_profile(
+            "player-1",
+            PlayerProfileUpdate(handedness="L"),
+            current_account=current_account,
+            db=db,
+        )
+
+        self.assertEqual(player.handedness, "L")
+        self.assertEqual(result["handedness"], "L")
+        self.assertEqual(
+            get_player_profile("player-1"),
+            {"handedness": "L", "age_group": "U16", "season": 2026},
+        )
+        db.commit.assert_called_once()
+        clear_stable_cache()
+
+    def test_analyze_uses_stable_cache_for_player_profile(self):
+        from app.common.stable_cache import clear_stable_cache, remember_player_profile
+        from app.orchestrator.orchestrator import analyze
+
+        clear_stable_cache()
+        remember_player_profile(
+            player_id="player-1",
+            handedness="R",
+            age_group="U16",
+            season=2026,
+        )
+
+        request = SimpleNamespace(
+            state=SimpleNamespace(request_id="req-1"),
+            headers={},
+            client=None,
+        )
+        background_tasks = MagicMock()
+        upload = SimpleNamespace(
+            content_type="video/mp4",
+            filename="clip.mp4",
+            file=BytesIO(b"fake-video"),
+        )
+        current_account = SimpleNamespace(account_id="acc-1", role="coach")
+
+        link_query = MagicMock()
+        link_query.filter.return_value.first.return_value = SimpleNamespace(player_id="player-1")
+
+        db = MagicMock()
+        db.query.side_effect = [link_query]
+
+        with patch("app.orchestrator.orchestrator.SessionLocal", return_value=db), patch(
+            "app.orchestrator.orchestrator._get_deterministic_expert_engine",
+            return_value=SimpleNamespace(history_window_runs=4),
+        ), patch(
+            "app.orchestrator.orchestrator._load_recent_expert_history",
+            return_value=[],
+        ), patch(
+            "app.orchestrator.orchestrator.load_video",
+            side_effect=RuntimeError("bad video"),
+        ):
+            with self.assertRaises(HTTPException) as context:
+                analyze(
+                    request=request,
+                    background_tasks=background_tasks,
+                    file=upload,
+                    player_id="player-1",
+                    bowler_type="pace",
+                    age_group=None,
+                    season=None,
+                    actor=None,
+                    current_account=current_account,
+                )
+
+        self.assertEqual(context.exception.status_code, 400)
+        self.assertEqual(db.query.call_count, 1)
+        clear_stable_cache()
 
 
 class AuthSecretTests(unittest.TestCase):

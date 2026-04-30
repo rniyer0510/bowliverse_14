@@ -93,7 +93,7 @@ class ElbowLegalityFallbackTests(unittest.TestCase):
         self.assertEqual(result_60["verdict"], result_30["verdict"])
         self.assertEqual(result_60["reason"], result_30["reason"])
 
-    def test_gap_aware_baseline_preserves_physical_velocity(self):
+    def test_uah_anchored_baseline_uses_event_window_directly(self):
         elbow_signal = [
             {"frame": 10, "angle_deg": 100.0, "valid": True},
             {"frame": 14, "angle_deg": 110.0, "valid": True},
@@ -115,9 +115,9 @@ class ElbowLegalityFallbackTests(unittest.TestCase):
         )
 
         self.assertEqual(result["debug"]["window_mode"], "uah_to_release")
-        self.assertEqual(result["verdict"], "LEGAL")
-        self.assertAlmostEqual(result["baseline_angle_deg"], 130.0, places=2)
-        self.assertAlmostEqual(result["extension_deg"], 15.0, places=2)
+        self.assertEqual(result["verdict"], "ILLEGAL")
+        self.assertAlmostEqual(result["baseline_angle_deg"], 105.0, places=2)
+        self.assertAlmostEqual(result["extension_deg"], 40.0, places=2)
 
     def test_prefers_uah_to_release_before_post_release_grace_window(self):
         elbow_signal = [
@@ -221,7 +221,7 @@ class ElbowLegalityFallbackTests(unittest.TestCase):
         self.assertEqual(result["verdict"], "LEGAL")
         self.assertEqual(result["reason"], "post_release_window_but_clear_margin")
 
-    def test_gap_aware_measurement_can_clear_a_previously_near_threshold_window(self):
+    def test_post_release_rescue_stays_suspect_without_primary_window_support(self):
         elbow_signal = [
             {"frame": 19, "angle_deg": 110.0, "valid": True},
             {"frame": 20, "angle_deg": 112.0, "valid": True},
@@ -243,8 +243,8 @@ class ElbowLegalityFallbackTests(unittest.TestCase):
             hand="R",
         )
 
-        self.assertEqual(result["verdict"], "LEGAL")
-        self.assertEqual(result["reason"], "post_release_window_but_clear_margin")
+        self.assertEqual(result["verdict"], "SUSPECT")
+        self.assertEqual(result["reason"], "post_release_window_conflicted")
 
     def test_weak_borderline_window_degrades_to_suspect_without_rescue_confirmation(self):
         elbow_signal = [

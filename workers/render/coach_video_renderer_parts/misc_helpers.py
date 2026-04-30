@@ -16,9 +16,9 @@ def _top_risk_panel_metrics(width: int, height: int) -> Dict[str, Any]:
         "body_max_lines": 1,
     }
 def _summary_telemetry_layout(width: int, height: int) -> Dict[str, Any]:
-    left_x = int(round(width * 0.04))
-    gap = int(round(width * 0.018))
-    stat_h = int(round(height * 0.118))
+    left_x = int(round(width * 0.03))
+    gap = int(round(width * 0.016))
+    stat_h = int(round(height * 0.092))
     stat_w = int(round((width - (left_x * 2) - (gap * 2)) / 3.0))
     return {
         "left_x": left_x,

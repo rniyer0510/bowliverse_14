@@ -75,6 +75,56 @@ class SpeedDisplayPolicyTest(unittest.TestCase):
         self.assertEqual(result["display_policy"], "suppress")
         self.assertEqual(result["reason"], "slow_motion_playback_detected")
 
+    def test_soft_release_recovery_with_weak_visibility_suppresses_speed(self):
+        speed = {
+            **self._base_speed(),
+            "debug": {
+                "soft_release_recovery_mode": True,
+                "overall_wrist_visibility": 0.11,
+                "shoulder_body_ratio": 0.93,
+            },
+        }
+
+        result = _gate_speed_estimate(
+            estimated_release_speed=speed,
+            event_chain={"ordered": True, "quality": 0.42},
+            events={
+                "release": {"confidence": 0.46},
+                "ffc": {"method": "release_backward_chain_grounding", "confidence": 0.90},
+                "bfc": {"method": "back_foot_support_edge", "confidence": 0.76},
+            },
+            playback_mode={"mode": "real_time_or_high_fps"},
+        )
+
+        self.assertFalse(result["available"])
+        self.assertEqual(result["display_policy"], "suppress")
+        self.assertEqual(result["reason"], "weak_release_speed_evidence")
+
+    def test_soft_release_recovery_can_show_low_confidence_when_other_evidence_is_strong(self):
+        speed = {
+            **self._base_speed(),
+            "debug": {
+                "soft_release_recovery_mode": True,
+                "overall_wrist_visibility": 0.18,
+                "shoulder_body_ratio": 0.84,
+            },
+        }
+
+        result = _gate_speed_estimate(
+            estimated_release_speed=speed,
+            event_chain={"ordered": True, "quality": 0.42},
+            events={
+                "release": {"confidence": 0.58},
+                "ffc": {"method": "release_backward_chain_grounding", "confidence": 0.90},
+                "bfc": {"method": "back_foot_support_edge", "confidence": 0.76},
+            },
+            playback_mode={"mode": "real_time_or_high_fps"},
+        )
+
+        self.assertTrue(result["available"])
+        self.assertEqual(result["display_policy"], "show_low_confidence")
+        self.assertEqual(result["reason"], "weak_release_speed_evidence")
+
 
 if __name__ == "__main__":
     unittest.main()

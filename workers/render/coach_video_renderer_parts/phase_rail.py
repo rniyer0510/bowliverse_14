@@ -19,6 +19,8 @@ def _phase_index_for_frame(
     if frame_idx < cp3:
         return 2
     return 3
+
+
 def _draw_phase_rail(
     frame: np.ndarray,
     *,

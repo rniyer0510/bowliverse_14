@@ -10,6 +10,7 @@ import numpy as np
 
 from app.common.logger import get_logger
 from app.common.auth import get_current_account
+from app.common.stable_cache import get_player_profile, remember_player_profile
 from app.io.loader import cleanup_stale_temp_uploads, load_video
 from app.workers.screening.video_screen import run_preanalysis_screen
 from app.workers.speed.release_speed import estimate_release_speed
@@ -451,6 +452,10 @@ def _gate_speed_estimate(
     chain_quality = float((event_chain or {}).get("quality") or 0.0)
     release_confidence = float(((events or {}).get("release") or {}).get("confidence") or 0.0)
     speed_confidence = float(estimated_release_speed.get("confidence") or 0.0)
+    speed_debug = dict(estimated_release_speed.get("debug") or {})
+    soft_release_recovery_mode = bool(speed_debug.get("soft_release_recovery_mode"))
+    overall_wrist_visibility = float(speed_debug.get("overall_wrist_visibility") or 0.0)
+    shoulder_body_ratio = float(speed_debug.get("shoulder_body_ratio") or 0.0)
 
     weak_anchor_names = []
     weak_fallback_methods = {"ultimate_fallback", "single_foot_fallback", "no_foot_data_fallback"}
@@ -478,6 +483,33 @@ def _gate_speed_estimate(
         and speed_confidence >= 0.50
         and chain_quality >= 0.20
     )
+
+    weak_speed_evidence = (
+        soft_release_recovery_mode
+        and (
+            overall_wrist_visibility < 0.20
+            or shoulder_body_ratio > 0.80
+        )
+    )
+
+    if weak_speed_evidence and can_show_low_confidence:
+        return {
+            **estimated_release_speed,
+            "available": True,
+            "display_policy": "show_low_confidence",
+            "reason": "weak_release_speed_evidence",
+        }
+
+    if weak_speed_evidence:
+        return {
+            **estimated_release_speed,
+            "available": False,
+            "display_policy": "suppress",
+            "display": None,
+            "value_kph": None,
+            "confidence": 0.0,
+            "reason": "weak_release_speed_evidence",
+        }
 
     if chain_quality < 0.35 and can_show_low_confidence:
         return {
@@ -982,7 +1014,6 @@ def _deterministic_render_story_context(
     coach_diagnosis = (deterministic_expert.get("coach_diagnosis_v1") or {})
     root_cause = (coach_diagnosis.get("root_cause") or {})
     chain_status = (coach_diagnosis.get("kinetic_chain_status") or {})
-
     if not coach_diagnosis:
         return None
 
@@ -1237,28 +1268,39 @@ def analyze(
                 detail="You do not have access to this player",
             )
 
-        # Step 2: Fetch player
-        player = (
-            db.query(Player)
-            .filter(Player.player_id == player_id)
-            .first()
-        )
+        player_profile = get_player_profile(player_id)
+        hand = str((player_profile or {}).get("handedness") or "").strip().upper() or None
+        effective_age_group = str((player_profile or {}).get("age_group") or "").strip().upper() or None
+        effective_season = (player_profile or {}).get("season")
 
-        if not player:
-            raise HTTPException(
-                status_code=404,
-                detail="Player not found",
+        if hand not in {"R", "L"} or not effective_age_group or effective_season is None:
+            player = (
+                db.query(Player)
+                .filter(Player.player_id == player_id)
+                .first()
             )
 
-        if not player.handedness:
-            raise HTTPException(
-                status_code=400,
-                detail="Player handedness not set",
-            )
+            if not player:
+                raise HTTPException(
+                    status_code=404,
+                    detail="Player not found",
+                )
 
-        hand = player.handedness.upper()
-        effective_age_group = player.age_group
-        effective_season = player.season
+            if not player.handedness:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Player handedness not set",
+                )
+
+            hand = player.handedness.upper()
+            effective_age_group = player.age_group
+            effective_season = player.season
+            remember_player_profile(
+                player_id=player_id,
+                handedness=hand,
+                age_group=effective_age_group,
+                season=effective_season,
+            )
 
         if age_group is not None:
             normalized_age_group = age_group.strip().upper()

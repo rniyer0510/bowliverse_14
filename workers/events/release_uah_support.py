@@ -87,6 +87,35 @@ def _local_peak(signal: np.ndarray, start: int, end: int, *, mode: str) -> Optio
     return int(start + np.argmax(work))
 
 
+def _local_peak_visible(
+    signal: np.ndarray,
+    raw_vis: Optional[np.ndarray],
+    start: int,
+    end: int,
+    *,
+    mode: str,
+    min_vis: float = MIN_VIS_SOFT,
+) -> Optional[int]:
+    if raw_vis is None:
+        return _local_peak(signal, start, end, mode=mode)
+
+    win = signal[start:end]
+    vis = raw_vis[start:end]
+    valid = np.isfinite(win) & np.isfinite(vis) & (vis >= float(min_vis))
+    if not np.any(valid):
+        fallback_valid = np.isfinite(win) & np.isfinite(vis) & (vis >= MIN_VIS_HARD)
+        if not np.any(fallback_valid):
+            return None
+        valid = fallback_valid
+
+    work = win.copy()
+    if mode == "peak_min":
+        work[~valid] = np.inf
+        return int(start + np.argmin(work))
+    work[~valid] = -np.inf
+    return int(start + np.argmax(work))
+
+
 def _late_release_cap(
     signals: Dict[str, Any],
     start: int,
@@ -99,20 +128,50 @@ def _late_release_cap(
         start,
         end,
     )
-    nb_peak = _local_peak(signals["nb_elbow_y"], start, end, mode="peak_min")
+    nb_peak = _local_peak_visible(
+        signals["nb_elbow_y"],
+        signals.get("nb_elbow_vis_raw"),
+        start,
+        end,
+        mode="peak_min",
+    )
     if nb_peak is None or nb_vis < 0.25:
         return end
 
     fps = float(tc["fps"])
     agree_gap = max(3, int(round(fps * 0.20)))
     tail_frames = max(5, int(round(fps * 0.28)))
+    short_tail_frames = max(3, int(round(fps * 0.08)))
+    trailing_gap = max(4, int(round(fps * 0.10)))
     anchor_frames = [nb_peak]
 
-    wrist_peak = _local_peak(signals["wrist_fwd_vel"], start, end, mode="peak_max")
+    wrist_peak = _local_peak_visible(
+        signals["wrist_fwd_vel"],
+        signals.get("wrist_vis_raw"),
+        start,
+        end,
+        mode="peak_max",
+    )
+    shoulder_peak = _local_peak_visible(
+        signals["shoulder_ang_vel"],
+        signals.get("shoulder_vis_raw"),
+        start,
+        end,
+        mode="peak_max",
+    )
+
+    if (
+        wrist_peak is not None
+        and shoulder_peak is not None
+        and abs(int(wrist_peak) - int(shoulder_peak)) <= agree_gap
+    ):
+        early_cluster = int(round((int(wrist_peak) + int(shoulder_peak)) / 2.0))
+        if int(nb_peak) - early_cluster >= trailing_gap:
+            return min(end, early_cluster + short_tail_frames)
+
     if wrist_peak is not None and abs(int(wrist_peak) - int(nb_peak)) <= agree_gap:
         anchor_frames.append(int(wrist_peak))
 
-    shoulder_peak = _local_peak(signals["shoulder_ang_vel"], start, end, mode="peak_max")
     if shoulder_peak is not None and abs(int(shoulder_peak) - int(nb_peak)) <= agree_gap:
         anchor_frames.append(int(shoulder_peak))
 
@@ -247,12 +306,12 @@ def build_release_candidates(
         )
     ]
 
-    for name, signal, mode in (
-        ("nb_elbow_peak", signals["nb_elbow_y"], "peak_min"),
-        ("shoulder_ang_vel_peak", signals["shoulder_ang_vel"], "peak_max"),
-        ("wrist_fwd_peak", signals["wrist_fwd_vel"], "peak_max"),
+    for name, signal, raw_vis, mode in (
+        ("nb_elbow_peak", signals["nb_elbow_y"], signals.get("nb_elbow_vis_raw"), "peak_min"),
+        ("shoulder_ang_vel_peak", signals["shoulder_ang_vel"], signals.get("shoulder_vis_raw"), "peak_max"),
+        ("wrist_fwd_peak", signals["wrist_fwd_vel"], signals.get("wrist_vis_raw"), "peak_max"),
     ):
-        frame = _local_peak(signal, start, end, mode=mode)
+        frame = _local_peak_visible(signal, raw_vis, start, end, mode=mode)
         if frame is None:
             continue
         score = 0.75 if frame == consensus_frame else 0.55
@@ -283,9 +342,9 @@ def release_consensus(
     # chain impact than to the wrist-speed release neighborhood, so use it
     # later as a suppression gate instead of letting it pull consensus early.
     locators = (
-        ("nb_elbow_y", signals["nb_elbow_y"], signals["nb_elbow_vis_raw"], signals["nb_elbow_vis_weight"], 0.40, "peak_min"),
+        ("wrist_fwd_vel", signals["wrist_fwd_vel"], signals["wrist_vis_raw"], signals["wrist_vis_weight"], 0.40, "peak_max"),
         ("shoulder_ang_vel", signals["shoulder_ang_vel"], signals["shoulder_vis_raw"], signals["shoulder_vis_weight"], 0.25, "peak_max"),
-        ("wrist_fwd_vel", signals["wrist_fwd_vel"], signals["wrist_vis_raw"], signals["wrist_vis_weight"], 0.20, "peak_max"),
+        ("nb_elbow_y", signals["nb_elbow_y"], signals["nb_elbow_vis_raw"], signals["nb_elbow_vis_weight"], 0.20, "peak_min"),
     )
 
     for name, signal, raw_vis, weights, base_weight, mode in locators:

@@ -17,6 +17,7 @@ from app.persistence.models import (
     LoginAudit,
 )
 from app.common.logger import get_logger
+from app.common.stable_cache import remember_player_profile
 from app.common.auth import (
     hash_password,
     verify_password,
@@ -179,6 +180,12 @@ def register(data: dict, db: Session = Depends(get_db)):
 
         db.add(player)
         db.flush()
+        remember_player_profile(
+            player_id=player.player_id,
+            handedness=player.handedness,
+            age_group=player.age_group,
+            season=player.season,
+        )
 
         link = AccountPlayerLink(
             account_id=account.account_id,

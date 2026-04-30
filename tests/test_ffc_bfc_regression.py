@@ -8,7 +8,10 @@ from app.workers.events.ffc_bfc import (
     _pick_ffc_backward_from_release,
     _sanitize_bfc_frame,
 )
-from app.workers.events.ffc_bfc_support import _adaptive_settling_frames
+from app.workers.events.ffc_bfc_support import (
+    _adaptive_settling_frames,
+    _refine_to_established_support,
+)
 
 
 class FfcBfcRegressionTest(unittest.TestCase):
@@ -96,6 +99,34 @@ class FfcBfcRegressionTest(unittest.TestCase):
         self.assertTrue(candidates)
         self.assertGreater(confidence, 0.0)
 
+    def test_ffc_refine_prefers_fully_established_plant_over_first_touch(self):
+        n = 24
+        hold = 3
+        win_start = 0
+        win_end = 18
+        dt = 1.0 / 60.0
+
+        y_front_ank = np.array(
+            [0.70] * 10
+            + [0.74, 0.82, 0.90, 0.92, 0.92, 0.92, 0.92, 0.92, 0.92]
+            + [0.92] * (n - 19),
+            dtype=float,
+        )
+        y_front_toe = y_front_ank + 0.03
+
+        refined = _refine_to_established_support(
+            y_front_ank,
+            y_front_toe,
+            frame=11,
+            hold=hold,
+            win_start=win_start,
+            win_end=win_end,
+            dt=dt,
+            approach_speed=np.linspace(0.2, 1.0, n, dtype=float),
+        )
+
+        self.assertEqual(refined, 13)
+
     def test_bfc_prefers_latest_stable_support_before_ffc_when_visible(self):
         n = 30
         hold = 3
@@ -173,9 +204,9 @@ class FfcBfcRegressionTest(unittest.TestCase):
             approach_speed=np.linspace(0.2, 1.0, n, dtype=float),
         )
 
-        self.assertEqual(method, "simple_grounded_bfc")
-        self.assertEqual(frame, 10)
-        self.assertEqual(confidence, 0.0)
+        self.assertEqual(method, "back_foot_support_edge")
+        self.assertEqual(frame, 9)
+        self.assertGreater(confidence, 0.0)
 
     def test_bfc_prefers_recent_support_edge_when_close_to_support_block(self):
         n = 40
@@ -264,7 +295,144 @@ class FfcBfcRegressionTest(unittest.TestCase):
         )
 
         self.assertEqual(method, "back_foot_support_edge")
-        self.assertEqual(frame, 13)
+        self.assertEqual(frame, 14)
+        self.assertGreater(confidence, 0.0)
+
+    def test_bfc_grounding_stays_local_to_ffc_band_even_when_release_window_runs_late(self):
+        hold = 3
+        dt = 1.0 / 59.93
+        ffc = 13
+
+        y_back_ank = np.array(
+            [
+                0.5984,
+                0.5984,
+                0.5984,
+                0.5984,
+                0.5984,
+                0.5978,
+                0.5984,
+                0.5831,
+                0.5930,
+                0.5928,
+                0.5980,
+                0.5953,
+                0.5965,
+                0.5939,
+                0.5929,
+                0.5921,
+                0.5969,
+                0.5960,
+                0.5995,
+                0.6011,
+                0.6022,
+                0.6052,
+            ],
+            dtype=float,
+        )
+        y_back_toe = np.array(
+            [
+                0.6170,
+                0.6170,
+                0.6170,
+                0.6170,
+                0.6170,
+                0.6097,
+                0.6154,
+                0.5959,
+                0.6131,
+                0.6144,
+                0.6186,
+                0.6149,
+                0.6189,
+                0.6188,
+                0.6153,
+                0.6195,
+                0.6239,
+                0.6242,
+                0.6270,
+                0.6306,
+                0.6321,
+                0.6400,
+            ],
+            dtype=float,
+        )
+        y_front_ank = np.array(
+            [
+                0.5707,
+                0.5707,
+                0.5707,
+                0.5707,
+                0.5707,
+                0.5794,
+                0.5908,
+                0.6054,
+                0.6009,
+                0.5981,
+                0.6030,
+                0.6138,
+                0.6245,
+                0.6357,
+                0.6406,
+                0.6458,
+                0.6467,
+                0.6440,
+                0.6441,
+                0.6381,
+                0.6356,
+                0.6364,
+            ],
+            dtype=float,
+        )
+        y_front_toe = np.array(
+            [
+                0.5891,
+                0.5891,
+                0.5891,
+                0.5891,
+                0.5891,
+                0.5752,
+                0.5914,
+                0.6004,
+                0.6088,
+                0.5907,
+                0.5970,
+                0.6106,
+                0.6372,
+                0.6441,
+                0.6586,
+                0.6674,
+                0.6660,
+                0.6645,
+                0.6610,
+                0.6574,
+                0.6569,
+                0.6529,
+            ],
+            dtype=float,
+        )
+        vis = np.full(len(y_back_ank), 0.99, dtype=float)
+
+        frame, confidence, method = _pick_bfc_backward_from_ffc(
+            ffc=ffc,
+            front_side="left",
+            hold=hold,
+            win_start=0,
+            win_end=21,
+            dt=dt,
+            fps=59.93,
+            y_LA=y_front_ank,
+            y_RA=y_back_ank,
+            y_LFI=y_front_toe,
+            y_RFI=y_back_toe,
+            vis_LA=vis,
+            vis_RA=vis,
+            vis_LFI=vis,
+            vis_RFI=vis,
+        )
+
+        self.assertEqual(method, "back_foot_support_edge")
+        self.assertEqual(frame, 10)
         self.assertGreater(confidence, 0.0)
 
     def test_bfc_correction_rejects_frame_when_front_foot_is_already_grounded(self):

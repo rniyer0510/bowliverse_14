@@ -705,6 +705,5 @@ class DeterministicExpertSystemTests(unittest.TestCase):
         self.assertEqual(payload["coach_diagnosis_v1"]["change_strategy"]["change_size"], "hold")
         self.assertIsNone(payload["coach_diagnosis_v1"]["change_reaction"])
 
-
 if __name__ == "__main__":
     unittest.main()

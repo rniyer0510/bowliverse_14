@@ -50,8 +50,8 @@ CFG = {
     # Front-foot toe line: uses compute_foot_intent angle bands
     "toe": {
         "semi_open_min": 35.0,
-        "semi_open_max": 65.0,
-        "front_on_min": 65.0,
+        "semi_open_max": 80.0,
+        "front_on_min": 80.0,
     }
 }
 

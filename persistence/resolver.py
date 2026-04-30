@@ -2,6 +2,7 @@ from datetime import datetime
 
 from app.persistence.models import Account, Player, AccountPlayerLink
 from app.common.logger import get_logger
+from app.common.stable_cache import remember_player_profile
 
 logger = get_logger(__name__)
 
@@ -90,6 +91,12 @@ def resolve_player(db, account: Account, actor: dict):
             link_type="self",
             player_name=actor.get("player_name"),
         ))
+        remember_player_profile(
+            player_id=player.player_id,
+            handedness=player.handedness,
+            age_group=player.age_group,
+            season=player.season,
+        )
 
         return player.player_id
 
@@ -140,5 +147,11 @@ def resolve_player(db, account: Account, actor: dict):
         link_type=link_type,
         player_name=player_name,
     ))
+    remember_player_profile(
+        player_id=player.player_id,
+        handedness=player.handedness,
+        age_group=player.age_group,
+        season=player.season,
+    )
 
     return player.player_id

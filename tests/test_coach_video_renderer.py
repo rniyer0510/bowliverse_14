@@ -47,6 +47,7 @@ from app.workers.render.coach_video_renderer_parts.themed_story import (
     _normalized_story_label,
 )
 from app.workers.render.coach_video_renderer_parts.render_pause_sequence import (
+    _fit_stage_holds_to_budget,
     _write_stage_frames,
 )
 from app.workers.render.coach_video_renderer_parts.timeline_events import (
@@ -286,7 +287,7 @@ class CoachVideoRendererTest(unittest.TestCase):
         self.assertGreater(quality, 0.0)
         self.assertLess(quality, 1.0)
 
-    def test_pause_hold_plan_gives_hotspots_extra_read_time(self):
+    def test_pause_hold_plan_keeps_hotspot_pause_within_requested_budget(self):
         normal_cue, normal_hotspot = _pause_hold_plan(
             pause_frames=10,
             has_hotspot=False,
@@ -299,9 +300,9 @@ class CoachVideoRendererTest(unittest.TestCase):
         self.assertEqual((normal_cue, normal_hotspot), (10, 0))
         self.assertLess(hotspot_cue, normal_cue)
         self.assertGreater(hotspot_hold, 5)
-        self.assertGreater(hotspot_cue + hotspot_hold, normal_cue)
+        self.assertEqual(hotspot_cue + hotspot_hold, normal_cue)
 
-    def test_phase_cut_points_retime_slow_motion_tail_cluster(self):
+    def test_phase_cut_points_preserve_detected_event_timing_for_slow_motion(self):
         cp1, cp2, cp3 = _phase_cut_points(
             start=319,
             stop=427,
@@ -315,9 +316,9 @@ class CoachVideoRendererTest(unittest.TestCase):
             playback_mode={"mode": "likely_slow_motion"},
         )
 
-        self.assertLess(cp1, 415)
-        self.assertLess(cp2, 420)
-        self.assertLess(cp3, 421)
+        self.assertEqual(cp1, 415)
+        self.assertEqual(cp2, 420)
+        self.assertEqual(cp3, 421)
 
     def test_pause_sequence_plan_reserves_body_pay_after_break(self):
         sequence = _pause_sequence_plan(
@@ -331,6 +332,23 @@ class CoachVideoRendererTest(unittest.TestCase):
         self.assertGreater(sequence["pay"], 0)
         self.assertGreater(sequence["hotspot"], 0)
         self.assertEqual(sum(sequence.values()), sum(_pause_hold_plan(pause_frames=10, has_hotspot=True)))
+
+    def test_fit_stage_holds_to_budget_caps_read_time_to_total_pause_budget(self):
+        fitted = _fit_stage_holds_to_budget(
+            total_budget=10,
+            desired_holds={
+                "proof": 8,
+                "leak": 7,
+                "pay": 4,
+                "hotspot": 11,
+            },
+        )
+
+        self.assertEqual(sum(fitted.values()), 10)
+        self.assertGreater(fitted["proof"], 0)
+        self.assertGreater(fitted["leak"], 0)
+        self.assertGreater(fitted["pay"], 0)
+        self.assertGreater(fitted["hotspot"], 0)
 
     def test_hotspot_stage_plan_ends_on_compact_label(self):
         stages = coach_video_renderer._hotspot_stage_plan(8)
@@ -505,10 +523,10 @@ class CoachVideoRendererTest(unittest.TestCase):
         self.assertEqual(headline, "Front leg doesn't hold strong at landing")
         self.assertEqual(support, "The body then falls away.")
 
-    def test_format_action_label_prefers_intent_when_present(self):
+    def test_format_action_label_prefers_final_action_when_present(self):
         self.assertEqual(
             _format_action_label({"action": "FRONT_ON", "intent": "semi_open"}),
-            "Semi Open",
+            "Front On",
         )
 
     def test_render_timeline_events_falls_back_from_weak_ffc_near_release(self):
@@ -1062,7 +1080,7 @@ class CoachVideoRendererTest(unittest.TestCase):
             self.assertEqual(result["slow_motion_factor"], 5.0)
             self.assertEqual(result["frames_rendered"], 47)
 
-    def test_render_skeleton_video_adapts_pause_and_summary_holds_for_small_high_fps_clip(self):
+    def test_render_skeleton_video_preserves_explicit_pause_and_summary_holds(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             video_path = os.path.join(tmpdir, "input.mp4")
             output_path = os.path.join(tmpdir, "output.mp4")
@@ -1079,28 +1097,22 @@ class CoachVideoRendererTest(unittest.TestCase):
             writer.release()
 
             pose_frames = [_pose_frame(i, shift=0.002 * i) for i in range(8)]
-            with mock.patch.object(
-                coach_video_renderer.render_video,
-                "_subject_height_ratio",
-                return_value=0.35,
-            ):
-                result = render_skeleton_video(
-                    video_path=video_path,
-                    pose_frames=pose_frames,
-                    events={
-                        "bfc": {"frame": 1},
-                        "ffc": {"frame": 3},
-                        "release": {"frame": 6},
-                    },
-                    output_path=output_path,
-                    pause_seconds=5.0,
-                    end_summary_seconds=2.5,
-                )
+            result = render_skeleton_video(
+                video_path=video_path,
+                pose_frames=pose_frames,
+                events={
+                    "bfc": {"frame": 1},
+                    "ffc": {"frame": 3},
+                    "release": {"frame": 6},
+                },
+                output_path=output_path,
+                pause_seconds=5.0,
+                end_summary_seconds=2.5,
+            )
 
             self.assertTrue(result["available"])
-            self.assertLess(result["pause_seconds"], 5.0)
-            self.assertLess(result["end_summary_seconds"], 2.5)
-            self.assertEqual(result["subject_height_ratio"], 0.35)
+            self.assertEqual(result["pause_seconds"], 5.0)
+            self.assertEqual(result["end_summary_seconds"], 2.5)
 
     def test_render_skeleton_video_uses_clean_raw_frame_for_end_summary(self):
         with tempfile.TemporaryDirectory() as tmpdir:

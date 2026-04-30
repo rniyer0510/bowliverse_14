@@ -589,54 +589,44 @@ def _refine_to_established_support(
     )
     if grounded < 2:
         return int(frame)
+    fps = 1.0 / max(dt, 1e-6)
+    timing = foot_contact_timing(fps)
+    settle_forward_limit = int(max_forward) if max_forward is not None else min(
+        3,
+        max(
+            1,
+            int(timing["ffc_local_post_band"]),
+            _adaptive_settling_frames(
+                approach_speed,
+                frame=frame,
+                hold=hold,
+                start=win_start,
+                end=win_end,
+                dt=dt,
+            ) - 1,
+        ),
+    )
 
-    if frame - 1 >= int(win_start) and dt <= (1.0 / 45.0):
-        prev_score = _foot_ground_score(
+    best_frame = int(frame)
+    best_key = (
+        grounded,
+        _ground_window_strength(
             y_ank,
             y_toe,
-            frame - 1,
-            hold,
-            win_start,
-            win_end,
-            dt,
-            approach_speed=approach_speed,
-        )
-        edge_strength = _contact_edge_strength(
-            y_ank,
-            y_toe,
-            frame=frame,
+            frame=int(frame),
             hold=hold,
             win_start=win_start,
             win_end=win_end,
             dt=dt,
-            pelvis_jerk=pelvis_jerk,
+            radius=max(1, hold // 2),
             approach_speed=approach_speed,
-        )
-        if prev_score < 2 and edge_strength >= 0.50:
-            return int(frame - 1)
-
-    # Walk backward through the release-side support block and return the
-    # first supported frame in that local block. This matches the step-wise
-    # ActionLab process: start near release, then walk backward until the foot
-    # is no longer supported, instead of drifting forward to a later settled
-    # frame.
-    settle_back_limit = max(
-        1,
-        _adaptive_settling_frames(
-            approach_speed,
-            frame=frame,
-            hold=hold,
-            start=win_start,
-            end=win_end,
-            dt=dt,
-        ) - 1,
+        ),
+        -int(frame),
     )
-    refine_start = max(int(win_start), int(frame) - settle_back_limit)
-    block_start = int(frame)
-    gap_budget = 1
-    gap_count = 0
-    idx = int(frame) - 1
-    while idx >= refine_start:
+
+    idx = int(frame) + 1
+    limit = min(int(win_end), int(frame) + settle_forward_limit)
+    while idx <= limit:
         score = _foot_ground_score(
             y_ank,
             y_toe,
@@ -647,17 +637,26 @@ def _refine_to_established_support(
             dt,
             approach_speed=approach_speed,
         )
-        if score >= 2:
-            block_start = idx
-            gap_count = 0
-            idx -= 1
-            continue
-        gap_count += 1
-        if gap_count > gap_budget:
+        if score < 2:
             break
-        idx -= 1
+        strength = _ground_window_strength(
+            y_ank,
+            y_toe,
+            frame=idx,
+            hold=hold,
+            win_start=win_start,
+            win_end=win_end,
+            dt=dt,
+            radius=max(1, hold // 2),
+            approach_speed=approach_speed,
+        )
+        key = (score, strength, -idx)
+        if key >= best_key:
+            best_key = key
+            best_frame = idx
+        idx += 1
 
-    return int(block_start)
+    return int(best_frame)
 
 
 def _pick_local_contact_frame(
@@ -1069,6 +1068,8 @@ def pick_bfc_backward_from_ffc(
     band_end = max(band_start, min(ffc - min_gap, ffc - 1))
     recent_band = max(hold + 2, int(timing["recent_support_band"]))
     edge_search_start = max(band_start, ffc - recent_band)
+    support_win_start = edge_search_start
+    support_win_end = max(support_win_start, min(win_end, ffc))
     best_edge: Optional[Tuple[float, int, float]] = None
     recent_vis = []
     for idx in range(edge_search_start, band_end + 1):
@@ -1079,7 +1080,16 @@ def pick_bfc_backward_from_ffc(
     if median_recent_vis >= MIN_VIS:
         denom = max(1, ffc - edge_search_start)
         for idx in range(edge_search_start, band_end + 1):
-            back_score = _foot_ground_score(back_ank, back_toe, idx, hold, win_start, win_end, dt)
+            back_score = _foot_ground_score(
+                back_ank,
+                back_toe,
+                idx,
+                hold,
+                support_win_start,
+                support_win_end,
+                dt,
+                approach_speed=approach_speed,
+            )
             if back_score < 2:
                 continue
             edge_strength = _contact_edge_strength(
@@ -1087,10 +1097,11 @@ def pick_bfc_backward_from_ffc(
                 back_toe,
                 frame=idx,
                 hold=hold,
-                win_start=win_start,
-                win_end=win_end,
+                win_start=support_win_start,
+                win_end=support_win_end,
                 dt=dt,
                 pelvis_jerk=pelvis_jerk,
+                approach_speed=approach_speed,
             )
             if edge_strength < 0.25:
                 continue
@@ -1098,10 +1109,28 @@ def pick_bfc_backward_from_ffc(
             valid_after = 0
             for j in range(idx, min(ffc, idx + hold + 1)):
                 valid_after += 1
-                if _foot_ground_score(back_ank, back_toe, j, hold, win_start, win_end, dt) >= 2:
+                if _foot_ground_score(
+                    back_ank,
+                    back_toe,
+                    j,
+                    hold,
+                    support_win_start,
+                    support_win_end,
+                    dt,
+                    approach_speed=approach_speed,
+                ) >= 2:
                     support_after += 1.0
             support_ratio = support_after / max(1, valid_after)
-            front_penalty = _foot_ground_score(front_ank, front_toe, idx, hold, win_start, win_end, dt) / 3.0
+            front_penalty = _foot_ground_score(
+                front_ank,
+                front_toe,
+                idx,
+                hold,
+                support_win_start,
+                support_win_end,
+                dt,
+                approach_speed=approach_speed,
+            ) / 3.0
             late_bias = float(idx - edge_search_start) / float(denom)
             score = edge_strength + (0.18 * support_ratio) + (0.10 * late_bias) - (0.10 * front_penalty)
             if best_edge is None or score > best_edge[0]:
@@ -1111,7 +1140,16 @@ def pick_bfc_backward_from_ffc(
     seed_frame: Optional[int] = None
 
     for idx in range(band_end, earliest - 1, -1):
-        back_score = _foot_ground_score(back_ank, back_toe, idx, hold, win_start, win_end, dt)
+        back_score = _foot_ground_score(
+            back_ank,
+            back_toe,
+            idx,
+            hold,
+            support_win_start,
+            support_win_end,
+            dt,
+            approach_speed=approach_speed,
+        )
         if back_score >= 2:
             seed_frame = idx
             continue
@@ -1123,7 +1161,16 @@ def pick_bfc_backward_from_ffc(
 
     chosen_frame = seed_frame
     for idx in range(seed_frame + 1, min(ffc, win_end + 1)):
-        back_score = _foot_ground_score(back_ank, back_toe, idx, hold, win_start, win_end, dt)
+        back_score = _foot_ground_score(
+            back_ank,
+            back_toe,
+            idx,
+            hold,
+            support_win_start,
+            support_win_end,
+            dt,
+            approach_speed=approach_speed,
+        )
         if back_score < 2:
             break
         chosen_frame = idx
@@ -1147,7 +1194,16 @@ def pick_bfc_backward_from_ffc(
         if median_recent_vis >= MIN_VIS and chosen_frame >= edge_search_start:
             unloading_after = False
             for j in range(chosen_frame + 1, min(ffc, chosen_frame + hold + 2)):
-                if _foot_ground_score(back_ank, back_toe, j, hold, win_start, win_end, dt) < 2:
+                if _foot_ground_score(
+                    back_ank,
+                    back_toe,
+                    j,
+                    hold,
+                    support_win_start,
+                    support_win_end,
+                    dt,
+                    approach_speed=approach_speed,
+                ) < 2:
                     unloading_after = True
                     break
             support_block_len = int(chosen_frame) - int(seed_frame) + 1 if seed_frame is not None else hold
@@ -1160,8 +1216,26 @@ def pick_bfc_backward_from_ffc(
         speed = np.nan_to_num(speed, nan=0.0)
         speed_ref = float(np.percentile(speed[band_start : band_end + 1], 60))
         for idx in range(band_end, band_start - 1, -1):
-            back_score = _foot_ground_score(back_ank, back_toe, idx, hold, win_start, win_end, dt)
-            front_score = _foot_ground_score(front_ank, front_toe, idx, hold, win_start, win_end, dt)
+            back_score = _foot_ground_score(
+                back_ank,
+                back_toe,
+                idx,
+                hold,
+                support_win_start,
+                support_win_end,
+                dt,
+                approach_speed=approach_speed,
+            )
+            front_score = _foot_ground_score(
+                front_ank,
+                front_toe,
+                idx,
+                hold,
+                support_win_start,
+                support_win_end,
+                dt,
+                approach_speed=approach_speed,
+            )
             if back_score < 1 or front_score >= 2:
                 continue
             if float(speed[idx]) < speed_ref:

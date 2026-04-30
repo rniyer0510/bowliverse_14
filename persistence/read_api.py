@@ -24,6 +24,7 @@ from sqlalchemy import inspect
 from sqlalchemy.orm import Session
 
 from app.clinician.knowledge_pack import load_knowledge_pack
+from app.common.stable_cache import remember_player_profile
 from app.persistence.session import get_db
 from app.persistence.models import (
     Player,
@@ -1446,6 +1447,7 @@ class PlayerCreateRequest(BaseModel):
 
 
 class PlayerProfileUpdate(BaseModel):
+    handedness: Optional[str] = Field(None, pattern="^(R|L)$")
     age_group: Optional[str] = Field(None, pattern="^(U10|U14|U16|U19|SENIOR)$")
     season: Optional[int] = Field(None, ge=2000, le=2100)
 
@@ -1478,6 +1480,7 @@ def list_players(
             "player_id": str(link.player_id),
             "player_name": link.player_name,
             "link_type": link.link_type,
+            "handedness": player.handedness if player else None,
             "age_group": player.age_group if player else None,
             "season": player.season if player else None,
         })
@@ -1502,9 +1505,16 @@ def create_player(
 
     if existing:
         player = db.query(Player).filter_by(player_id=existing.player_id).first()
+        remember_player_profile(
+            player_id=existing.player_id,
+            handedness=player.handedness,
+            age_group=player.age_group,
+            season=player.season,
+        )
         return {
             "player_id": str(existing.player_id),
             "player_name": existing.player_name,
+            "handedness": player.handedness,
             "age_group": player.age_group,
             "season": player.season,
             "already_exists": True,
@@ -1529,10 +1539,17 @@ def create_player(
     ))
 
     db.commit()
+    remember_player_profile(
+        player_id=player.player_id,
+        handedness=player.handedness,
+        age_group=player.age_group,
+        season=player.season,
+    )
 
     return {
         "player_id": str(player.player_id),
         "player_name": payload.player_name,
+        "handedness": player.handedness,
         "age_group": player.age_group,
         "season": player.season,
     }
@@ -1561,6 +1578,9 @@ def update_player_profile(
     if not player:
         raise HTTPException(status_code=404, detail="Player not found")
 
+    if payload.handedness is not None:
+        player.handedness = payload.handedness
+
     if payload.age_group is not None:
         player.age_group = payload.age_group
 
@@ -1568,9 +1588,16 @@ def update_player_profile(
         player.season = payload.season
 
     db.commit()
+    remember_player_profile(
+        player_id=player.player_id,
+        handedness=player.handedness,
+        age_group=player.age_group,
+        season=player.season,
+    )
 
     return {
         "player_id": str(player.player_id),
+        "handedness": player.handedness,
         "age_group": player.age_group,
         "season": player.season,
     }

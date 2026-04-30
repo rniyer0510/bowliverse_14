@@ -447,6 +447,90 @@ class ReleaseSpeedTests(unittest.TestCase):
             "implausible_saturated_estimate",
         )
 
+    def test_estimate_release_speed_can_recover_from_late_speed_anchor_on_small_subject_clip(self):
+        def fake_anchor_estimate(**kwargs):
+            anchor_frame = int(kwargs["anchor_frame"])
+            if anchor_frame == 493:
+                return {
+                    "available": True,
+                    "display_policy": "show",
+                    "value_kph": 136,
+                    "display": "~136 km/h",
+                    "confidence": 0.72,
+                    "method": "release_kinematics_research_v2",
+                    "ball_weight_oz": 5.25,
+                    "reason": None,
+                    "debug": {
+                        "release_frame": 493,
+                        "soft_release_recovery_mode": True,
+                        "overall_wrist_visibility": 0.107,
+                        "shoulder_body_ratio": 0.931,
+                        "wrist_arm_ratio": 22.451,
+                    },
+                }
+            if anchor_frame == 503:
+                return {
+                    "available": True,
+                    "display_policy": "show_low_confidence",
+                    "value_kph": 103,
+                    "display": "~103 km/h",
+                    "confidence": 0.53,
+                    "method": "release_kinematics_research_v2_salvage",
+                    "ball_weight_oz": 5.25,
+                    "reason": "recovered_unstable_release_window",
+                    "debug": {
+                        "release_frame": 503,
+                        "shoulder_body_ratio": 0.48,
+                        "overall_wrist_visibility": 0.107,
+                        "elbow_extension_velocity_deg_per_sec": 227.4,
+                        "wrist_arm_ratio": 8.964,
+                    },
+                }
+            if anchor_frame == 505:
+                return {
+                    "available": True,
+                    "display_policy": "show_low_confidence",
+                    "value_kph": 104,
+                    "display": "~104 km/h",
+                    "confidence": 0.53,
+                    "method": "release_kinematics_research_v2_salvage",
+                    "ball_weight_oz": 5.25,
+                    "reason": "recovered_unstable_release_window",
+                    "debug": {
+                        "release_frame": 505,
+                        "shoulder_body_ratio": 0.48,
+                        "overall_wrist_visibility": 0.107,
+                        "elbow_extension_velocity_deg_per_sec": 245.2,
+                        "wrist_arm_ratio": 10.569,
+                    },
+                }
+            return {
+                "available": False,
+                "display_policy": "suppress",
+                "method": "release_kinematics_research_v2",
+                "confidence": 0.0,
+                "ball_weight_oz": 5.25,
+                "reason": "unstable_release_window",
+                "debug": {},
+            }
+
+        with patch(
+            "app.workers.speed.release_speed._estimate_speed_for_anchor_frame",
+            side_effect=fake_anchor_estimate,
+        ):
+            result = estimate_release_speed(
+                pose_frames=[{} for _ in range(645)],
+                events={"release": {"frame": 493, "confidence": 0.42}},
+                video={"fps": 59.93, "width": 478, "height": 850},
+                hand="R",
+            )
+
+        self.assertTrue(result["available"])
+        self.assertEqual(result["value_kph"], 104)
+        self.assertEqual(result["display_policy"], "show_low_confidence")
+        self.assertTrue(result["debug"]["late_anchor_recovery"])
+        self.assertEqual(result["debug"]["late_anchor_source_frame"], 493)
+
     def test_clean_salvage_promotion_restores_plausible_fast_clip(self):
         result = {
             "available": True,

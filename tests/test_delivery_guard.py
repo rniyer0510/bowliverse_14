@@ -154,6 +154,9 @@ class DeliveryGuardTests(unittest.TestCase):
         ]
 
         with patch("app.orchestrator.orchestrator.SessionLocal", return_value=db), patch(
+            "app.orchestrator.orchestrator._load_recent_expert_history",
+            return_value=[],
+        ), patch(
             "app.orchestrator.orchestrator.load_video",
             return_value=({"path": "/tmp/fake.mp4", "fps": 30.0, "total_frames": 150}, [], {}),
         ), patch(
